@@ -2,6 +2,7 @@
 
 use crate::model::config::ResolvedProvider;
 use crate::model::gateway::{ModelError, ModelRunSummary, ModelTurnRequest};
+use crate::model::http::{build_client, post_json};
 use crate::model::invocation::{InvocationTransport, ProviderInvocationPlan};
 use crate::model::normalized_stream::{NormalizedTurnEvent, UsageDelta};
 use serde_json::json;
@@ -49,6 +50,10 @@ impl AnthropicAdapter {
                 .collect(),
         };
 
+        if should_attempt_live_http(provider) {
+            return execute_live_http(provider, &plan, request, sink);
+        }
+
         sink(NormalizedTurnEvent::AssistantDelta {
             chunk: format!("Using {} messages API. ", plan.display_name),
         });
@@ -79,6 +84,81 @@ impl AnthropicAdapter {
             usage,
         })
     }
+}
+
+fn execute_live_http(
+    provider: &ResolvedProvider,
+    plan: &ProviderInvocationPlan,
+    request: ModelTurnRequest,
+    sink: &mut dyn FnMut(NormalizedTurnEvent),
+) -> Result<ModelRunSummary, ModelError> {
+    let InvocationTransport::HttpJson {
+        base_url, path, ..
+    } = &plan.transport
+    else {
+        return Err(ModelError::ProviderFailure(
+            "anthropic transport must be HTTP JSON".to_owned(),
+        ));
+    };
+
+    let mut headers = provider.headers.clone();
+    if let Some(api_key) = provider.api_key.as_ref() {
+        headers
+            .entry("x-api-key".to_owned())
+            .or_insert_with(|| api_key.clone());
+    }
+    headers
+        .entry("anthropic-version".to_owned())
+        .or_insert_with(|| "2023-06-01".to_owned());
+
+    let body = json!({
+        "model": provider.model_id,
+        "max_tokens": 4096,
+        "messages": [{"role": "user", "content": request.prompt}],
+        "stream": false,
+    });
+    let response = post_json(
+        &build_client()?,
+        &format!("{}{}", trim_trailing_slash(base_url), path),
+        &headers,
+        &body,
+    )?;
+
+    let assistant_message = response
+        .get("content")
+        .and_then(|value| value.as_array())
+        .and_then(|items| items.first())
+        .and_then(|item| item.get("text"))
+        .and_then(|value| value.as_str())
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("{} response received.", plan.display_name));
+
+    sink(NormalizedTurnEvent::AssistantDelta {
+        chunk: format!("Live response from {}.", plan.display_name),
+    });
+    sink(NormalizedTurnEvent::AssistantMessage {
+        message: assistant_message.clone(),
+    });
+
+    Ok(ModelRunSummary {
+        assistant_message: Some(assistant_message),
+        usage: UsageDelta {
+            input_tokens: estimate_tokens(&request.prompt),
+            output_tokens: estimate_tokens(&plan.model_id),
+            reasoning_tokens: 0,
+            cache_hit_tokens: 0,
+            cache_write_tokens: 0,
+        },
+    })
+}
+
+fn should_attempt_live_http(provider: &ResolvedProvider) -> bool {
+    std::env::var("LIZ_PROVIDER_ENABLE_LIVE").ok().as_deref() == Some("1")
+        && provider.api_key.is_some()
+}
+
+fn trim_trailing_slash(value: &str) -> &str {
+    value.trim_end_matches('/')
 }
 
 fn estimate_tokens(text: &str) -> u32 {

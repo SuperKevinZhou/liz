@@ -3,6 +3,7 @@
 use crate::model::config::ResolvedProvider;
 use crate::model::family::ModelProviderFamily;
 use crate::model::gateway::{ModelError, ModelRunSummary, ModelTurnRequest};
+use crate::model::http::{build_client, post_json};
 use crate::model::invocation::{InvocationTransport, ProviderInvocationPlan};
 use crate::model::normalized_stream::{NormalizedTurnEvent, UsageDelta};
 use serde_json::json;
@@ -20,6 +21,10 @@ impl OpenAiStyleAdapter {
         sink: &mut dyn FnMut(NormalizedTurnEvent),
     ) -> Result<ModelRunSummary, ModelError> {
         let plan = self.build_plan(provider, &request)?;
+        if should_attempt_live_http(provider, &plan) {
+            return execute_live_http(provider, &plan, request, sink);
+        }
+
         simulate_stream(plan, request, sink)
     }
 
@@ -116,6 +121,74 @@ impl OpenAiStyleAdapter {
     }
 }
 
+fn execute_live_http(
+    provider: &ResolvedProvider,
+    plan: &ProviderInvocationPlan,
+    request: ModelTurnRequest,
+    sink: &mut dyn FnMut(NormalizedTurnEvent),
+) -> Result<ModelRunSummary, ModelError> {
+    let (url, body) = match &plan.transport {
+        InvocationTransport::HttpJson {
+            base_url, path, ..
+        } => {
+            let body = match plan.family {
+                ModelProviderFamily::OpenAiResponses => json!({
+                    "model": provider.model_id,
+                    "input": request.prompt,
+                    "stream": false,
+                }),
+                _ => json!({
+                    "model": provider.model_id,
+                    "messages": [{"role": "user", "content": request.prompt}],
+                    "stream": false,
+                }),
+            };
+            (format!("{}{}", trim_trailing_slash(base_url), path), body)
+        }
+        InvocationTransport::ProviderOperation { .. } => {
+            return simulate_stream(plan.clone(), request, sink);
+        }
+    };
+
+    let mut headers = provider.headers.clone();
+    if let Some(api_key) = provider.api_key.as_ref() {
+        headers
+            .entry("Authorization".to_owned())
+            .or_insert_with(|| format!("Bearer {api_key}"));
+    }
+    if matches!(plan.family, ModelProviderFamily::GitLabDuo) {
+        headers
+            .entry("Authorization".to_owned())
+            .or_insert_with(|| format!("Bearer {}", provider.api_key.clone().unwrap_or_default()));
+    }
+
+    let response = post_json(&build_client()?, &url, &headers, &body)?;
+    let assistant_message = extract_openai_style_text(&response).unwrap_or_else(|| {
+        format!(
+            "{} response received for {}.",
+            plan.display_name, plan.model_id
+        )
+    });
+
+    sink(NormalizedTurnEvent::AssistantDelta {
+        chunk: format!("Live response from {}.", plan.display_name),
+    });
+    sink(NormalizedTurnEvent::AssistantMessage {
+        message: assistant_message.clone(),
+    });
+
+    Ok(ModelRunSummary {
+        assistant_message: Some(assistant_message),
+        usage: UsageDelta {
+            input_tokens: estimate_tokens(&request.prompt),
+            output_tokens: estimate_tokens(&plan.model_id),
+            reasoning_tokens: 0,
+            cache_hit_tokens: 0,
+            cache_write_tokens: 0,
+        },
+    })
+}
+
 fn simulate_stream(
     plan: ProviderInvocationPlan,
     request: ModelTurnRequest,
@@ -200,6 +273,57 @@ fn provider_supports_patching(family: &ModelProviderFamily) -> bool {
 
 fn supports_reasoning_accounting(family: &ModelProviderFamily) -> bool {
     matches!(family, ModelProviderFamily::OpenAiResponses | ModelProviderFamily::GitLabDuo)
+}
+
+fn should_attempt_live_http(provider: &ResolvedProvider, plan: &ProviderInvocationPlan) -> bool {
+    if std::env::var("LIZ_PROVIDER_ENABLE_LIVE").ok().as_deref() != Some("1") {
+        return false;
+    }
+
+    match plan.family {
+        ModelProviderFamily::OpenAiResponses => provider.api_key.is_some(),
+        ModelProviderFamily::OpenAiCompatible => provider.base_url.is_some() || provider.api_key.is_some(),
+        ModelProviderFamily::GitHubCopilot | ModelProviderFamily::GitLabDuo => {
+            provider.api_key.is_some() && provider.base_url.is_some()
+        }
+        _ => false,
+    }
+}
+
+fn extract_openai_style_text(response: &serde_json::Value) -> Option<String> {
+    response
+        .get("output")
+        .and_then(|value| value.as_array())
+        .and_then(|items| {
+            items.iter().find_map(|item| {
+                item.get("content")
+                    .and_then(|value| value.as_array())
+                    .and_then(|parts| {
+                        parts.iter().find_map(|part| {
+                            part.get("text")
+                                .and_then(|value| value.as_str())
+                                .map(str::to_owned)
+                        })
+                    })
+            })
+        })
+        .or_else(|| {
+            response
+                .get("choices")
+                .and_then(|value| value.as_array())
+                .and_then(|items| items.first())
+                .and_then(|choice| {
+                    choice
+                        .get("message")
+                        .and_then(|message| message.get("content"))
+                        .and_then(|value| value.as_str())
+                        .map(str::to_owned)
+                })
+        })
+}
+
+fn trim_trailing_slash(value: &str) -> &str {
+    value.trim_end_matches('/')
 }
 
 fn should_use_copilot_responses_api(model_id: &str) -> bool {

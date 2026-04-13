@@ -5,6 +5,7 @@ mod capabilities;
 mod config;
 mod family;
 mod gateway;
+mod http;
 mod invocation;
 mod normalized_stream;
 mod provider_spec;

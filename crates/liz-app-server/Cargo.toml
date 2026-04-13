@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 liz-protocol = { path = "../liz-protocol" }
+reqwest = { version = "0.12.24", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 serde.workspace = true
 serde_json.workspace = true
 
