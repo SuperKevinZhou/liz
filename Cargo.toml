@@ -1,0 +1,12 @@
+[workspace]
+members = [
+    "crates/liz-protocol",
+    "crates/liz-app-server",
+    "crates/liz-cli",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+version = "0.1.0"

@@ -1,0 +1,8 @@
+[package]
+name = "liz-app-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+liz-protocol = { path = "../liz-protocol" }
