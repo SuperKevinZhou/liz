@@ -1,11 +1,15 @@
-//! Model-gateway orchestration over provider adapters.
+//! Model-gateway orchestration over provider specs and family adapters.
 
 use crate::model::adapters::{
-    LocalGatewayAdapter, OpenAiAdapter, OpenAiCompatibleAdapter, ProviderAdapter,
+    AnthropicAdapter, AwsBedrockAdapter, GoogleAdapter, OpenAiStyleAdapter,
 };
 use crate::model::capabilities::ModelCapabilities;
+use crate::model::config::{ModelGatewayConfig, ProviderOverride, ResolvedProvider};
+use crate::model::family::ModelProviderFamily;
 use crate::model::normalized_stream::{NormalizedTurnEvent, UsageDelta};
+use crate::model::registry::ProviderRegistry;
 use liz_protocol::{Thread, Turn};
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
 
@@ -51,33 +55,78 @@ impl fmt::Display for ModelError {
 
 impl Error for ModelError {}
 
-/// The model gateway mediates between the runtime and concrete provider adapters.
+/// The model gateway mediates between the runtime and concrete provider families.
 #[derive(Debug, Clone)]
 pub struct ModelGateway {
-    primary_provider: &'static str,
-    openai: OpenAiAdapter,
-    openai_compatible: OpenAiCompatibleAdapter,
-    local_gateway: LocalGatewayAdapter,
+    config: ModelGatewayConfig,
+    registry: ProviderRegistry,
+    anthropic: AnthropicAdapter,
+    bedrock: AwsBedrockAdapter,
+    google: GoogleAdapter,
+    openai_style: OpenAiStyleAdapter,
 }
 
 impl Default for ModelGateway {
     fn default() -> Self {
-        Self {
-            primary_provider: "openai",
-            openai: OpenAiAdapter::default(),
-            openai_compatible: OpenAiCompatibleAdapter::default(),
-            local_gateway: LocalGatewayAdapter::default(),
-        }
+        Self::from_config(ModelGatewayConfig::from_env())
     }
 }
 
 impl ModelGateway {
-    /// Returns the capability matrix for the currently selected primary provider.
-    pub fn primary_capabilities(&self) -> &ModelCapabilities {
-        self.adapter(self.primary_provider).capabilities()
+    /// Creates a gateway from an explicit config.
+    pub fn from_config(config: ModelGatewayConfig) -> Self {
+        Self {
+            config,
+            registry: ProviderRegistry::default(),
+            anthropic: AnthropicAdapter::default(),
+            bedrock: AwsBedrockAdapter::default(),
+            google: GoogleAdapter::default(),
+            openai_style: OpenAiStyleAdapter::default(),
+        }
     }
 
-    /// Streams one turn through the selected provider adapter.
+    /// Returns the configured primary provider identifier.
+    pub fn primary_provider_id(&self) -> &str {
+        &self.config.primary_provider
+    }
+
+    /// Overrides the primary provider while keeping the existing registry and overrides.
+    pub fn with_primary_provider(mut self, provider_id: impl Into<String>) -> Self {
+        self.config.primary_provider = provider_id.into();
+        self
+    }
+
+    /// Adds or replaces a provider override.
+    pub fn with_provider_override(
+        mut self,
+        provider_id: impl Into<String>,
+        override_config: ProviderOverride,
+    ) -> Self {
+        self.config
+            .overrides
+            .insert(provider_id.into(), override_config);
+        self
+    }
+
+    /// Returns the capability matrix for the currently selected primary provider.
+    pub fn primary_capabilities(&self) -> &ModelCapabilities {
+        self.registry
+            .provider(self.primary_provider_id())
+            .map(|provider| &provider.capabilities)
+            .unwrap_or_else(|| {
+                self.registry
+                    .provider("openai")
+                    .map(|provider| &provider.capabilities)
+                    .expect("openai spec")
+            })
+    }
+
+    /// Returns the sorted list of supported provider identifiers.
+    pub fn supported_provider_ids(&self) -> Vec<&'static str> {
+        self.registry.supported_provider_ids()
+    }
+
+    /// Streams one turn through the selected provider family.
     pub fn run_turn<F>(
         &self,
         request: ModelTurnRequest,
@@ -86,24 +135,45 @@ impl ModelGateway {
     where
         F: FnMut(NormalizedTurnEvent),
     {
-        self.adapter(self.primary_provider)
-            .stream_turn(request, &mut sink)
-    }
-
-    /// Returns the provider interfaces reserved for future expansion.
-    pub fn reserved_interfaces(&self) -> Vec<&'static str> {
-        vec![
-            self.openai_compatible.provider_name(),
-            self.local_gateway.provider_name(),
-        ]
-    }
-
-    fn adapter(&self, provider: &str) -> &dyn ProviderAdapter {
-        match provider {
-            "openai" => &self.openai,
-            "openai-compatible" => &self.openai_compatible,
-            "local-gateway" => &self.local_gateway,
-            _ => &self.openai,
+        let provider = self.resolve_primary_provider()?;
+        match provider.spec.family {
+            ModelProviderFamily::AnthropicMessages => {
+                self.anthropic.stream_turn(&provider, request, &mut sink)
+            }
+            ModelProviderFamily::AwsBedrockConverse => {
+                self.bedrock.stream_turn(&provider, request, &mut sink)
+            }
+            ModelProviderFamily::GoogleGenerativeAi
+            | ModelProviderFamily::GoogleVertex
+            | ModelProviderFamily::GoogleVertexAnthropic => {
+                self.google.stream_turn(&provider, request, &mut sink)
+            }
+            ModelProviderFamily::OpenAiResponses
+            | ModelProviderFamily::OpenAiCompatible
+            | ModelProviderFamily::GitHubCopilot
+            | ModelProviderFamily::GitLabDuo => {
+                self.openai_style.stream_turn(&provider, request, &mut sink)
+            }
         }
+    }
+
+    /// Returns a short summary of the configured provider registry for diagnostics.
+    pub fn provider_summary(&self) -> BTreeMap<&'static str, &'static str> {
+        self.registry
+            .providers()
+            .iter()
+            .map(|(id, spec)| (*id, spec.family.transport_label()))
+            .collect()
+    }
+
+    fn resolve_primary_provider(&self) -> Result<ResolvedProvider, ModelError> {
+        let Some(spec) = self.registry.provider(self.primary_provider_id()) else {
+            return Err(ModelError::UnsupportedProvider(self.primary_provider_id().to_owned()));
+        };
+
+        Ok(ResolvedProvider::from_spec(
+            spec,
+            self.config.overrides.get(self.primary_provider_id()),
+        ))
     }
 }
