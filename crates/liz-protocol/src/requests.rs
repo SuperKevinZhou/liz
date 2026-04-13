@@ -1,0 +1,124 @@
+//! Client request envelopes and request payloads.
+
+use crate::approval::ApprovalDecision;
+use crate::checkpoint::CheckpointScope;
+use crate::ids::{ApprovalId, CheckpointId, RequestId, ThreadId, TurnId};
+use serde::{Deserialize, Serialize};
+
+/// Describes what kind of user input started a turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnInputKind {
+    /// The input came directly from the user.
+    UserMessage,
+    /// The input nudges an in-flight turn.
+    SteeringNote,
+    /// The input resumes a prior thread state.
+    ResumeCommand,
+}
+
+/// The top-level client request envelope sent over the transport.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClientRequestEnvelope {
+    /// The request identifier used to correlate responses.
+    pub request_id: RequestId,
+    /// The typed request payload.
+    #[serde(flatten)]
+    pub request: ClientRequest,
+}
+
+/// All request types supported by protocol v0.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "method", content = "params")]
+pub enum ClientRequest {
+    /// Starts a new thread.
+    #[serde(rename = "thread/start")]
+    ThreadStart(ThreadStartRequest),
+    /// Resumes an existing thread.
+    #[serde(rename = "thread/resume")]
+    ThreadResume(ThreadResumeRequest),
+    /// Forks an existing thread into a new line of work.
+    #[serde(rename = "thread/fork")]
+    ThreadFork(ThreadForkRequest),
+    /// Starts a new turn on a thread.
+    #[serde(rename = "turn/start")]
+    TurnStart(TurnStartRequest),
+    /// Cancels a running turn.
+    #[serde(rename = "turn/cancel")]
+    TurnCancel(TurnCancelRequest),
+    /// Responds to a pending approval.
+    #[serde(rename = "approval/respond")]
+    ApprovalRespond(ApprovalRespondRequest),
+    /// Rolls back a thread to a prior checkpoint.
+    #[serde(rename = "thread/rollback")]
+    ThreadRollback(ThreadRollbackRequest),
+}
+
+/// Starts a new thread.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThreadStartRequest {
+    /// An optional user-visible thread title.
+    pub title: Option<String>,
+    /// The initial goal for the thread.
+    pub initial_goal: Option<String>,
+    /// An optional workspace locator associated with the thread.
+    pub workspace_ref: Option<String>,
+}
+
+/// Resumes an existing thread.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThreadResumeRequest {
+    /// The identifier of the thread to resume.
+    pub thread_id: ThreadId,
+}
+
+/// Forks an existing thread.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThreadForkRequest {
+    /// The thread to fork from.
+    pub thread_id: ThreadId,
+    /// An optional title for the forked thread.
+    pub title: Option<String>,
+    /// The reason the fork is being created.
+    pub fork_reason: Option<String>,
+}
+
+/// Starts a new turn.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TurnStartRequest {
+    /// The parent thread for the new turn.
+    pub thread_id: ThreadId,
+    /// The raw turn input text.
+    pub input: String,
+    /// The kind of input that triggered the turn.
+    pub input_kind: TurnInputKind,
+}
+
+/// Cancels an existing turn.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TurnCancelRequest {
+    /// The thread that owns the turn.
+    pub thread_id: ThreadId,
+    /// The turn to cancel.
+    pub turn_id: TurnId,
+}
+
+/// Responds to an approval request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApprovalRespondRequest {
+    /// The approval request to resolve.
+    pub approval_id: ApprovalId,
+    /// The decision that resolves the approval.
+    pub decision: ApprovalDecision,
+}
+
+/// Rolls back a thread.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThreadRollbackRequest {
+    /// The thread to roll back.
+    pub thread_id: ThreadId,
+    /// The specific checkpoint to restore, if not restoring the latest one.
+    pub target_checkpoint_id: Option<CheckpointId>,
+    /// The restore scope for the rollback.
+    pub rollback_scope: CheckpointScope,
+}
