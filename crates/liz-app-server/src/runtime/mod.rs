@@ -1,14 +1,12 @@
-//! Runtime coordination skeleton for the app server.
+//! Runtime coordination for app-server lifecycle work.
 
-/// Minimal runtime metadata captured by the Phase 0 skeleton.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RuntimeSkeleton {
-    /// The intended lifecycle model for the runtime.
-    pub mode: &'static str,
-}
+mod coordinator;
+mod error;
+mod ids;
+mod stores;
+mod thread_manager;
+mod turn_manager;
 
-impl Default for RuntimeSkeleton {
-    fn default() -> Self {
-        Self { mode: "thread-turn-runtime" }
-    }
-}
+pub use coordinator::RuntimeCoordinator;
+pub use error::{RuntimeError, RuntimeResult};
+pub(crate) use stores::RuntimeStores;

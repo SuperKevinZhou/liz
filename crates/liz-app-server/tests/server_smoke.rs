@@ -19,7 +19,7 @@ fn app_server_binary_prints_workspace_banner() {
         String::from_utf8(output.stdout).expect("app-server smoke output should be valid UTF-8");
 
     assert!(
-        stdout.contains("liz-app-server workspace skeleton"),
+        stdout.contains("liz-app-server runtime"),
         "unexpected app-server banner: {stdout}"
     );
     assert!(

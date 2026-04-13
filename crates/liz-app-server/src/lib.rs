@@ -10,9 +10,9 @@ pub mod storage;
 pub fn banner_line() -> String {
     format!(
         "{} [{} | {} | {} | {}]",
-        "liz-app-server workspace skeleton",
+        "liz-app-server runtime",
         server::ServerConfig::default().bind_address,
-        runtime::RuntimeSkeleton::default().mode,
+        runtime::RuntimeCoordinator::default_mode(),
         storage::StorageLayout::default().root_dir,
         events::EventStreamSkeleton::default().transport,
     )
