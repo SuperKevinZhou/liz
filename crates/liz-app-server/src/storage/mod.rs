@@ -3,18 +3,21 @@
 pub mod artifact_store;
 pub mod checkpoint_store;
 pub mod error;
+mod fs;
 pub mod global_memory_store;
 pub mod paths;
 pub mod thread_store;
 pub mod turn_log;
 
-pub use artifact_store::{ArtifactStore, StoredArtifact};
-pub use checkpoint_store::CheckpointStore;
+pub use artifact_store::{ArtifactStore, FsArtifactStore, StoredArtifact};
+pub use checkpoint_store::{CheckpointStore, FsCheckpointStore};
 pub use error::{StorageError, StorageResult};
-pub use global_memory_store::{GlobalMemorySnapshot, GlobalMemoryStore, StoredMemoryFact};
+pub use global_memory_store::{
+    FsGlobalMemoryStore, GlobalMemorySnapshot, GlobalMemoryStore, StoredMemoryFact,
+};
 pub use paths::StoragePaths;
-pub use thread_store::ThreadStore;
-pub use turn_log::{TurnLog, TurnLogEntry};
+pub use thread_store::{FsThreadStore, ThreadStore};
+pub use turn_log::{FsTurnLog, TurnLog, TurnLogEntry};
 
 /// Minimal storage layout metadata for the Phase 0 and Phase 2 skeletons.
 #[derive(Debug, Clone, PartialEq, Eq)]

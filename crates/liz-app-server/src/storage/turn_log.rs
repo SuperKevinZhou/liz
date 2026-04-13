@@ -1,8 +1,11 @@
 //! Append-only turn log interfaces.
 
 use crate::storage::error::StorageResult;
+use crate::storage::paths::StoragePaths;
 use liz_protocol::{ThreadId, Timestamp, TurnId};
 use serde::{Deserialize, Serialize};
+use std::fs::{self, OpenOptions};
+use std::io::{BufRead, BufReader, ErrorKind, Write};
 
 /// A single append-only record in a thread turn log.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -28,4 +31,55 @@ pub trait TurnLog {
 
     /// Reads every log entry for a thread in append order.
     fn read_entries(&self, thread_id: &ThreadId) -> StorageResult<Vec<TurnLogEntry>>;
+}
+
+/// Filesystem-backed append-only turn log.
+#[derive(Debug, Clone)]
+pub struct FsTurnLog {
+    paths: StoragePaths,
+}
+
+impl FsTurnLog {
+    /// Creates a filesystem-backed turn log.
+    pub fn new(paths: StoragePaths) -> Self {
+        Self { paths }
+    }
+}
+
+impl TurnLog for FsTurnLog {
+    fn append_entry(&self, entry: &TurnLogEntry) -> StorageResult<()> {
+        let path = self.paths.turn_log_file(&entry.thread_id);
+
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        let mut file = OpenOptions::new().append(true).create(true).open(path)?;
+        serde_json::to_writer(&mut file, entry)?;
+        writeln!(file)?;
+        Ok(())
+    }
+
+    fn read_entries(&self, thread_id: &ThreadId) -> StorageResult<Vec<TurnLogEntry>> {
+        let path = self.paths.turn_log_file(thread_id);
+        let file = match fs::File::open(path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(error.into()),
+        };
+
+        let reader = BufReader::new(file);
+        let mut entries = Vec::new();
+
+        for line in reader.lines() {
+            let line = line?;
+            if line.trim().is_empty() {
+                continue;
+            }
+
+            entries.push(serde_json::from_str(&line)?);
+        }
+
+        Ok(entries)
+    }
 }
