@@ -4,9 +4,23 @@ members = [
     "crates/liz-app-server",
     "crates/liz-cli",
 ]
+default-members = [
+    "crates/liz-protocol",
+    "crates/liz-app-server",
+    "crates/liz-cli",
+]
 resolver = "2"
 
 [workspace.package]
 edition = "2021"
 license = "MIT"
 version = "0.1.0"
+
+[workspace.lints.rust]
+missing_docs = "warn"
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+unwrap_used = "deny"

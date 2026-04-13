@@ -1,3 +1,5 @@
+//! Binary entrypoint for the liz CLI reference client.
+
 fn main() {
-    println!("liz-cli workspace skeleton");
+    println!("{}", liz_cli::banner_line());
 }

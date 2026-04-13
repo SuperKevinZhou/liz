@@ -1,0 +1,4 @@
+[alias]
+xcheck = "check --workspace --all-targets"
+xtest = "test --workspace --all-targets"
+xlint = "clippy --workspace --all-targets --all-features -- -D warnings"
