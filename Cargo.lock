@@ -13,6 +13,8 @@ name = "liz-app-server"
 version = "0.1.0"
 dependencies = [
  "liz-protocol",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
