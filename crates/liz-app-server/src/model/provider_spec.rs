@@ -19,6 +19,14 @@ pub enum ProviderAuthKind {
     GoogleApplicationDefault,
     /// Structured service-key auth such as SAP AI Core.
     ServiceKey,
+    /// Runtime-only setup-token auth.
+    SetupToken,
+    /// Reuse of an external CLI auth session.
+    CliSession,
+    /// Personal access token auth.
+    PersonalAccessToken,
+    /// Microsoft Entra ID / bearer-token auth.
+    EntraId,
     /// Local runtime with no remote credential.
     Local,
     /// Multiple auth modes are supported depending on the deployment.
@@ -35,10 +43,29 @@ impl ProviderAuthKind {
             Self::AwsCredentialChain => "aws-credential-chain",
             Self::GoogleApplicationDefault => "google-adc",
             Self::ServiceKey => "service-key",
+            Self::SetupToken => "setup-token",
+            Self::CliSession => "cli-session",
+            Self::PersonalAccessToken => "personal-access-token",
+            Self::EntraId => "entra-id",
             Self::Local => "local",
             Self::Hybrid => "hybrid",
         }
     }
+}
+
+/// One explicit auth path supported by a provider.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderAuthStrategy {
+    /// Strategy kind.
+    pub kind: ProviderAuthKind,
+    /// Human-facing strategy label.
+    pub label: &'static str,
+    /// Environment variables that may satisfy this auth strategy.
+    pub env_keys: &'static [&'static str],
+    /// Config keys or metadata fields that participate in this auth strategy.
+    pub config_keys: &'static [&'static str],
+    /// Notes specific to this strategy.
+    pub notes: &'static [&'static str],
 }
 
 /// A builtin provider definition that can be resolved into a runtime config.
@@ -52,6 +79,8 @@ pub struct ProviderSpec {
     pub family: ModelProviderFamily,
     /// The primary auth mode for the provider.
     pub auth_kind: ProviderAuthKind,
+    /// Explicit auth strategies supported by this provider.
+    pub auth_strategies: Vec<ProviderAuthStrategy>,
     /// The default base URL when it is stable enough to bake into the registry.
     pub default_base_url: Option<&'static str>,
     /// The default model id used when no model override is present.
@@ -75,5 +104,24 @@ impl ProviderSpec {
             .iter()
             .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
             .collect()
+    }
+
+    /// Replaces the default auth-strategy list with an explicit one.
+    pub fn with_auth_strategies(mut self, auth_strategies: Vec<ProviderAuthStrategy>) -> Self {
+        self.auth_strategies = auth_strategies;
+        self
+    }
+
+    /// Returns every env key mentioned by the provider's auth strategies.
+    pub fn credential_env_keys(&self) -> Vec<&'static str> {
+        let mut keys = self.api_key_envs.to_vec();
+        for strategy in &self.auth_strategies {
+            for key in strategy.env_keys {
+                if !keys.contains(key) {
+                    keys.push(*key);
+                }
+            }
+        }
+        keys
     }
 }

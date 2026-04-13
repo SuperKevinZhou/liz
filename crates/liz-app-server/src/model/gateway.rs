@@ -166,6 +166,11 @@ impl ModelGateway {
             .collect()
     }
 
+    /// Resolves the primary provider after applying overrides and environment defaults.
+    pub fn resolved_primary_provider(&self) -> Result<ResolvedProvider, ModelError> {
+        self.resolve_primary_provider()
+    }
+
     fn resolve_primary_provider(&self) -> Result<ResolvedProvider, ModelError> {
         let Some(spec) = self.registry.provider(self.primary_provider_id()) else {
             return Err(ModelError::UnsupportedProvider(self.primary_provider_id().to_owned()));

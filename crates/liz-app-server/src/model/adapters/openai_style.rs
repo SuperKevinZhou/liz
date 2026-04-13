@@ -66,15 +66,16 @@ impl OpenAiStyleAdapter {
                     .unwrap_or_else(|| "https://api.openai.com".to_owned()),
                 path: "/v1/responses".to_owned(),
             },
-            ModelProviderFamily::OpenAiCompatible => InvocationTransport::HttpJson {
-                method: "POST",
-                base_url: provider.base_url.clone().ok_or_else(|| {
-                    ModelError::ProviderFailure(format!(
-                        "provider {} requires a base URL override or builtin base URL",
-                        provider.spec.id
-                    ))
-                })?,
-                path: "/v1/chat/completions".to_owned(),
+            ModelProviderFamily::OpenAiCompatible => match provider.base_url.clone() {
+                Some(base_url) => InvocationTransport::HttpJson {
+                    method: "POST",
+                    base_url,
+                    path: "/v1/chat/completions".to_owned(),
+                },
+                None => InvocationTransport::ProviderOperation {
+                    operation: "openai-compatible.chat-completions",
+                    base_url: None,
+                },
             },
             ModelProviderFamily::GitHubCopilot => {
                 if should_use_copilot_responses_api(&provider.model_id) {
@@ -138,16 +139,18 @@ fn simulate_stream(
             tool_name: tool_name.clone(),
             summary: format!("{} is preparing a tool call", plan.display_name),
         });
-        sink(NormalizedTurnEvent::ToolCallDelta {
-            call_id: "call_01".to_owned(),
-            tool_name: tool_name.clone(),
-            delta_summary: "arguments patched".to_owned(),
-            preview: Some(format!(
-                "{{\"goal\":\"{}\",\"provider\":\"{}\"",
-                truncate_preview(&request.prompt),
-                plan.provider_id
-            )),
-        });
+        if provider_supports_patching(&plan.family) {
+            sink(NormalizedTurnEvent::ToolCallDelta {
+                call_id: "call_01".to_owned(),
+                tool_name: tool_name.clone(),
+                delta_summary: "arguments patched".to_owned(),
+                preview: Some(format!(
+                    "{{\"goal\":\"{}\",\"provider\":\"{}\"",
+                    truncate_preview(&request.prompt),
+                    plan.provider_id
+                )),
+            });
+        }
         sink(NormalizedTurnEvent::ToolCallCommitted {
             call_id: "call_01".to_owned(),
             tool_name,
@@ -165,7 +168,7 @@ fn simulate_stream(
     let usage = UsageDelta {
         input_tokens: estimate_tokens(&request.prompt),
         output_tokens: estimate_tokens(&request.prompt) + 12,
-        reasoning_tokens: if plan.family == ModelProviderFamily::OpenAiResponses {
+        reasoning_tokens: if supports_reasoning_accounting(&plan.family) {
             6
         } else {
             0
@@ -189,6 +192,14 @@ fn simulate_stream(
         assistant_message: Some(final_message),
         usage,
     })
+}
+
+fn provider_supports_patching(family: &ModelProviderFamily) -> bool {
+    matches!(family, ModelProviderFamily::OpenAiResponses)
+}
+
+fn supports_reasoning_accounting(family: &ModelProviderFamily) -> bool {
+    matches!(family, ModelProviderFamily::OpenAiResponses | ModelProviderFamily::GitLabDuo)
 }
 
 fn should_use_copilot_responses_api(model_id: &str) -> bool {

@@ -2,7 +2,7 @@
 
 use crate::model::capabilities::ModelCapabilities;
 use crate::model::family::ModelProviderFamily;
-use crate::model::provider_spec::{ProviderAuthKind, ProviderSpec};
+use crate::model::provider_spec::{ProviderAuthKind, ProviderAuthStrategy, ProviderSpec};
 use std::collections::BTreeMap;
 
 /// The builtin provider registry used by the liz backend.
@@ -52,7 +52,23 @@ fn builtin_specs() -> Vec<ProviderSpec> {
             &[],
             ModelCapabilities::openai_streaming().with_prompt_caching(true),
             &["Primary OpenAI Responses-style provider.", "Supports ChatGPT OAuth or API key."],
-        ),
+        )
+        .with_auth_strategies(vec![
+            auth_strategy(
+                ProviderAuthKind::OAuth,
+                "chatgpt-oauth",
+                &[],
+                &[],
+                &["OpenCode and OpenClaw both expose ChatGPT OAuth / Codex-backed auth paths."],
+            ),
+            auth_strategy(
+                ProviderAuthKind::ApiKey,
+                "api-key",
+                &["OPENAI_API_KEY"],
+                &["models.providers.openai.baseUrl"],
+                &["Direct API-key auth with optional provider base URL override."],
+            ),
+        ]),
         spec(
             "anthropic",
             "Anthropic",
@@ -68,7 +84,30 @@ fn builtin_specs() -> Vec<ProviderSpec> {
             )],
             ModelCapabilities::anthropic_messages(),
             &["Anthropic Messages family.", "Beta headers mirror OpenCode's streaming/tool behavior."],
-        ),
+        )
+        .with_auth_strategies(vec![
+            auth_strategy(
+                ProviderAuthKind::CliSession,
+                "claude-cli",
+                &["ANTHROPIC_OAUTH_TOKEN"],
+                &[],
+                &["OpenClaw can reuse Claude CLI auth."],
+            ),
+            auth_strategy(
+                ProviderAuthKind::SetupToken,
+                "setup-token",
+                &[],
+                &[],
+                &["OpenClaw exposes a runtime setup-token path for Anthropic."],
+            ),
+            auth_strategy(
+                ProviderAuthKind::ApiKey,
+                "api-key",
+                &["ANTHROPIC_API_KEY"],
+                &["models.providers.anthropic.baseUrl"],
+                &["Direct Anthropic API key path."],
+            ),
+        ]),
         spec(
             "google",
             "Google",
@@ -114,7 +153,29 @@ fn builtin_specs() -> Vec<ProviderSpec> {
             &[],
             ModelCapabilities::bedrock_converse(),
             &["Uses Bedrock Converse/ConverseStream semantics.", "Model-prefix logic mirrors OpenCode's region handling."],
-        ),
+        )
+        .with_auth_strategies(vec![
+            auth_strategy(
+                ProviderAuthKind::ApiKey,
+                "bedrock-bearer-token",
+                &["AWS_BEARER_TOKEN_BEDROCK"],
+                &["provider.amazon-bedrock.options.region", "provider.amazon-bedrock.options.endpoint"],
+                &["Bearer token takes precedence over the AWS credential chain in OpenCode."],
+            ),
+            auth_strategy(
+                ProviderAuthKind::AwsCredentialChain,
+                "aws-credential-chain",
+                &[
+                    "AWS_ACCESS_KEY_ID",
+                    "AWS_SECRET_ACCESS_KEY",
+                    "AWS_PROFILE",
+                    "AWS_WEB_IDENTITY_TOKEN_FILE",
+                    "AWS_ROLE_ARN",
+                ],
+                &["provider.amazon-bedrock.options.profile", "provider.amazon-bedrock.options.region"],
+                &["Falls back to shared credentials, profiles, web identity, or instance metadata."],
+            ),
+        ]),
         spec(
             "amazon-bedrock-mantle",
             "Amazon Bedrock Mantle",
@@ -193,7 +254,14 @@ fn builtin_specs() -> Vec<ProviderSpec> {
                 .with_strict_tool_schema(true)
                 .with_server_side_conversation_state(true),
             &["Device auth and model discovery are provider-owned.", "GPT-5 Copilot models favor the Responses path."],
-        ),
+        )
+        .with_auth_strategies(vec![auth_strategy(
+            ProviderAuthKind::DeviceCode,
+            "device-code",
+            &["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"],
+            &["provider.github-copilot.options.enterpriseUrl"],
+            &["Built-in plugin exchanges a GitHub token for Copilot runtime auth."],
+        )]),
         spec(
             "gitlab",
             "GitLab Duo",
@@ -208,7 +276,23 @@ fn builtin_specs() -> Vec<ProviderSpec> {
                 .with_server_side_conversation_state(true)
                 .with_max_context_window(1_000_000),
             &["GitLab Duo Agent Platform provider.", "Workflow-model discovery is provider-owned."],
-        ),
+        )
+        .with_auth_strategies(vec![
+            auth_strategy(
+                ProviderAuthKind::OAuth,
+                "oauth",
+                &[],
+                &["GITLAB_INSTANCE_URL", "GITLAB_OAUTH_CLIENT_ID", "provider.gitlab.options.instanceUrl"],
+                &["OpenCode supports OAuth on GitLab.com and self-hosted GitLab."],
+            ),
+            auth_strategy(
+                ProviderAuthKind::PersonalAccessToken,
+                "personal-access-token",
+                &["GITLAB_TOKEN"],
+                &["GITLAB_INSTANCE_URL", "GITLAB_AI_GATEWAY_URL"],
+                &["OpenCode also supports PAT auth for GitLab Duo."],
+            ),
+        ]),
         spec(
             "openai-codex",
             "OpenAI Codex",
@@ -223,7 +307,14 @@ fn builtin_specs() -> Vec<ProviderSpec> {
                 .with_prompt_caching(true)
                 .with_server_side_conversation_state(true),
             &["Codex-flavored OpenAI path.", "OAuth-oriented provider variant in OpenClaw."],
-        ),
+        )
+        .with_auth_strategies(vec![auth_strategy(
+            ProviderAuthKind::OAuth,
+            "chatgpt-oauth",
+            &[],
+            &[],
+            &["OpenClaw stores OpenAI Codex as a ChatGPT OAuth-backed provider variant."],
+        )]),
         spec(
             "codex",
             "Codex",
@@ -251,7 +342,14 @@ fn builtin_specs() -> Vec<ProviderSpec> {
             &[],
             ModelCapabilities::openai_streaming(),
             &["OpenCode routes xAI through Responses-style handling."],
-        ),
+        )
+        .with_auth_strategies(vec![auth_strategy(
+            ProviderAuthKind::ApiKey,
+            "api-key",
+            &["XAI_API_KEY"],
+            &["models.providers.xai.baseUrl"],
+            &["Direct xAI API key path."],
+        )]),
         openai_compatible_spec("openrouter", "OpenRouter", "openai/gpt-4.1-mini"),
         openai_compatible_spec("ollama", "Ollama", "llama3.1:8b"),
         openai_compatible_spec("vllm", "vLLM", "meta-llama/Llama-3.1-70B-Instruct"),
@@ -348,6 +446,7 @@ fn spec(
         display_name,
         family,
         auth_kind,
+        auth_strategies: vec![auth_strategy(auth_kind, auth_kind.label(), api_key_envs, required_envs, &[])],
         default_base_url,
         default_model,
         api_key_envs,
@@ -473,4 +572,20 @@ fn openai_compatible_spec(
             .with_max_context_window(200_000),
         &["OpenAI-compatible or gateway-style provider resolved through the generic adapter."],
     )
+}
+
+fn auth_strategy(
+    kind: ProviderAuthKind,
+    label: &'static str,
+    env_keys: &'static [&'static str],
+    config_keys: &'static [&'static str],
+    notes: &'static [&'static str],
+) -> ProviderAuthStrategy {
+    ProviderAuthStrategy {
+        kind,
+        label,
+        env_keys,
+        config_keys,
+        notes,
+    }
 }

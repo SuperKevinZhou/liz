@@ -94,7 +94,10 @@ impl ResolvedProvider {
             .or_else(|| spec.default_base_url.map(str::to_owned));
         let api_key = override_config
             .and_then(|config| config.api_key.clone())
-            .or_else(|| first_env(spec.api_key_envs));
+            .or_else(|| {
+                let keys = spec.credential_env_keys();
+                first_env(&keys)
+            });
         let model_id = override_config
             .and_then(|config| config.model_id.clone())
             .unwrap_or_else(|| spec.default_model.to_owned());
@@ -110,7 +113,9 @@ impl ResolvedProvider {
             "azure" => {
                 if base_url.is_none() {
                     if let Ok(resource_name) = env::var("AZURE_RESOURCE_NAME") {
-                        metadata.insert("azure.resource_name".to_owned(), resource_name.clone());
+                        metadata
+                            .entry("azure.resource_name".to_owned())
+                            .or_insert(resource_name.clone());
                         base_url = Some(format!("https://{resource_name}.openai.azure.com/openai"));
                     }
                 }
@@ -118,10 +123,9 @@ impl ResolvedProvider {
             "azure-cognitive-services" => {
                 if base_url.is_none() {
                     if let Ok(resource_name) = env::var("AZURE_COGNITIVE_SERVICES_RESOURCE_NAME") {
-                        metadata.insert(
-                            "azure.cognitive.resource_name".to_owned(),
-                            resource_name.clone(),
-                        );
+                        metadata
+                            .entry("azure.cognitive.resource_name".to_owned())
+                            .or_insert(resource_name.clone());
                         base_url = Some(format!(
                             "https://{resource_name}.cognitiveservices.azure.com/openai"
                         ));
@@ -134,8 +138,12 @@ impl ResolvedProvider {
                         env::var("CLOUDFLARE_ACCOUNT_ID"),
                         env::var("CLOUDFLARE_GATEWAY_ID"),
                     ) {
-                        metadata.insert("cloudflare.account_id".to_owned(), account_id.clone());
-                        metadata.insert("cloudflare.gateway_id".to_owned(), gateway_id.clone());
+                        metadata
+                            .entry("cloudflare.account_id".to_owned())
+                            .or_insert(account_id.clone());
+                        metadata
+                            .entry("cloudflare.gateway_id".to_owned())
+                            .or_insert(gateway_id.clone());
                         base_url = Some(format!(
                             "https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}"
                         ));
@@ -145,11 +153,36 @@ impl ResolvedProvider {
             "cloudflare-workers-ai" => {
                 if base_url.is_none() {
                     if let Ok(account_id) = env::var("CLOUDFLARE_ACCOUNT_ID") {
-                        metadata.insert("cloudflare.account_id".to_owned(), account_id.clone());
+                        metadata
+                            .entry("cloudflare.account_id".to_owned())
+                            .or_insert(account_id.clone());
                         base_url = Some(format!(
                             "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1"
                         ));
                     }
+                }
+            }
+            "gitlab" => {
+                if let Ok(instance_url) = env::var("GITLAB_INSTANCE_URL") {
+                    metadata
+                        .entry("gitlab.instance_url".to_owned())
+                        .or_insert(instance_url.clone());
+                    if base_url.is_none() {
+                        base_url = Some(instance_url);
+                    }
+                }
+                if let Ok(ai_gateway_url) = env::var("GITLAB_AI_GATEWAY_URL") {
+                    metadata
+                        .entry("gitlab.ai_gateway_url".to_owned())
+                        .or_insert(ai_gateway_url.clone());
+                    if override_config.and_then(|config| config.base_url.as_ref()).is_none() {
+                        base_url = Some(ai_gateway_url);
+                    }
+                }
+                if let Ok(client_id) = env::var("GITLAB_OAUTH_CLIENT_ID") {
+                    metadata
+                        .entry("gitlab.oauth_client_id".to_owned())
+                        .or_insert(client_id);
                 }
             }
             "google-vertex" | "google-vertex-anthropic" | "anthropic-vertex" => {
@@ -158,29 +191,28 @@ impl ResolvedProvider {
                     "GCP_PROJECT",
                     "GCLOUD_PROJECT",
                 ]) {
-                    metadata.insert("google.project".to_owned(), project);
+                    metadata.entry("google.project".to_owned()).or_insert(project);
                 }
                 if let Some(location) = first_env(&[
                     "GOOGLE_VERTEX_LOCATION",
                     "GOOGLE_CLOUD_LOCATION",
                     "VERTEX_LOCATION",
                 ]) {
-                    metadata.insert("google.location".to_owned(), location);
+                    metadata.entry("google.location".to_owned()).or_insert(location);
                 }
             }
             "amazon-bedrock" | "amazon-bedrock-mantle" => {
                 if let Some(region) = first_env(&["AWS_REGION"]) {
-                    metadata.insert("aws.region".to_owned(), region);
+                    metadata.entry("aws.region".to_owned()).or_insert(region);
                 }
                 if let Some(profile) = first_env(&["AWS_PROFILE"]) {
-                    metadata.insert("aws.profile".to_owned(), profile);
+                    metadata.entry("aws.profile".to_owned()).or_insert(profile);
                 }
                 if matches!(spec.auth_kind, ProviderAuthKind::AwsCredentialChain) {
                     if api_key.is_none() {
-                        metadata.insert(
-                            "aws.auth".to_owned(),
-                            "credential-chain-or-bearer-token".to_owned(),
-                        );
+                        metadata
+                            .entry("aws.auth".to_owned())
+                            .or_insert("credential-chain-or-bearer-token".to_owned());
                     }
                 }
             }
