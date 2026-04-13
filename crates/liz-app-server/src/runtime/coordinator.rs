@@ -1,20 +1,27 @@
 //! High-level runtime coordination for thread and turn lifecycle work.
 
+use crate::runtime::context_assembler::{AssembledContext, ContextAssembler};
 use crate::runtime::error::{RuntimeError, RuntimeResult};
 use crate::runtime::ids::IdGenerator;
+use crate::runtime::policy_engine::{PolicyDecision, PolicyEngine};
 use crate::runtime::stores::RuntimeStores;
 use crate::runtime::thread_manager::ThreadManager;
 use crate::runtime::turn_manager::TurnManager;
 use liz_protocol::memory::ResumeSummary;
 use liz_protocol::requests::{
-    ThreadForkRequest, ThreadResumeRequest, ThreadStartRequest, TurnCancelRequest,
+    ApprovalRespondRequest, ThreadForkRequest, ThreadResumeRequest, ThreadStartRequest,
+    TurnCancelRequest,
     TurnStartRequest,
 };
 use liz_protocol::responses::{
-    ThreadForkResponse, ThreadResumeResponse, ThreadStartResponse, TurnCancelResponse,
-    TurnStartResponse,
+    ApprovalRespondResponse, ThreadForkResponse, ThreadResumeResponse, ThreadStartResponse,
+    TurnCancelResponse, TurnStartResponse,
 };
-use liz_protocol::{Thread, ThreadId, Turn};
+use liz_protocol::{
+    ApprovalDecision, ApprovalRequest, ApprovalStatus, Checkpoint, CheckpointScope, Thread,
+    ThreadId, Turn,
+};
+use std::collections::HashMap;
 
 /// Coordinates the persisted runtime state for thread and turn lifecycle actions.
 #[derive(Debug)]
@@ -23,6 +30,9 @@ pub struct RuntimeCoordinator {
     ids: IdGenerator,
     thread_manager: ThreadManager,
     turn_manager: TurnManager,
+    context_assembler: ContextAssembler,
+    policy_engine: PolicyEngine,
+    approvals: HashMap<liz_protocol::ApprovalId, ApprovalRequest>,
 }
 
 impl RuntimeCoordinator {
@@ -33,6 +43,9 @@ impl RuntimeCoordinator {
             ids: IdGenerator::default(),
             thread_manager: ThreadManager::default(),
             turn_manager: TurnManager::default(),
+            context_assembler: ContextAssembler::default(),
+            policy_engine: PolicyEngine::default(),
+            approvals: HashMap::new(),
         }
     }
 
@@ -91,6 +104,28 @@ impl RuntimeCoordinator {
         Ok(TurnCancelResponse { turn })
     }
 
+    /// Responds to a previously generated approval request.
+    pub fn respond_approval(
+        &mut self,
+        request: ApprovalRespondRequest,
+    ) -> RuntimeResult<ApprovalRespondResponse> {
+        let approval = self
+            .approvals
+            .get_mut(&request.approval_id)
+            .ok_or_else(|| RuntimeError::not_found("approval_not_found", "approval does not exist"))?;
+
+        approval.status = match request.decision {
+            ApprovalDecision::Deny => ApprovalStatus::Denied,
+            ApprovalDecision::ApproveOnce | ApprovalDecision::ApproveAndPersist => {
+                ApprovalStatus::Approved
+            }
+        };
+
+        Ok(ApprovalRespondResponse {
+            approval: approval.clone(),
+        })
+    }
+
     /// Marks a running turn as completed and projects the result back onto the thread.
     pub fn complete_turn(
         &mut self,
@@ -123,6 +158,79 @@ impl RuntimeCoordinator {
         self.turn_manager.read_turn(turn_id)
     }
 
+    /// Assembles the current context envelope for a thread and input.
+    pub fn assemble_context(
+        &self,
+        thread_id: &ThreadId,
+        input: &str,
+    ) -> RuntimeResult<AssembledContext> {
+        let thread = self
+            .stores
+            .get_thread(thread_id)?
+            .ok_or_else(|| RuntimeError::not_found("thread_not_found", "thread does not exist"))?;
+        let snapshot = self.stores.read_global_memory()?;
+        Ok(self.context_assembler.assemble(&snapshot, &thread, input))
+    }
+
+    /// Evaluates policy for a turn input and assembled context.
+    pub fn evaluate_policy(&self, input: &str, context: &AssembledContext) -> PolicyDecision {
+        self.policy_engine.evaluate(input, context)
+    }
+
+    /// Creates a checkpoint and approval request for a risky turn and marks it waiting.
+    pub fn require_approval_for_turn(
+        &mut self,
+        thread_id: &ThreadId,
+        turn_id: &liz_protocol::TurnId,
+        decision: &PolicyDecision,
+    ) -> RuntimeResult<(Option<Checkpoint>, ApprovalRequest)> {
+        let checkpoint = if decision.requires_checkpoint {
+            Some(self.create_checkpoint(
+                thread_id,
+                turn_id,
+                CheckpointScope::ConversationOnly,
+                format!("Before risky turn: {}", decision.reason),
+            )?)
+        } else {
+            None
+        };
+        let approval = ApprovalRequest {
+            id: self.ids.next_approval_id(),
+            thread_id: thread_id.clone(),
+            turn_id: turn_id.clone(),
+            action_type: "turn/start".to_owned(),
+            risk_level: decision.risk_level,
+            reason: decision.reason.clone(),
+            sandbox_context: Some(format!(
+                "mode={} writable_roots={} network={}",
+                decision.sandbox_context.filesystem_mode,
+                decision.sandbox_context.writable_roots.join(","),
+                decision.sandbox_context.network_access
+            )),
+            status: ApprovalStatus::Pending,
+        };
+
+        self.turn_manager.mark_waiting_approval(
+            &self.stores,
+            &mut self.ids,
+            thread_id,
+            turn_id,
+            &decision.reason,
+        )?;
+        self.approvals.insert(approval.id.clone(), approval.clone());
+        Ok((checkpoint, approval))
+    }
+
+    /// Marks a previously approved turn as runnable again.
+    pub fn resume_approved_turn(
+        &mut self,
+        thread_id: &ThreadId,
+        turn_id: &liz_protocol::TurnId,
+    ) -> RuntimeResult<Turn> {
+        self.turn_manager
+            .mark_running(&self.stores, &mut self.ids, thread_id, turn_id)
+    }
+
     fn build_resume_summary(&self, thread: &Thread) -> ResumeSummary {
         let headline = match thread.latest_turn_id.as_ref() {
             Some(turn_id) => format!("Resume thread {} from {turn_id}", thread.title),
@@ -135,6 +243,33 @@ impl RuntimeCoordinator {
             pending_commitments: thread.pending_commitments.clone(),
             last_interruption: thread.last_interruption.clone(),
         }
+    }
+
+    fn create_checkpoint(
+        &mut self,
+        thread_id: &ThreadId,
+        turn_id: &liz_protocol::TurnId,
+        scope: CheckpointScope,
+        reason: String,
+    ) -> RuntimeResult<Checkpoint> {
+        let checkpoint = Checkpoint {
+            id: self.ids.next_checkpoint_id(),
+            thread_id: thread_id.clone(),
+            turn_id: turn_id.clone(),
+            scope,
+            reason,
+            created_at: self.ids.now_timestamp(),
+        };
+        self.stores.put_checkpoint(&checkpoint)?;
+
+        let mut thread = self
+            .stores
+            .get_thread(thread_id)?
+            .ok_or_else(|| RuntimeError::not_found("thread_not_found", "thread does not exist"))?;
+        thread.latest_checkpoint_id = Some(checkpoint.id.clone());
+        thread.updated_at = checkpoint.created_at.clone();
+        self.stores.put_thread(&thread)?;
+        Ok(checkpoint)
     }
 }
 

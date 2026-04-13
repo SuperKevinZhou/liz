@@ -130,6 +130,92 @@ impl TurnManager {
         self.active_turns.get(turn_id).cloned()
     }
 
+    /// Marks a running turn as waiting for approval and updates the thread projection.
+    pub fn mark_waiting_approval(
+        &mut self,
+        stores: &RuntimeStores,
+        ids: &mut IdGenerator,
+        thread_id: &liz_protocol::ThreadId,
+        turn_id: &TurnId,
+        reason: &str,
+    ) -> RuntimeResult<Turn> {
+        let mut thread = stores
+            .get_thread(thread_id)?
+            .ok_or_else(|| RuntimeError::not_found("thread_not_found", "thread does not exist"))?;
+        let recorded_at = ids.now_timestamp();
+        let turn = {
+            let turn = self
+                .active_turns
+                .get_mut(turn_id)
+                .ok_or_else(|| RuntimeError::not_found("turn_not_found", "turn is not running"))?;
+            turn.status = TurnStatus::WaitingApproval;
+            turn.summary = Some(reason.to_owned());
+            turn.clone()
+        };
+        let turn_id = turn.id.clone();
+
+        thread.status = ThreadStatus::WaitingApproval;
+        thread.updated_at = recorded_at.clone();
+        thread.active_summary = Some(format!("Waiting approval: {reason}"));
+        thread.latest_turn_id = Some(turn_id.clone());
+        let sequence = self.next_sequence_for(&thread.id);
+
+        stores.append_turn_log(&TurnLogEntry {
+            thread_id: thread.id.clone(),
+            sequence,
+            turn_id: Some(turn_id),
+            recorded_at,
+            event: "approval_wait".to_owned(),
+            summary: reason.to_owned(),
+        })?;
+        stores.put_thread(&thread)?;
+        Ok(turn)
+    }
+
+    /// Marks a waiting turn as runnable again after approval.
+    pub fn mark_running(
+        &mut self,
+        stores: &RuntimeStores,
+        ids: &mut IdGenerator,
+        thread_id: &liz_protocol::ThreadId,
+        turn_id: &TurnId,
+    ) -> RuntimeResult<Turn> {
+        let mut thread = stores
+            .get_thread(thread_id)?
+            .ok_or_else(|| RuntimeError::not_found("thread_not_found", "thread does not exist"))?;
+        let recorded_at = ids.now_timestamp();
+        let turn = {
+            let turn = self
+                .active_turns
+                .get_mut(turn_id)
+                .ok_or_else(|| RuntimeError::not_found("turn_not_found", "turn is not running"))?;
+            turn.status = TurnStatus::Running;
+            turn.clone()
+        };
+        let turn_id = turn.id.clone();
+        thread.status = ThreadStatus::Active;
+        thread.updated_at = recorded_at.clone();
+        thread.active_summary = Some(
+            turn.goal
+                .clone()
+                .map(|goal| format!("Currently working on: {goal}"))
+                .unwrap_or_else(|| "Currently working on the requested turn".to_owned()),
+        );
+        thread.latest_turn_id = Some(turn_id.clone());
+        let sequence = self.next_sequence_for(&thread.id);
+
+        stores.append_turn_log(&TurnLogEntry {
+            thread_id: thread.id.clone(),
+            sequence,
+            turn_id: Some(turn_id),
+            recorded_at,
+            event: "approval_resolved".to_owned(),
+            summary: "Approval granted; resuming turn".to_owned(),
+        })?;
+        stores.put_thread(&thread)?;
+        Ok(turn)
+    }
+
     /// Completes a running turn and persists the updated thread projection.
     pub fn complete_turn(
         &mut self,

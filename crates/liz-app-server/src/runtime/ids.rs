@@ -1,7 +1,7 @@
 //! Runtime-scoped identifier and timestamp helpers.
 
 use liz_protocol::primitives::Timestamp;
-use liz_protocol::{ThreadId, TurnId};
+use liz_protocol::{ApprovalId, CheckpointId, ThreadId, TurnId};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -20,6 +20,16 @@ impl IdGenerator {
     /// Creates a turn identifier.
     pub fn next_turn_id(&self) -> TurnId {
         TurnId::new(self.next_value("turn"))
+    }
+
+    /// Creates an approval identifier.
+    pub fn next_approval_id(&self) -> ApprovalId {
+        ApprovalId::new(self.next_value("approval"))
+    }
+
+    /// Creates a checkpoint identifier.
+    pub fn next_checkpoint_id(&self) -> CheckpointId {
+        CheckpointId::new(self.next_value("checkpoint"))
     }
 
     /// Produces a serialized timestamp string for persisted protocol resources.

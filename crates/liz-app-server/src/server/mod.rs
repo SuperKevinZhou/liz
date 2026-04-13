@@ -8,8 +8,9 @@ use crate::model::{ModelGateway, ModelTurnRequest, NormalizedTurnEvent};
 use crate::runtime::RuntimeCoordinator;
 use crate::storage::StoragePaths;
 use liz_protocol::{
-    AssistantChunkEvent, AssistantCompletedEvent, ClientRequestEnvelope, ServerEvent,
-    ServerEventPayload, ServerResponseEnvelope, ThreadId, TurnCompletedEvent, TurnFailedEvent,
+    ApprovalDecision, ApprovalRequestedEvent, AssistantChunkEvent, AssistantCompletedEvent,
+    CheckpointCreatedEvent, ClientRequestEnvelope, ServerEvent, ServerEventPayload,
+    ServerResponseEnvelope, ThreadId, TurnCancelRequest, TurnCompletedEvent, TurnFailedEvent,
     TurnId,
 };
 use std::sync::mpsc::Receiver;
@@ -58,14 +59,17 @@ impl AppServer {
 
     /// Handles a single protocol request and returns the matching response envelope.
     pub fn handle_request(&mut self, envelope: ClientRequestEnvelope) -> ServerResponseEnvelope {
-        let turn_input = match envelope.request.clone() {
-            liz_protocol::ClientRequest::TurnStart(request) => Some(request.input),
-            _ => None,
-        };
+        let request = envelope.request.clone();
         let handled = handlers::handle_request(&mut self.runtime, envelope);
         self.event_bus.publish_all(handled.events);
-        if let Some(input) = turn_input {
-            self.stream_model_turn(&handled.response, input);
+        match request {
+            liz_protocol::ClientRequest::TurnStart(request) => {
+                self.continue_turn_after_policy(&handled.response, request.input);
+            }
+            liz_protocol::ClientRequest::ApprovalRespond(request) => {
+                self.continue_after_approval(&handled.response, request.decision);
+            }
+            _ => {}
         }
         handled.response
     }
@@ -80,7 +84,7 @@ impl AppServer {
         &self.runtime
     }
 
-    fn stream_model_turn(&mut self, response: &ServerResponseEnvelope, input: String) {
+    fn continue_turn_after_policy(&mut self, response: &ServerResponseEnvelope, input: String) {
         let (thread, turn) = match response {
             ServerResponseEnvelope::Success(success) => match &success.response {
                 liz_protocol::ResponsePayload::TurnStart(turn_response) => {
@@ -99,34 +103,121 @@ impl AppServer {
             ServerResponseEnvelope::Error(_) => return,
         };
 
-        let prompt = format!(
-            "thread: {}\nactive_goal: {}\ninput: {}",
-            thread.title,
-            thread.active_goal.clone().unwrap_or_default(),
-            input
-        );
+        let Ok(context) = self.runtime.assemble_context(&thread.id, &input) else {
+            return;
+        };
+        let decision = self.runtime.evaluate_policy(&input, &context);
+
+        if decision.requires_approval {
+            if let Ok((checkpoint, approval)) =
+                self.runtime.require_approval_for_turn(&thread.id, &turn.id, &decision)
+            {
+                if let Some(checkpoint) = checkpoint {
+                    self.event_bus.publish(crate::events::PendingEvent::new(
+                        thread.id.clone(),
+                        Some(turn.id.clone()),
+                        ServerEventPayload::CheckpointCreated(CheckpointCreatedEvent { checkpoint }),
+                    ));
+                }
+                self.event_bus.publish(crate::events::PendingEvent::new(
+                    thread.id.clone(),
+                    Some(turn.id.clone()),
+                    ServerEventPayload::ApprovalRequested(ApprovalRequestedEvent { approval }),
+                ));
+            }
+            return;
+        }
+
+        self.stream_model_turn(thread, turn, context.prompt);
+    }
+
+    fn continue_after_approval(
+        &mut self,
+        response: &ServerResponseEnvelope,
+        decision: ApprovalDecision,
+    ) {
+        let approval = match response {
+            ServerResponseEnvelope::Success(success) => match &success.response {
+                liz_protocol::ResponsePayload::ApprovalRespond(response) => response.approval.clone(),
+                _ => return,
+            },
+            ServerResponseEnvelope::Error(_) => return,
+        };
+
+        match decision {
+            ApprovalDecision::ApproveOnce | ApprovalDecision::ApproveAndPersist => {
+                let Ok(turn) = self
+                    .runtime
+                    .resume_approved_turn(&approval.thread_id, &approval.turn_id)
+                else {
+                    return;
+                };
+                let Some(thread) = self
+                    .runtime
+                    .read_thread(&approval.thread_id)
+                    .ok()
+                    .and_then(|thread| thread)
+                else {
+                    return;
+                };
+                let input = turn.goal.clone().unwrap_or_default();
+                let Ok(context) = self.runtime.assemble_context(&thread.id, &input) else {
+                    return;
+                };
+                self.stream_model_turn(thread, turn, context.prompt);
+            }
+            ApprovalDecision::Deny => {
+                if let Ok(response) = self.runtime.cancel_turn(TurnCancelRequest {
+                    thread_id: approval.thread_id.clone(),
+                    turn_id: approval.turn_id.clone(),
+                }) {
+                    let turn = response.turn;
+                    self.event_bus.publish(crate::events::PendingEvent::new(
+                        approval.thread_id.clone(),
+                        Some(turn.id.clone()),
+                        ServerEventPayload::TurnCancelled(liz_protocol::TurnCancelledEvent {
+                            turn: turn.clone(),
+                        }),
+                    ));
+                    if let Ok(Some(thread)) = self.runtime.read_thread(&approval.thread_id) {
+                        self.event_bus.publish(crate::events::PendingEvent::new(
+                            thread.id.clone(),
+                            Some(turn.id.clone()),
+                            ServerEventPayload::ThreadInterrupted(liz_protocol::ThreadInterruptedEvent {
+                                thread,
+                            }),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    fn stream_model_turn(&mut self, thread: liz_protocol::Thread, turn: liz_protocol::Turn, prompt: String) {
+        let thread_id = thread.id.clone();
+        let turn_id = turn.id.clone();
 
         let run_result = self.model_gateway.run_turn(
-            ModelTurnRequest { thread: thread.clone(), turn: turn.clone(), prompt },
-            |event| self.publish_model_event(&thread.id, &turn.id, event),
+            ModelTurnRequest { thread, turn, prompt },
+            |event| self.publish_model_event(&thread_id, &turn_id, event),
         );
 
         match run_result {
             Ok(summary) => {
                 let final_message =
                     summary.assistant_message.unwrap_or_else(|| "Completed turn".to_owned());
-                if let Ok(turn) = self.runtime.complete_turn(&thread.id, &turn.id, final_message) {
+                if let Ok(turn) = self.runtime.complete_turn(&thread_id, &turn_id, final_message) {
                     self.event_bus.publish(crate::events::PendingEvent::new(
-                        thread.id.clone(),
+                        thread_id.clone(),
                         Some(turn.id.clone()),
                         ServerEventPayload::TurnCompleted(TurnCompletedEvent { turn }),
                     ));
                 }
             }
             Err(error) => {
-                if let Ok(turn) = self.runtime.fail_turn(&thread.id, &turn.id, error.to_string()) {
+                if let Ok(turn) = self.runtime.fail_turn(&thread_id, &turn_id, error.to_string()) {
                     self.event_bus.publish(crate::events::PendingEvent::new(
-                        thread.id.clone(),
+                        thread_id.clone(),
                         Some(turn.id.clone()),
                         ServerEventPayload::TurnFailed(TurnFailedEvent {
                             turn,

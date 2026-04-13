@@ -3,8 +3,8 @@
 use crate::events::PendingEvent;
 use crate::runtime::{RuntimeCoordinator, RuntimeError};
 use liz_protocol::events::{
-    ThreadForkedEvent, ThreadInterruptedEvent, ThreadResumedEvent, ThreadStartedEvent,
-    ThreadUpdatedEvent, TurnCancelledEvent, TurnStartedEvent,
+    ApprovalResolvedEvent, ThreadForkedEvent, ThreadInterruptedEvent, ThreadResumedEvent,
+    ThreadStartedEvent, ThreadUpdatedEvent, TurnCancelledEvent, TurnStartedEvent,
 };
 use liz_protocol::requests::ClientRequest;
 use liz_protocol::responses::{
@@ -97,10 +97,23 @@ pub fn handle_request(
                 (ResponsePayload::TurnCancel(response), events)
             })
         }
-        ClientRequest::ApprovalRespond(_) => Err(RuntimeError::unsupported(
-            "approval_not_ready",
-            "approval handling is implemented in a later phase",
-        )),
+        ClientRequest::ApprovalRespond(request) => {
+            let decision = request.decision;
+            runtime.respond_approval(request).map(|response| {
+                let approval = response.approval.clone();
+                (
+                    ResponsePayload::ApprovalRespond(response),
+                    vec![PendingEvent::new(
+                        approval.thread_id.clone(),
+                        Some(approval.turn_id.clone()),
+                        ServerEventPayload::ApprovalResolved(ApprovalResolvedEvent {
+                            approval,
+                            decision,
+                        }),
+                    )],
+                )
+            })
+        }
         ClientRequest::ThreadRollback(_) => Err(RuntimeError::unsupported(
             "rollback_not_ready",
             "rollback handling is implemented in a later phase",
