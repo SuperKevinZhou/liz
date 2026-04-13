@@ -130,6 +130,85 @@ impl TurnManager {
         self.active_turns.get(turn_id).cloned()
     }
 
+    /// Completes a running turn and persists the updated thread projection.
+    pub fn complete_turn(
+        &mut self,
+        stores: &RuntimeStores,
+        ids: &mut IdGenerator,
+        thread_id: &liz_protocol::ThreadId,
+        turn_id: &TurnId,
+        final_message: String,
+    ) -> RuntimeResult<Turn> {
+        let mut thread = stores
+            .get_thread(thread_id)?
+            .ok_or_else(|| RuntimeError::not_found("thread_not_found", "thread does not exist"))?;
+        let mut turn = self
+            .active_turns
+            .remove(turn_id)
+            .ok_or_else(|| RuntimeError::not_found("turn_not_found", "turn is not running"))?;
+
+        let ended_at = ids.now_timestamp();
+        turn.status = TurnStatus::Completed;
+        turn.ended_at = Some(ended_at.clone());
+        turn.summary = Some(final_message.clone());
+
+        thread.status = ThreadStatus::Active;
+        thread.updated_at = ended_at.clone();
+        thread.active_summary = Some(final_message);
+        thread.last_interruption = None;
+        thread.latest_turn_id = Some(turn.id.clone());
+
+        stores.append_turn_log(&TurnLogEntry {
+            thread_id: thread.id.clone(),
+            sequence: self.next_sequence_for(&thread.id),
+            turn_id: Some(turn.id.clone()),
+            recorded_at: ended_at,
+            event: "turn_completed".to_owned(),
+            summary: turn.summary.clone().unwrap_or_default(),
+        })?;
+        stores.put_thread(&thread)?;
+        Ok(turn)
+    }
+
+    /// Fails a running turn and projects the failure onto the thread.
+    pub fn fail_turn(
+        &mut self,
+        stores: &RuntimeStores,
+        ids: &mut IdGenerator,
+        thread_id: &liz_protocol::ThreadId,
+        turn_id: &TurnId,
+        message: String,
+    ) -> RuntimeResult<Turn> {
+        let mut thread = stores
+            .get_thread(thread_id)?
+            .ok_or_else(|| RuntimeError::not_found("thread_not_found", "thread does not exist"))?;
+        let mut turn = self
+            .active_turns
+            .remove(turn_id)
+            .ok_or_else(|| RuntimeError::not_found("turn_not_found", "turn is not running"))?;
+
+        let ended_at = ids.now_timestamp();
+        turn.status = TurnStatus::Failed;
+        turn.ended_at = Some(ended_at.clone());
+        turn.summary = Some(message.clone());
+
+        thread.status = ThreadStatus::Failed;
+        thread.updated_at = ended_at.clone();
+        thread.active_summary = Some(format!("Turn failed: {message}"));
+        thread.latest_turn_id = Some(turn.id.clone());
+
+        stores.append_turn_log(&TurnLogEntry {
+            thread_id: thread.id.clone(),
+            sequence: self.next_sequence_for(&thread.id),
+            turn_id: Some(turn.id.clone()),
+            recorded_at: ended_at,
+            event: "turn_failed".to_owned(),
+            summary: turn.summary.clone().unwrap_or_default(),
+        })?;
+        stores.put_thread(&thread)?;
+        Ok(turn)
+    }
+
     fn next_sequence_for(&mut self, thread_id: &liz_protocol::ThreadId) -> u64 {
         let sequence = self.next_sequence.entry(thread_id.clone()).or_insert(0);
         *sequence += 1;

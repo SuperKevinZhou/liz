@@ -41,6 +41,11 @@ impl RuntimeCoordinator {
         "thread-turn-runtime"
     }
 
+    /// Creates a runtime coordinator rooted at explicit storage paths.
+    pub fn from_storage_paths(paths: crate::storage::StoragePaths) -> Self {
+        Self::new(RuntimeStores::new(paths))
+    }
+
     /// Starts a new thread and persists the initial thread projection.
     pub fn start_thread(&mut self, request: ThreadStartRequest) -> RuntimeResult<ThreadStartResponse> {
         let thread = self.thread_manager.start_thread(&self.stores, &mut self.ids, request)?;
@@ -84,6 +89,28 @@ impl RuntimeCoordinator {
     pub fn cancel_turn(&mut self, request: TurnCancelRequest) -> RuntimeResult<TurnCancelResponse> {
         let turn = self.turn_manager.cancel_turn(&self.stores, &mut self.ids, request)?;
         Ok(TurnCancelResponse { turn })
+    }
+
+    /// Marks a running turn as completed and projects the result back onto the thread.
+    pub fn complete_turn(
+        &mut self,
+        thread_id: &ThreadId,
+        turn_id: &liz_protocol::TurnId,
+        final_message: String,
+    ) -> RuntimeResult<Turn> {
+        self.turn_manager
+            .complete_turn(&self.stores, &mut self.ids, thread_id, turn_id, final_message)
+    }
+
+    /// Marks a running turn as failed and projects the failure back onto the thread.
+    pub fn fail_turn(
+        &mut self,
+        thread_id: &ThreadId,
+        turn_id: &liz_protocol::TurnId,
+        message: String,
+    ) -> RuntimeResult<Turn> {
+        self.turn_manager
+            .fail_turn(&self.stores, &mut self.ids, thread_id, turn_id, message)
     }
 
     /// Returns a persisted thread when it exists.
