@@ -3,6 +3,7 @@
 use crate::model::config::ResolvedProvider;
 use crate::model::family::ModelProviderFamily;
 use crate::model::gateway::{ModelError, ModelRunSummary, ModelTurnRequest};
+use crate::model::http::{build_client, post_json};
 use crate::model::invocation::{InvocationTransport, ProviderInvocationPlan};
 use crate::model::normalized_stream::{NormalizedTurnEvent, UsageDelta};
 use serde_json::json;
@@ -65,6 +66,10 @@ impl GoogleAdapter {
                 .collect(),
         };
 
+        if should_attempt_live_http(provider) {
+            return execute_live_http(provider, &plan, request, sink);
+        }
+
         let location_hint = provider
             .metadata
             .get("google.location")
@@ -103,6 +108,119 @@ impl GoogleAdapter {
             usage,
         })
     }
+}
+
+fn execute_live_http(
+    provider: &ResolvedProvider,
+    plan: &ProviderInvocationPlan,
+    request: ModelTurnRequest,
+    sink: &mut dyn FnMut(NormalizedTurnEvent),
+) -> Result<ModelRunSummary, ModelError> {
+    let (url, body, headers) = match plan.family {
+        ModelProviderFamily::GoogleGenerativeAi => {
+            let api_key = provider.api_key.clone().ok_or_else(|| {
+                ModelError::ProviderFailure("google provider requires API key for live mode".to_owned())
+            })?;
+            let base = provider
+                .base_url
+                .clone()
+                .unwrap_or_else(|| "https://generativelanguage.googleapis.com".to_owned());
+            (
+                format!(
+                    "{}/v1beta/models/{}:generateContent?key={}",
+                    trim_trailing_slash(&base),
+                    provider.model_id,
+                    api_key
+                ),
+                json!({
+                    "contents": [{"role": "user", "parts": [{"text": request.prompt}]}],
+                }),
+                provider.headers.clone(),
+            )
+        }
+        _ => return simulate_only(plan, request, sink),
+    };
+
+    let response = post_json(&build_client()?, &url, &headers, &body)?;
+    let assistant_message = response
+        .get("candidates")
+        .and_then(|value| value.as_array())
+        .and_then(|items| items.first())
+        .and_then(|candidate| candidate.get("content"))
+        .and_then(|content| content.get("parts"))
+        .and_then(|parts| parts.as_array())
+        .and_then(|parts| parts.first())
+        .and_then(|part| part.get("text"))
+        .and_then(|value| value.as_str())
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("{} response received.", plan.display_name));
+
+    sink(NormalizedTurnEvent::AssistantDelta {
+        chunk: format!("Live response from {}.", plan.display_name),
+    });
+    sink(NormalizedTurnEvent::AssistantMessage {
+        message: assistant_message.clone(),
+    });
+
+    Ok(ModelRunSummary {
+        assistant_message: Some(assistant_message),
+        usage: UsageDelta {
+            input_tokens: estimate_tokens(&request.prompt),
+            output_tokens: estimate_tokens(&plan.model_id),
+            reasoning_tokens: 0,
+            cache_hit_tokens: 0,
+            cache_write_tokens: 0,
+        },
+    })
+}
+
+fn simulate_only(
+    plan: &ProviderInvocationPlan,
+    request: ModelTurnRequest,
+    sink: &mut dyn FnMut(NormalizedTurnEvent),
+) -> Result<ModelRunSummary, ModelError> {
+    let location_hint = "default-location";
+    sink(NormalizedTurnEvent::AssistantDelta {
+        chunk: format!("Using {}. ", plan.display_name),
+    });
+    sink(NormalizedTurnEvent::AssistantDelta {
+        chunk: format!("Routing model {} in {}.", plan.model_id, location_hint),
+    });
+    sink(NormalizedTurnEvent::ProviderRawEvent {
+        label: format!("request-plan {}", plan.payload_preview),
+    });
+    let usage = UsageDelta {
+        input_tokens: estimate_tokens(&request.prompt),
+        output_tokens: estimate_tokens(&request.prompt) + 9,
+        reasoning_tokens: 0,
+        cache_hit_tokens: 0,
+        cache_write_tokens: 0,
+    };
+    sink(NormalizedTurnEvent::UsageDelta(usage.clone()));
+    let final_message = format!(
+        "{} request prepared for {} using {}.",
+        plan.display_name,
+        plan.model_id,
+        plan.family.transport_label()
+    );
+    sink(NormalizedTurnEvent::AssistantMessage {
+        message: final_message.clone(),
+    });
+
+    Ok(ModelRunSummary {
+        assistant_message: Some(final_message),
+        usage,
+    })
+}
+
+fn should_attempt_live_http(provider: &ResolvedProvider) -> bool {
+    std::env::var("LIZ_PROVIDER_ENABLE_LIVE").ok().as_deref() == Some("1")
+        && provider.spec.family == ModelProviderFamily::GoogleGenerativeAi
+        && provider.api_key.is_some()
+}
+
+fn trim_trailing_slash(value: &str) -> &str {
+    value.trim_end_matches('/')
 }
 
 fn estimate_tokens(text: &str) -> u32 {
