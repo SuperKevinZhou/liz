@@ -8,9 +8,9 @@ pub mod view_model;
 pub fn banner_line() -> String {
     format!(
         "{} [{} | {} | {}]",
-        "liz-cli workspace skeleton",
-        app_client::AppClientSkeleton::default().transport,
-        view_model::ViewModelSkeleton::default().primary_view,
+        "liz-cli reference client",
+        app_client::WebSocketAppClient::transport_name(),
+        view_model::ViewModel::primary_view(),
         renderers::RendererSkeleton::default().renderer_stack,
     )
 }
