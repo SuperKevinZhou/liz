@@ -120,7 +120,10 @@ fn prefix_bedrock_model(provider: &ResolvedProvider, model_id: &str) -> String {
     }
 
     if ["ap-southeast-2", "ap-southeast-4"].contains(&region)
-        && ["anthropic.claude-sonnet-4-5", "anthropic.claude-haiku"]
+        && [
+            "anthropic.claude-sonnet-4-20250514",
+            "anthropic.claude-haiku",
+        ]
             .iter()
             .any(|marker| lower.contains(marker))
     {
