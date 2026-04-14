@@ -93,7 +93,7 @@ pub struct ProviderSpec {
     pub default_headers: &'static [(&'static str, &'static str)],
     /// The provider capability matrix used by the runtime.
     pub capabilities: ModelCapabilities,
-    /// Lightweight implementation notes captured from OpenClaw/OpenCode behavior.
+    /// Lightweight implementation notes that describe provider-specific behavior.
     pub notes: &'static [&'static str],
 }
 

@@ -28,7 +28,7 @@ pub struct ModelCapabilities {
 }
 
 impl ModelCapabilities {
-    /// Returns a capability matrix that mirrors a strong OpenAI-style streaming adapter.
+    /// Returns a capability matrix for a strong OpenAI-style streaming adapter.
     pub fn openai_streaming() -> Self {
         Self {
             assistant_text_streaming: true,
