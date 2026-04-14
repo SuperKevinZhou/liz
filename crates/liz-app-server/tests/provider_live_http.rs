@@ -82,7 +82,7 @@ fn anthropic_live_request_uses_messages_shape_and_headers() {
         ProviderOverride {
             base_url: Some(base_url),
             api_key: Some("anthropic-test".to_owned()),
-            model_id: Some("claude-sonnet-4-20250514".to_owned()),
+            model_id: Some("claude-sonnet-4-6".to_owned()),
             headers: BTreeMap::new(),
             metadata: BTreeMap::new(),
         },
@@ -110,7 +110,7 @@ fn anthropic_live_request_uses_messages_shape_and_headers() {
         lowercase.contains("anthropic-version: 2023-06-01")
             || lowercase.contains("anthropic-version:2023-06-01")
     );
-    assert!(request.contains(r#""model":"claude-sonnet-4-20250514""#));
+    assert!(request.contains(r#""model":"claude-sonnet-4-6""#));
     assert!(request.contains(r#""messages":["#));
     assert!(request.contains(r#""role":"user""#));
     assert!(request.contains(r#""content":"Run a patch tool command for this task""#));
@@ -138,7 +138,7 @@ fn google_live_request_uses_generate_content_shape() {
         ProviderOverride {
             base_url: Some(base_url),
             api_key: Some("google-test".to_owned()),
-            model_id: Some("gemini-3-pro-preview".to_owned()),
+            model_id: Some("gemini-3.1-pro".to_owned()),
             headers: BTreeMap::new(),
             metadata: BTreeMap::new(),
         },
@@ -156,7 +156,7 @@ fn google_live_request_uses_generate_content_shape() {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone();
-    assert!(request.contains("POST /v1beta/models/gemini-3-pro-preview:generateContent?key=google-test HTTP/1.1"));
+    assert!(request.contains("POST /v1beta/models/gemini-3.1-pro:generateContent?key=google-test HTTP/1.1"));
     assert!(request.contains(r#""contents":["#));
     assert!(request.contains(r#""role":"user""#));
     assert!(request.contains(r#""parts":["#));
