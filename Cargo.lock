@@ -1138,7 +1138,11 @@ dependencies = [
 name = "liz-cli"
 version = "0.1.0"
 dependencies = [
+ "liz-app-server",
  "liz-protocol",
+ "serde_json",
+ "tempfile",
+ "tungstenite",
 ]
 
 [[package]]

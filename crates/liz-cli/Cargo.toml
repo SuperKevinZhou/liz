@@ -9,3 +9,9 @@ workspace = true
 
 [dependencies]
 liz-protocol = { path = "../liz-protocol" }
+serde_json.workspace = true
+tungstenite = "0.24.0"
+
+[dev-dependencies]
+liz-app-server = { path = "../liz-app-server" }
+tempfile.workspace = true
