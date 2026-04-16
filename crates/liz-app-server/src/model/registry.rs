@@ -549,8 +549,75 @@ fn builtin_specs() -> Vec<ProviderSpec> {
                 "Accepts the Kimi Code subscription API key.",
             ],
         ),
-        openai_compatible_spec("azure", "Azure OpenAI", "gpt-4.1"),
-        openai_compatible_spec("azure-cognitive-services", "Azure Cognitive Services", "gpt-4.1"),
+        spec(
+            "azure",
+            "Azure OpenAI",
+            ModelProviderFamily::OpenAiCompatible,
+            ProviderAuthKind::ApiKey,
+            None,
+            "gpt-4.1",
+            &["AZURE_OPENAI_API_KEY", "AZURE_API_KEY"],
+            &["AZURE_RESOURCE_NAME", "AZURE_OPENAI_DEPLOYMENT"],
+            &[],
+            ModelCapabilities::openai_compatible()
+                .with_tool_call_streaming(true)
+                .with_image_input(true)
+                .with_max_context_window(200_000),
+            &[
+                "Uses the Azure OpenAI v1 endpoint with api-key authentication.",
+                "The model field should resolve to the Azure deployment name.",
+            ],
+        )
+        .with_auth_strategies(vec![auth_strategy(
+            ProviderAuthKind::ApiKey,
+            "api-key",
+            &["AZURE_OPENAI_API_KEY", "AZURE_API_KEY"],
+            &[
+                "AZURE_RESOURCE_NAME",
+                "AZURE_OPENAI_DEPLOYMENT",
+                "provider.azure.baseUrl",
+            ],
+            &[
+                "Builds https://{resource}.openai.azure.com/openai/v1 when no explicit base URL override is present.",
+                "Sends API keys with the api-key header instead of Authorization.",
+            ],
+        )]),
+        spec(
+            "azure-cognitive-services",
+            "Azure Cognitive Services",
+            ModelProviderFamily::OpenAiCompatible,
+            ProviderAuthKind::ApiKey,
+            None,
+            "gpt-4.1",
+            &["AZURE_API_KEY"],
+            &[
+                "AZURE_COGNITIVE_SERVICES_RESOURCE_NAME",
+                "AZURE_COGNITIVE_SERVICES_DEPLOYMENT",
+            ],
+            &[],
+            ModelCapabilities::openai_compatible()
+                .with_tool_call_streaming(true)
+                .with_image_input(true)
+                .with_max_context_window(200_000),
+            &[
+                "Uses the Azure Cognitive Services OpenAI-compatible v1 endpoint with api-key authentication.",
+                "The model field should resolve to the Azure deployment name.",
+            ],
+        )
+        .with_auth_strategies(vec![auth_strategy(
+            ProviderAuthKind::ApiKey,
+            "api-key",
+            &["AZURE_API_KEY"],
+            &[
+                "AZURE_COGNITIVE_SERVICES_RESOURCE_NAME",
+                "AZURE_COGNITIVE_SERVICES_DEPLOYMENT",
+                "provider.azure-cognitive-services.baseUrl",
+            ],
+            &[
+                "Builds https://{resource}.cognitiveservices.azure.com/openai/v1 when no explicit base URL override is present.",
+                "Sends API keys with the api-key header instead of Authorization.",
+            ],
+        )]),
         openai_compatible_spec("copilot-proxy", "Copilot Proxy", "gpt-5-mini"),
         openai_compatible_spec("microsoft-foundry", "Microsoft Foundry", "gpt-4.1"),
         openai_compatible_spec("302ai", "302.AI", "gpt-4.1-mini"),
@@ -776,8 +843,6 @@ fn openai_compatible_spec(
         "gitlab" => &["GITLAB_TOKEN"][..],
         "cloudflare-ai-gateway" => &["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_AI_GATEWAY_API_KEY"][..],
         "cloudflare-workers-ai" => &["CLOUDFLARE_API_KEY"][..],
-        "azure" => &["AZURE_OPENAI_API_KEY", "AZURE_API_KEY"][..],
-        "azure-cognitive-services" => &["AZURE_API_KEY"][..],
         "xai" => &["XAI_API_KEY"][..],
         "mistral" => &["MISTRAL_API_KEY"][..],
         "moonshot" | "moonshotai" => &["MOONSHOT_API_KEY"][..],
@@ -810,8 +875,6 @@ fn openai_compatible_spec(
     };
 
     let required_envs = match id {
-        "azure" => &["AZURE_RESOURCE_NAME"][..],
-        "azure-cognitive-services" => &["AZURE_COGNITIVE_SERVICES_RESOURCE_NAME"][..],
         "cloudflare-ai-gateway" => &["CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_GATEWAY_ID"][..],
         "cloudflare-workers-ai" => &["CLOUDFLARE_ACCOUNT_ID"][..],
         _ => &[],

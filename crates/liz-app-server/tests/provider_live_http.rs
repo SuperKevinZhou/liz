@@ -596,6 +596,96 @@ fn sap_ai_core_live_request_exchanges_service_key_and_uses_deployment_chat_path(
 }
 
 #[test]
+fn azure_live_requests_use_v1_paths_and_api_key_headers() {
+    let _guard = env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");
+
+    let azure_capture = Arc::new(Mutex::new(String::new()));
+    let azure_base_url = format!(
+        "{}/openai/v1",
+        spawn_json_server(
+            azure_capture.clone(),
+            r#"{"choices":[{"message":{"content":"hello from azure"}}]}"#,
+        )
+    );
+    let mut azure_overrides = BTreeMap::new();
+    azure_overrides.insert(
+        "azure".to_owned(),
+        ProviderOverride {
+            base_url: Some(azure_base_url),
+            api_key: Some("azure-api-key".to_owned()),
+            model_id: Some("gpt-4.1-prod".to_owned()),
+            headers: BTreeMap::new(),
+            metadata: BTreeMap::new(),
+        },
+    );
+    let azure_gateway = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "azure".to_owned(),
+        overrides: azure_overrides,
+    });
+    let azure_summary = azure_gateway
+        .run_turn(demo_request(), |_| {})
+        .expect("azure request should succeed");
+    let azure_request = azure_capture
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    assert!(azure_request.contains("POST /openai/v1/chat/completions HTTP/1.1"));
+    let azure_lower = azure_request.to_ascii_lowercase();
+    assert!(azure_lower.contains("api-key: azure-api-key"));
+    assert!(!azure_lower.contains("authorization: bearer azure-api-key"));
+    assert_eq!(
+        azure_summary.assistant_message.as_deref(),
+        Some("hello from azure")
+    );
+
+    let cognitive_capture = Arc::new(Mutex::new(String::new()));
+    let cognitive_base_url = format!(
+        "{}/openai/v1",
+        spawn_json_server(
+            cognitive_capture.clone(),
+            r#"{"choices":[{"message":{"content":"hello from azure cognitive"}}]}"#,
+        )
+    );
+    let mut cognitive_overrides = BTreeMap::new();
+    cognitive_overrides.insert(
+        "azure-cognitive-services".to_owned(),
+        ProviderOverride {
+            base_url: Some(cognitive_base_url),
+            api_key: Some("azure-cog-key".to_owned()),
+            model_id: Some("gpt-4.1-cog".to_owned()),
+            headers: BTreeMap::new(),
+            metadata: BTreeMap::new(),
+        },
+    );
+    let cognitive_gateway = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "azure-cognitive-services".to_owned(),
+        overrides: cognitive_overrides,
+    });
+    let cognitive_summary = cognitive_gateway
+        .run_turn(demo_request(), |_| {})
+        .expect("azure cognitive request should succeed");
+    let cognitive_request = cognitive_capture
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    assert!(
+        cognitive_request.contains("POST /openai/v1/chat/completions HTTP/1.1")
+    );
+    let cognitive_lower = cognitive_request.to_ascii_lowercase();
+    assert!(cognitive_lower.contains("api-key: azure-cog-key"));
+    assert!(!cognitive_lower.contains("authorization: bearer azure-cog-key"));
+    assert_eq!(
+        cognitive_summary.assistant_message.as_deref(),
+        Some("hello from azure cognitive")
+    );
+
+    std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
+}
+
+#[test]
 fn minimax_live_request_uses_anthropic_messages_with_bearer_auth() {
     let _guard = env_lock()
         .lock()

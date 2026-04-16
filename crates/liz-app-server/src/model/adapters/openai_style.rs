@@ -538,6 +538,18 @@ fn default_openai_style_headers(
         return Ok(headers);
     }
 
+    if matches!(provider.spec.id, "azure" | "azure-cognitive-services") {
+        let api_key = provider.api_key.as_ref().ok_or_else(|| {
+            ModelError::ProviderFailure(format!(
+                "{} requires an Azure API key for live mode",
+                provider.spec.id
+            ))
+        })?;
+        headers.insert("api-key".to_owned(), api_key.clone());
+        headers.remove("Authorization");
+        return Ok(headers);
+    }
+
     if let Some(api_key) = provider.api_key.as_ref() {
         headers
             .entry("Authorization".to_owned())

@@ -591,6 +591,44 @@ fn sap_ai_core_env_resolution_parses_service_key_and_builds_deployment_route() {
 }
 
 #[test]
+fn azure_env_resolution_uses_v1_base_urls_and_deployment_names() {
+    let _guard = env_lock().lock().expect("env lock");
+    std::env::set_var("AZURE_RESOURCE_NAME", "azure-openai-resource");
+    std::env::set_var("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1-prod");
+    std::env::set_var("AZURE_COGNITIVE_SERVICES_RESOURCE_NAME", "azure-cog-resource");
+    std::env::set_var("AZURE_COGNITIVE_SERVICES_DEPLOYMENT", "gpt-4.1-cog");
+
+    let azure = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "azure".to_owned(),
+        overrides: BTreeMap::new(),
+    })
+    .resolved_primary_provider()
+    .expect("azure provider should resolve");
+    assert_eq!(
+        azure.base_url.as_deref(),
+        Some("https://azure-openai-resource.openai.azure.com/openai/v1")
+    );
+    assert_eq!(azure.model_id, "gpt-4.1-prod");
+
+    let cognitive = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "azure-cognitive-services".to_owned(),
+        overrides: BTreeMap::new(),
+    })
+    .resolved_primary_provider()
+    .expect("azure cognitive provider should resolve");
+    assert_eq!(
+        cognitive.base_url.as_deref(),
+        Some("https://azure-cog-resource.cognitiveservices.azure.com/openai/v1")
+    );
+    assert_eq!(cognitive.model_id, "gpt-4.1-cog");
+
+    std::env::remove_var("AZURE_RESOURCE_NAME");
+    std::env::remove_var("AZURE_OPENAI_DEPLOYMENT");
+    std::env::remove_var("AZURE_COGNITIVE_SERVICES_RESOURCE_NAME");
+    std::env::remove_var("AZURE_COGNITIVE_SERVICES_DEPLOYMENT");
+}
+
+#[test]
 fn openai_compatible_provider_without_builtin_base_url_still_runs() {
     let gateway = ModelGateway::from_config(ModelGatewayConfig {
         primary_provider: "copilot-proxy".to_owned(),

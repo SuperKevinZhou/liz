@@ -117,7 +117,15 @@ impl ResolvedProvider {
                         metadata
                             .entry("azure.resource_name".to_owned())
                             .or_insert(resource_name.clone());
-                        base_url = Some(format!("https://{resource_name}.openai.azure.com/openai"));
+                        base_url = Some(format!("https://{resource_name}.openai.azure.com/openai/v1"));
+                    }
+                }
+                if let Some(deployment) = first_env(&["AZURE_OPENAI_DEPLOYMENT"]) {
+                    metadata
+                        .entry("azure.deployment".to_owned())
+                        .or_insert(deployment.clone());
+                    if model_id == spec.default_model {
+                        model_id = deployment;
                     }
                 }
             }
@@ -128,8 +136,16 @@ impl ResolvedProvider {
                             .entry("azure.cognitive.resource_name".to_owned())
                             .or_insert(resource_name.clone());
                         base_url = Some(format!(
-                            "https://{resource_name}.cognitiveservices.azure.com/openai"
+                            "https://{resource_name}.cognitiveservices.azure.com/openai/v1"
                         ));
+                    }
+                }
+                if let Some(deployment) = first_env(&["AZURE_COGNITIVE_SERVICES_DEPLOYMENT"]) {
+                    metadata
+                        .entry("azure.cognitive.deployment".to_owned())
+                        .or_insert(deployment.clone());
+                    if model_id == spec.default_model {
+                        model_id = deployment;
                     }
                 }
             }
