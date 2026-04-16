@@ -1,6 +1,7 @@
 //! Model-layer integration for provider-aware streaming turns.
 
 pub mod adapters;
+mod auth;
 mod capabilities;
 mod config;
 mod family;
