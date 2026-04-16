@@ -231,7 +231,7 @@ impl ResolvedProvider {
                     metadata.entry("google.location".to_owned()).or_insert(location);
                 }
             }
-            "amazon-bedrock" | "amazon-bedrock-mantle" => {
+            "amazon-bedrock" => {
                 if override_config.and_then(|config| config.api_key.as_ref()).is_none() {
                     api_key = first_env(&["AWS_BEARER_TOKEN_BEDROCK"]);
                 }
@@ -247,6 +247,28 @@ impl ResolvedProvider {
                             .entry("aws.auth".to_owned())
                             .or_insert("credential-chain-or-bearer-token".to_owned());
                     }
+                }
+            }
+            "amazon-bedrock-mantle" => {
+                if override_config.and_then(|config| config.api_key.as_ref()).is_none() {
+                    api_key = first_env(&["AWS_BEARER_TOKEN_BEDROCK"]);
+                }
+                let region = first_env(&["AWS_REGION", "AWS_DEFAULT_REGION"])
+                    .unwrap_or_else(|| "us-east-1".to_owned());
+                metadata
+                    .entry("aws.region".to_owned())
+                    .or_insert(region.clone());
+                if let Some(profile) = first_env(&["AWS_PROFILE"]) {
+                    metadata.entry("aws.profile".to_owned()).or_insert(profile);
+                }
+                if base_url.is_none() {
+                    base_url = Some(format!("https://bedrock-mantle.{region}.api.aws/v1"));
+                }
+                if matches!(spec.auth_kind, ProviderAuthKind::AwsCredentialChain) && api_key.is_none()
+                {
+                    metadata
+                        .entry("aws.auth".to_owned())
+                        .or_insert("credential-chain-or-bearer-token".to_owned());
                 }
             }
             _ => {}

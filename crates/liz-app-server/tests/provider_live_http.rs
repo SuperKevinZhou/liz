@@ -419,6 +419,118 @@ fn bedrock_live_request_uses_bearer_auth_and_converse_path() {
 }
 
 #[test]
+fn bedrock_mantle_live_request_uses_explicit_bearer_auth_and_chat_completions_path() {
+    let _guard = env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");
+
+    let capture = Arc::new(Mutex::new(String::new()));
+    let base_url = spawn_json_server(
+        capture.clone(),
+        r#"{"choices":[{"message":{"content":"hello from mantle bearer"}}]}"#,
+    );
+
+    let mut overrides = BTreeMap::new();
+    overrides.insert(
+        "amazon-bedrock-mantle".to_owned(),
+        ProviderOverride {
+            base_url: Some(base_url),
+            api_key: Some("bedrock-mantle-bearer".to_owned()),
+            model_id: Some("gpt-oss-120b".to_owned()),
+            headers: BTreeMap::new(),
+            metadata: BTreeMap::from([(String::from("aws.region"), String::from("us-east-1"))]),
+        },
+    );
+
+    let gateway = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "amazon-bedrock-mantle".to_owned(),
+        overrides,
+    });
+    let summary = gateway
+        .run_turn(demo_request(), |_| {})
+        .expect("bedrock mantle bearer request should succeed");
+
+    let request = capture
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    assert!(request.contains("POST /v1/chat/completions HTTP/1.1"));
+    assert!(
+        request
+            .to_ascii_lowercase()
+            .contains("authorization: bearer bedrock-mantle-bearer")
+    );
+    assert!(request.contains(r#""model":"gpt-oss-120b""#));
+    assert!(request.contains(r#""messages":["#));
+    assert!(request.contains(r#""role":"user""#));
+    assert_eq!(
+        summary.assistant_message.as_deref(),
+        Some("hello from mantle bearer")
+    );
+
+    std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
+}
+
+#[test]
+fn bedrock_mantle_live_request_mints_bearer_token_from_aws_credentials() {
+    let _guard = env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");
+    std::env::set_var("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE");
+    std::env::set_var("AWS_SECRET_ACCESS_KEY", "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY");
+    std::env::set_var("AWS_REGION", "us-east-1");
+
+    let capture = Arc::new(Mutex::new(String::new()));
+    let base_url = spawn_json_server(
+        capture.clone(),
+        r#"{"choices":[{"message":{"content":"hello from mantle iam"}}]}"#,
+    );
+
+    let mut overrides = BTreeMap::new();
+    overrides.insert(
+        "amazon-bedrock-mantle".to_owned(),
+        ProviderOverride {
+            base_url: Some(base_url),
+            api_key: None,
+            model_id: Some("gpt-oss-120b".to_owned()),
+            headers: BTreeMap::new(),
+            metadata: BTreeMap::from([(String::from("aws.region"), String::from("us-east-1"))]),
+        },
+    );
+
+    let gateway = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "amazon-bedrock-mantle".to_owned(),
+        overrides,
+    });
+    let summary = gateway
+        .run_turn(demo_request(), |_| {})
+        .expect("bedrock mantle credential-chain request should succeed");
+
+    let request = capture
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    assert!(request.contains("POST /v1/chat/completions HTTP/1.1"));
+    assert!(
+        request
+            .to_ascii_lowercase()
+            .contains("authorization: bearer bedrock-api-key-")
+    );
+    assert!(request.contains(r#""model":"gpt-oss-120b""#));
+    assert_eq!(
+        summary.assistant_message.as_deref(),
+        Some("hello from mantle iam")
+    );
+
+    std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
+    std::env::remove_var("AWS_ACCESS_KEY_ID");
+    std::env::remove_var("AWS_SECRET_ACCESS_KEY");
+    std::env::remove_var("AWS_REGION");
+}
+
+#[test]
 fn bedrock_live_request_uses_sigv4_when_credential_chain_is_available() {
     let _guard = env_lock()
         .lock()

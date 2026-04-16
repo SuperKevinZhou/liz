@@ -175,16 +175,47 @@ fn builtin_specs() -> Vec<ProviderSpec> {
         spec(
             "amazon-bedrock-mantle",
             "Amazon Bedrock Mantle",
-            ModelProviderFamily::AwsBedrockConverse,
+            ModelProviderFamily::OpenAiCompatible,
             ProviderAuthKind::AwsCredentialChain,
             None,
-            "anthropic.claude-sonnet-4-6-v1:0",
+            "gpt-oss-120b",
             &["AWS_BEARER_TOKEN_BEDROCK"],
             &["AWS_REGION", "AWS_PROFILE"],
             &[],
-            ModelCapabilities::bedrock_converse(),
-            &["Bedrock bridge-style provider variant."],
-        ),
+            ModelCapabilities::openai_compatible(),
+            &[
+                "Uses the Bedrock Mantle OpenAI-compatible endpoint.",
+                "Accepts explicit Bedrock bearer tokens or IAM-derived bearer tokens.",
+            ],
+        )
+        .with_auth_strategies(vec![
+            auth_strategy(
+                ProviderAuthKind::ApiKey,
+                "bedrock-bearer-token",
+                &["AWS_BEARER_TOKEN_BEDROCK"],
+                &[
+                    "provider.amazon-bedrock-mantle.options.region",
+                    "provider.amazon-bedrock-mantle.options.endpoint",
+                ],
+                &["Bearer-token auth takes precedence over the AWS credential chain."],
+            ),
+            auth_strategy(
+                ProviderAuthKind::AwsCredentialChain,
+                "aws-credential-chain",
+                &[
+                    "AWS_ACCESS_KEY_ID",
+                    "AWS_SECRET_ACCESS_KEY",
+                    "AWS_PROFILE",
+                    "AWS_WEB_IDENTITY_TOKEN_FILE",
+                    "AWS_ROLE_ARN",
+                ],
+                &[
+                    "provider.amazon-bedrock-mantle.options.profile",
+                    "provider.amazon-bedrock-mantle.options.region",
+                ],
+                &["Falls back to shared credentials, profiles, web identity, or instance metadata."],
+            ),
+        ]),
         spec(
             "google-vertex-anthropic",
             "Google Vertex Anthropic",

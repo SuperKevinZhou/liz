@@ -1,8 +1,10 @@
 //! Authentication helpers for provider families that need runtime credentials.
 
 use crate::model::gateway::ModelError;
-use aws_credential_types::provider::ProvideCredentials;
-use aws_sigv4::http_request::{sign, SignableBody, SignableRequest, SigningSettings};
+use aws_credential_types::{provider::ProvideCredentials, Credentials};
+use aws_sigv4::http_request::{
+    sign, SignableBody, SignableRequest, SignatureLocation, SigningSettings,
+};
 use aws_types::region::Region;
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
@@ -12,6 +14,8 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::env;
 use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 use std::time::SystemTime;
 use yup_oauth2::authenticator::ApplicationDefaultCredentialsTypes;
 use yup_oauth2::authenticator::DefaultAuthenticator;
@@ -25,6 +29,27 @@ const GOOGLE_CLOUD_PLATFORM_SCOPE: &str = "https://www.googleapis.com/auth/cloud
 const GITHUB_COPILOT_DEVICE_CLIENT_ID: &str = "Ov23li8tweQw6odWQebz";
 const OPENAI_CODEX_OAUTH_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const OPENAI_CODEX_OAUTH_ISSUER: &str = "https://auth.openai.com";
+const BEDROCK_MANTLE_CONTROL_PLANE_URL: &str =
+    "https://bedrock.amazonaws.com/?Action=CallWithBearerToken";
+const BEDROCK_MANTLE_TOKEN_PREFIX: &str = "bedrock-api-key-";
+const BEDROCK_MANTLE_TOKEN_SUFFIX: &str = "&Version=1";
+const BEDROCK_MANTLE_TOKEN_EXPIRES_SECONDS: u64 = 7200;
+const BEDROCK_MANTLE_CACHE_TTL_MS: u64 = 3600_000;
+const BEDROCK_MANTLE_CACHE_SAFETY_WINDOW_MS: u64 = 60_000;
+const BEDROCK_MANTLE_SUPPORTED_REGIONS: &[&str] = &[
+    "us-east-1",
+    "us-east-2",
+    "us-west-2",
+    "ap-northeast-1",
+    "ap-south-1",
+    "ap-southeast-3",
+    "eu-central-1",
+    "eu-west-1",
+    "eu-west-2",
+    "eu-south-1",
+    "eu-north-1",
+    "sa-east-1",
+];
 const OPENAI_CODEX_OAUTH_REQUIRED_SCOPES: &[&str] = &[
     "openid",
     "profile",
@@ -175,6 +200,12 @@ struct OpenAiCodexProfileClaims {
     email: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+struct CachedBedrockMantleToken {
+    token: String,
+    expires_at_ms: u64,
+}
+
 /// Resolves a Google ADC bearer token for Vertex AI requests.
 pub fn google_vertex_bearer_token() -> Result<String, ModelError> {
     let runtime = tokio::runtime::Runtime::new().map_err(|error| {
@@ -282,6 +313,42 @@ fn default_google_adc_path() -> Option<PathBuf> {
     }
 }
 
+/// Resolves a Bedrock Mantle bearer token from either an explicit API key or the AWS credential chain.
+pub fn resolve_bedrock_mantle_runtime_auth(
+    explicit_token: Option<&str>,
+    region: &str,
+) -> Result<String, ModelError> {
+    if let Some(token) = explicit_token.map(str::trim).filter(|value| !value.is_empty()) {
+        return Ok(token.to_owned());
+    }
+
+    validate_bedrock_mantle_region(region)?;
+
+    let runtime = tokio::runtime::Runtime::new().map_err(|error| {
+        ModelError::ProviderFailure(format!(
+            "failed to initialize AWS Mantle auth runtime: {error}"
+        ))
+    })?;
+    runtime.block_on(async { resolve_bedrock_mantle_runtime_auth_async(region).await })
+}
+
+async fn resolve_bedrock_mantle_runtime_auth_async(region: &str) -> Result<String, ModelError> {
+    let now = current_unix_time_ms();
+    if let Some(token) = load_cached_bedrock_mantle_token(region, now) {
+        return Ok(token);
+    }
+
+    let credentials = resolve_aws_credentials(region).await?;
+    let token = mint_bedrock_mantle_bearer_token(
+        region,
+        credentials.access_key_id(),
+        credentials.secret_access_key(),
+        credentials.session_token(),
+    )?;
+    store_cached_bedrock_mantle_token(region, token.clone(), mantle_cache_expiry_ms(now, &credentials));
+    Ok(token)
+}
+
 /// Signs an AWS Bedrock Runtime request with SigV4 using the AWS default credential chain.
 pub fn sign_bedrock_request(
     method: &str,
@@ -346,6 +413,36 @@ async fn sign_bedrock_request_async(
         credentials.secret_access_key(),
         credentials.session_token(),
     )
+}
+
+async fn resolve_aws_credentials(region: &str) -> Result<Credentials, ModelError> {
+    if let (Some(access_key), Some(secret_key)) = (
+        first_env(&["AWS_ACCESS_KEY_ID"]),
+        first_env(&["AWS_SECRET_ACCESS_KEY"]),
+    ) {
+        return Ok(Credentials::new(
+            access_key,
+            secret_key,
+            first_env(&["AWS_SESSION_TOKEN"]),
+            None,
+            "env",
+        ));
+    }
+
+    let config = aws_config::from_env()
+        .region(Region::new(region.to_owned()))
+        .load()
+        .await;
+    let provider = config.credentials_provider().ok_or_else(|| {
+        ModelError::ProviderFailure(
+            "aws credential chain is not available for Amazon Bedrock Mantle".to_owned(),
+        )
+    })?;
+    provider.provide_credentials().await.map_err(|error| {
+        ModelError::ProviderFailure(format!(
+            "failed to resolve AWS credentials for Amazon Bedrock Mantle: {error}"
+        ))
+    })
 }
 
 fn sign_bedrock_request_with_credentials(
@@ -420,6 +517,119 @@ fn sign_bedrock_request_with_credentials(
         result.insert(name.as_str().to_owned(), value.to_owned());
     }
     Ok(result)
+}
+
+fn mint_bedrock_mantle_bearer_token(
+    region: &str,
+    access_key: &str,
+    secret_key: &str,
+    session_token: Option<&str>,
+) -> Result<String, ModelError> {
+    let mut settings = SigningSettings::default();
+    settings.signature_location = SignatureLocation::QueryParams;
+    settings.expires_in = Some(Duration::from_secs(
+        BEDROCK_MANTLE_TOKEN_EXPIRES_SECONDS,
+    ));
+    let mut signing_params_builder = aws_sigv4::SigningParams::builder()
+        .access_key(access_key)
+        .secret_key(secret_key)
+        .region(region)
+        .service_name("bedrock")
+        .time(SystemTime::now())
+        .settings(settings);
+    signing_params_builder.set_security_token(session_token);
+    let signing_params = signing_params_builder.build().map_err(|error| {
+        ModelError::ProviderFailure(format!(
+            "failed to build AWS Bedrock Mantle signing params: {error}"
+        ))
+    })?;
+
+    let mut signed_request = http::Request::builder()
+        .method("POST")
+        .uri(BEDROCK_MANTLE_CONTROL_PLANE_URL)
+        .body(Vec::<u8>::new())
+        .map_err(|error| {
+            ModelError::ProviderFailure(format!(
+                "failed to build AWS Bedrock Mantle request shell: {error}"
+            ))
+        })?;
+
+    let signable_request = SignableRequest::new(
+        signed_request.method(),
+        signed_request.uri(),
+        signed_request.headers(),
+        SignableBody::Bytes(signed_request.body()),
+    );
+
+    let (instructions, _) = sign(signable_request, &signing_params)
+        .map_err(|error| {
+            ModelError::ProviderFailure(format!(
+                "failed to sign AWS Bedrock Mantle bearer-token request: {error}"
+            ))
+        })?
+        .into_parts();
+    instructions.apply_to_request(&mut signed_request);
+
+    let presigned_url = signed_request.uri().to_string();
+    let encoded = STANDARD.encode(
+        presigned_url
+            .strip_prefix("https://")
+            .unwrap_or(&presigned_url)
+            .as_bytes(),
+    );
+    Ok(format!(
+        "{BEDROCK_MANTLE_TOKEN_PREFIX}{encoded}{BEDROCK_MANTLE_TOKEN_SUFFIX}"
+    ))
+}
+
+fn validate_bedrock_mantle_region(region: &str) -> Result<(), ModelError> {
+    let trimmed = region.trim();
+    if BEDROCK_MANTLE_SUPPORTED_REGIONS.contains(&trimmed) {
+        return Ok(());
+    }
+
+    Err(ModelError::ProviderFailure(format!(
+        "amazon-bedrock-mantle is not available in region {trimmed}"
+    )))
+}
+
+fn mantle_cache_expiry_ms(now_ms: u64, credentials: &Credentials) -> u64 {
+    let preferred_expiry_ms = now_ms + BEDROCK_MANTLE_CACHE_TTL_MS;
+    let credential_expiry_ms = credentials
+        .expiry()
+        .and_then(|expiry| expiry.duration_since(SystemTime::UNIX_EPOCH).ok())
+        .map(|duration| duration.as_millis() as u64)
+        .map(|expiry_ms| expiry_ms.saturating_sub(BEDROCK_MANTLE_CACHE_SAFETY_WINDOW_MS));
+
+    credential_expiry_ms
+        .map(|expiry_ms| preferred_expiry_ms.min(expiry_ms))
+        .unwrap_or(preferred_expiry_ms)
+}
+
+fn bedrock_mantle_token_cache() -> &'static Mutex<BTreeMap<String, CachedBedrockMantleToken>> {
+    static CACHE: OnceLock<Mutex<BTreeMap<String, CachedBedrockMantleToken>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+fn load_cached_bedrock_mantle_token(region: &str, now_ms: u64) -> Option<String> {
+    bedrock_mantle_token_cache()
+        .lock()
+        .ok()
+        .and_then(|cache| cache.get(region).cloned())
+        .filter(|entry| entry.expires_at_ms > now_ms)
+        .map(|entry| entry.token)
+}
+
+fn store_cached_bedrock_mantle_token(region: &str, token: String, expires_at_ms: u64) {
+    if let Ok(mut cache) = bedrock_mantle_token_cache().lock() {
+        cache.insert(
+            region.to_owned(),
+            CachedBedrockMantleToken {
+                token,
+                expires_at_ms,
+            },
+        );
+    }
 }
 
 fn first_env(keys: &[&str]) -> Option<String> {

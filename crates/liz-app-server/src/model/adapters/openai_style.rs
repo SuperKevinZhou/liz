@@ -1,8 +1,9 @@
 //! Adapter for OpenAI-style, OpenAI-compatible, Codex, Copilot, and GitLab provider families.
 
 use crate::model::auth::{
-    resolve_copilot_runtime_auth, resolve_openai_codex_runtime_auth,
-    resolve_gitlab_oauth_runtime_auth, OpenAiCodexRuntimeAuthRequest,
+    resolve_bedrock_mantle_runtime_auth, resolve_copilot_runtime_auth,
+    resolve_gitlab_oauth_runtime_auth, resolve_openai_codex_runtime_auth,
+    OpenAiCodexRuntimeAuthRequest,
 };
 use crate::model::config::ResolvedProvider;
 use crate::model::family::ModelProviderFamily;
@@ -466,6 +467,17 @@ fn default_openai_style_headers(
     plan: &ProviderInvocationPlan,
 ) -> Result<std::collections::BTreeMap<String, String>, ModelError> {
     let mut headers = provider.headers.clone();
+    if provider.spec.id == "amazon-bedrock-mantle" {
+        let region = provider
+            .metadata
+            .get("aws.region")
+            .map(String::as_str)
+            .unwrap_or("us-east-1");
+        let token = resolve_bedrock_mantle_runtime_auth(provider.api_key.as_deref(), region)?;
+        headers.insert("Authorization".to_owned(), format!("Bearer {token}"));
+        return Ok(headers);
+    }
+
     if provider.spec.id == "openai-codex" {
         let expires_at_ms = provider
             .metadata

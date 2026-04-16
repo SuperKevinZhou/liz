@@ -21,6 +21,7 @@ fn registry_contains_all_llm_provider_ids_we_expect() {
         "google-vertex-anthropic",
         "anthropic-vertex",
         "amazon-bedrock",
+        "amazon-bedrock-mantle",
         "github-copilot",
         "gitlab",
         "openrouter",
@@ -65,6 +66,13 @@ fn provider_families_match_expected_transport_groups() {
             .expect("bedrock spec")
             .family,
         ModelProviderFamily::AwsBedrockConverse
+    );
+    assert_eq!(
+        registry
+            .provider("amazon-bedrock-mantle")
+            .expect("bedrock mantle spec")
+            .family,
+        ModelProviderFamily::OpenAiCompatible
     );
     assert_eq!(
         registry
@@ -161,6 +169,17 @@ fn special_providers_expose_explicit_auth_strategies() {
             .auth_strategies
             .iter()
             .any(|strategy| strategy.env_keys.contains(&"AWS_PROFILE"))
+    );
+
+    let mantle = registry
+        .provider("amazon-bedrock-mantle")
+        .expect("bedrock mantle spec");
+    assert_eq!(mantle.auth_kind, liz_app_server::model::ProviderAuthKind::AwsCredentialChain);
+    assert!(
+        mantle
+            .auth_strategies
+            .iter()
+            .any(|strategy| strategy.env_keys.contains(&"AWS_BEARER_TOKEN_BEDROCK"))
     );
 
     let copilot = registry
@@ -274,6 +293,30 @@ fn explicit_metadata_override_beats_process_env_for_bedrock_and_vertex() {
 
     std::env::remove_var("AWS_REGION");
     std::env::remove_var("GOOGLE_VERTEX_LOCATION");
+}
+
+#[test]
+fn mantle_env_resolution_derives_region_scoped_endpoint() {
+    let _guard = env_lock().lock().expect("env lock");
+    std::env::set_var("AWS_REGION", "us-west-2");
+
+    let provider = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "amazon-bedrock-mantle".to_owned(),
+        overrides: BTreeMap::new(),
+    })
+    .resolved_primary_provider()
+    .expect("bedrock mantle provider should resolve");
+
+    assert_eq!(
+        provider.base_url.as_deref(),
+        Some("https://bedrock-mantle.us-west-2.api.aws/v1")
+    );
+    assert_eq!(
+        provider.metadata.get("aws.region").map(String::as_str),
+        Some("us-west-2")
+    );
+
+    std::env::remove_var("AWS_REGION");
 }
 
 #[test]
