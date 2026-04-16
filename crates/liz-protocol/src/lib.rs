@@ -11,6 +11,7 @@ pub mod primitives;
 pub mod requests;
 pub mod responses;
 pub mod thread;
+pub mod transport;
 pub mod turn;
 
 pub use approval::{ApprovalDecision, ApprovalRequest, ApprovalStatus};
@@ -56,4 +57,5 @@ pub use responses::{
     ThreadStartResponse, TurnCancelResponse, TurnStartResponse,
 };
 pub use thread::{Thread, ThreadStatus};
+pub use transport::{ClientTransportMessage, ServerTransportMessage};
 pub use turn::{Turn, TurnKind, TurnStatus};

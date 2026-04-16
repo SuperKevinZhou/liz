@@ -15,7 +15,10 @@ use liz_protocol::{
 };
 use std::sync::mpsc::Receiver;
 
-pub use websocket::{spawn_loopback_websocket, LoopbackWebSocketClient, WebSocketTransportError};
+pub use websocket::{
+    spawn_loopback_websocket, spawn_websocket_server, LoopbackWebSocketClient,
+    WebSocketServerHandle, WebSocketTransportError,
+};
 
 /// Minimal server configuration used by the app server.
 #[derive(Debug, Clone, PartialEq, Eq)]

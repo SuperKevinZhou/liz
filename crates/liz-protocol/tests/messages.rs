@@ -2,10 +2,11 @@
 
 use liz_protocol::{
     ApprovalDecision, ApprovalId, ApprovalRequest, ApprovalRespondRequest, ApprovalRespondResponse,
-    ApprovalStatus, ClientRequest, ClientRequestEnvelope, EventId, MemoryCompilationAppliedEvent,
-    MemoryCompilationSummary, RequestId, ResponsePayload, RiskLevel, ServerEvent,
-    ServerEventPayload, ServerResponseEnvelope, SuccessResponseEnvelope, Thread, ThreadId,
-    ThreadStartRequest, ThreadStartResponse, ThreadStartedEvent, ThreadStatus, Timestamp, TurnId,
+    ApprovalStatus, ClientRequest, ClientRequestEnvelope, ClientTransportMessage, EventId,
+    MemoryCompilationAppliedEvent, MemoryCompilationSummary, RequestId, ResponsePayload, RiskLevel,
+    ServerEvent, ServerEventPayload, ServerResponseEnvelope, ServerTransportMessage,
+    SuccessResponseEnvelope, Thread, ThreadId, ThreadStartRequest, ThreadStartResponse,
+    ThreadStartedEvent, ThreadStatus, Timestamp, TurnId,
 };
 
 /// Ensures request envelopes serialize with the expected method names.
@@ -165,4 +166,80 @@ fn protocol_messages_cover_approval_and_memory_shapes() {
     assert_eq!(approval_request_value["method"], "approval/respond");
     assert_eq!(approval_response_value["method"], "approval/respond");
     assert_eq!(memory_event_value["event_type"], "memory_compilation_applied");
+}
+
+/// Ensures websocket transport frames distinguish requests, responses, and events.
+#[test]
+fn transport_messages_round_trip_through_json() {
+    let request = ClientTransportMessage::request(ClientRequestEnvelope {
+        request_id: RequestId::new("req_transport"),
+        request: ClientRequest::ThreadStart(ThreadStartRequest {
+            title: Some("Transport bootstrap".to_owned()),
+            initial_goal: Some("Exercise websocket frames".to_owned()),
+            workspace_ref: None,
+        }),
+    });
+    let response = ServerTransportMessage::response(ServerResponseEnvelope::Success(Box::new(
+        SuccessResponseEnvelope {
+            ok: true,
+            request_id: RequestId::new("req_transport"),
+            response: ResponsePayload::ThreadStart(ThreadStartResponse {
+                thread: Thread {
+                    id: ThreadId::new("thread_transport"),
+                    title: "Transport bootstrap".to_owned(),
+                    status: ThreadStatus::Active,
+                    created_at: Timestamp::new("2026-04-16T18:00:00Z"),
+                    updated_at: Timestamp::new("2026-04-16T18:00:00Z"),
+                    active_goal: Some("Exercise websocket frames".to_owned()),
+                    active_summary: Some("Transport ready".to_owned()),
+                    last_interruption: None,
+                    pending_commitments: Vec::new(),
+                    latest_turn_id: None,
+                    latest_checkpoint_id: None,
+                    parent_thread_id: None,
+                },
+            }),
+        },
+    )));
+    let event = ServerTransportMessage::event(ServerEvent {
+        event_id: EventId::new("event_transport"),
+        thread_id: ThreadId::new("thread_transport"),
+        turn_id: None,
+        created_at: Timestamp::new("2026-04-16T18:00:01Z"),
+        payload: ServerEventPayload::ThreadStarted(ThreadStartedEvent {
+            thread: Thread {
+                id: ThreadId::new("thread_transport"),
+                title: "Transport bootstrap".to_owned(),
+                status: ThreadStatus::Active,
+                created_at: Timestamp::new("2026-04-16T18:00:00Z"),
+                updated_at: Timestamp::new("2026-04-16T18:00:01Z"),
+                active_goal: Some("Exercise websocket frames".to_owned()),
+                active_summary: Some("Transport ready".to_owned()),
+                last_interruption: None,
+                pending_commitments: Vec::new(),
+                latest_turn_id: None,
+                latest_checkpoint_id: None,
+                parent_thread_id: None,
+            },
+        }),
+    });
+
+    let request_value = serde_json::to_value(&request).expect("request frame should serialize");
+    let response_value = serde_json::to_value(&response).expect("response frame should serialize");
+    let event_value = serde_json::to_value(&event).expect("event frame should serialize");
+
+    assert_eq!(request_value["kind"], "request");
+    assert_eq!(response_value["kind"], "response");
+    assert_eq!(event_value["kind"], "event");
+
+    let request_round_trip: ClientTransportMessage =
+        serde_json::from_value(request_value).expect("request frame should deserialize");
+    let response_round_trip: ServerTransportMessage =
+        serde_json::from_value(response_value).expect("response frame should deserialize");
+    let event_round_trip: ServerTransportMessage =
+        serde_json::from_value(event_value).expect("event frame should deserialize");
+
+    assert_eq!(request_round_trip, request);
+    assert_eq!(response_round_trip, response);
+    assert_eq!(event_round_trip, event);
 }
