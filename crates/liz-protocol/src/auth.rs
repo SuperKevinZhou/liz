@@ -48,3 +48,30 @@ pub enum ProviderCredential {
         metadata: BTreeMap<String, String>,
     },
 }
+
+/// Device-code login bootstrap information for GitHub Copilot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitHubCopilotDeviceCode {
+    /// Verification URL the user should open in a browser.
+    pub verification_uri: String,
+    /// One-time user code the user should enter in the browser flow.
+    pub user_code: String,
+    /// Opaque device code used for polling.
+    pub device_code: String,
+    /// Polling interval in seconds suggested by the provider.
+    pub interval_seconds: u32,
+    /// Final Copilot API base URL derived from the chosen deployment.
+    pub api_base_url: String,
+}
+
+/// The polling status returned by GitHub Copilot device-code completion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GitHubCopilotDevicePollStatus {
+    /// Authorization is still pending.
+    Pending,
+    /// The caller should back off and poll more slowly.
+    SlowDown,
+    /// Authorization completed successfully and a profile was stored.
+    Complete,
+}

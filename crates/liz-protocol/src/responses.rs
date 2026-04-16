@@ -1,7 +1,9 @@
 //! Server response envelopes and typed response payloads.
 
 use crate::approval::ApprovalRequest;
-use crate::auth::ProviderAuthProfile;
+use crate::auth::{
+    GitHubCopilotDeviceCode, GitHubCopilotDevicePollStatus, ProviderAuthProfile,
+};
 use crate::checkpoint::{Checkpoint, CheckpointScope};
 use crate::ids::{RequestId, ThreadId};
 use crate::memory::{MemoryCompilationSummary, ResumeSummary};
@@ -57,6 +59,12 @@ pub struct ResponseError {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "method", content = "data")]
 pub enum ResponsePayload {
+    /// Acknowledges `provider_auth/github_copilot_device_start`.
+    #[serde(rename = "provider_auth/github_copilot_device_start")]
+    GitHubCopilotDeviceStart(GitHubCopilotDeviceStartResponse),
+    /// Acknowledges `provider_auth/github_copilot_device_poll`.
+    #[serde(rename = "provider_auth/github_copilot_device_poll")]
+    GitHubCopilotDevicePoll(GitHubCopilotDevicePollResponse),
     /// Acknowledges `provider_auth/list`.
     #[serde(rename = "provider_auth/list")]
     ProviderAuthList(ProviderAuthListResponse),
@@ -90,6 +98,24 @@ pub enum ResponsePayload {
     /// Acknowledges `memory/compile_now`.
     #[serde(rename = "memory/compile_now")]
     MemoryCompileNow(MemoryCompileNowResponse),
+}
+
+/// The response payload for `provider_auth/github_copilot_device_start`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitHubCopilotDeviceStartResponse {
+    /// The device-code bootstrap information.
+    pub device: GitHubCopilotDeviceCode,
+}
+
+/// The response payload for `provider_auth/github_copilot_device_poll`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitHubCopilotDevicePollResponse {
+    /// The current polling status.
+    pub status: GitHubCopilotDevicePollStatus,
+    /// Suggested retry delay in seconds when polling should continue.
+    pub retry_after_seconds: Option<u32>,
+    /// The persisted profile when authorization completed.
+    pub profile: Option<ProviderAuthProfile>,
 }
 
 /// The response payload for `provider_auth/list`.

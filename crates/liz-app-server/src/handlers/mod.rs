@@ -30,6 +30,16 @@ pub fn handle_request(
     let ClientRequestEnvelope { request_id, request } = envelope;
 
     let response = match request {
+        ClientRequest::GitHubCopilotDeviceStart(request) => {
+            runtime.start_github_copilot_device_login(request).map(|response| {
+                (ResponsePayload::GitHubCopilotDeviceStart(response), Vec::new())
+            })
+        }
+        ClientRequest::GitHubCopilotDevicePoll(request) => {
+            runtime.poll_github_copilot_device_login(request).map(|response| {
+                (ResponsePayload::GitHubCopilotDevicePoll(response), Vec::new())
+            })
+        }
         ClientRequest::ProviderAuthList(request) => runtime.list_provider_auth_profiles(request).map(|response| {
             (ResponsePayload::ProviderAuthList(response), Vec::new())
         }),

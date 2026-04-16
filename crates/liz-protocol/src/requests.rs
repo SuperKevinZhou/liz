@@ -32,6 +32,12 @@ pub struct ClientRequestEnvelope {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "method", content = "params")]
 pub enum ClientRequest {
+    /// Starts a GitHub Copilot device-code login flow.
+    #[serde(rename = "provider_auth/github_copilot_device_start")]
+    GitHubCopilotDeviceStart(GitHubCopilotDeviceStartRequest),
+    /// Polls a GitHub Copilot device-code login flow to completion.
+    #[serde(rename = "provider_auth/github_copilot_device_poll")]
+    GitHubCopilotDevicePoll(GitHubCopilotDevicePollRequest),
     /// Lists persisted provider auth profiles.
     #[serde(rename = "provider_auth/list")]
     ProviderAuthList(ProviderAuthListRequest),
@@ -62,6 +68,26 @@ pub enum ClientRequest {
     /// Rolls back a thread to a prior checkpoint.
     #[serde(rename = "thread/rollback")]
     ThreadRollback(ThreadRollbackRequest),
+}
+
+/// Starts a GitHub Copilot device-code login flow.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitHubCopilotDeviceStartRequest {
+    /// Optional GitHub Enterprise URL or domain.
+    pub enterprise_url: Option<String>,
+}
+
+/// Polls a GitHub Copilot device-code login flow.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitHubCopilotDevicePollRequest {
+    /// The device code obtained from `provider_auth/github_copilot_device_start`.
+    pub device_code: String,
+    /// Optional GitHub Enterprise URL or domain.
+    pub enterprise_url: Option<String>,
+    /// Optional polling interval hint returned from the device-code start call.
+    pub interval_seconds: Option<u32>,
+    /// Optional profile id to persist when authorization completes.
+    pub profile_id: Option<String>,
 }
 
 /// Lists provider auth profiles, optionally scoped to one provider.

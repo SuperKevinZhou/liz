@@ -20,6 +20,7 @@ use yup_oauth2::{
 };
 
 const GOOGLE_CLOUD_PLATFORM_SCOPE: &str = "https://www.googleapis.com/auth/cloud-platform";
+const GITHUB_COPILOT_DEVICE_CLIENT_ID: &str = "Ov23li8tweQw6odWQebz";
 const OPENAI_CODEX_OAUTH_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const OPENAI_CODEX_OAUTH_ISSUER: &str = "https://auth.openai.com";
 const OPENAI_CODEX_OAUTH_REQUIRED_SCOPES: &[&str] = &[
@@ -44,6 +45,43 @@ pub struct CopilotRuntimeAuth {
     pub token: String,
     /// Final Copilot runtime base URL.
     pub base_url: String,
+}
+
+/// Device-code bootstrap information for GitHub Copilot login.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitHubCopilotDeviceCodeAuth {
+    /// Verification URL the user should open in a browser.
+    pub verification_uri: String,
+    /// One-time user code shown to the user.
+    pub user_code: String,
+    /// Opaque device code used for polling.
+    pub device_code: String,
+    /// Suggested polling interval in seconds.
+    pub interval_seconds: u32,
+    /// Final Copilot API base URL for the selected deployment.
+    pub api_base_url: String,
+}
+
+/// Current poll result when completing a GitHub Copilot device-code login flow.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GitHubCopilotDevicePollOutcome {
+    /// Authorization is still pending.
+    Pending {
+        /// Suggested retry delay in seconds.
+        retry_after_seconds: u32,
+    },
+    /// The caller should back off and poll more slowly.
+    SlowDown {
+        /// Suggested retry delay in seconds.
+        retry_after_seconds: u32,
+    },
+    /// Authorization completed successfully and yielded a GitHub token.
+    Complete {
+        /// The resulting GitHub token from the completed device flow.
+        github_token: String,
+        /// The Copilot API base URL associated with the selected deployment.
+        api_base_url: String,
+    },
 }
 
 /// Runtime OpenAI Codex OAuth credentials used for native Codex requests.
@@ -436,6 +474,167 @@ fn derive_copilot_api_base_url_from_token(token: &str) -> Option<String> {
     let host = url.host_str()?.replace("proxy.", "api.");
     url.set_host(Some(&host)).ok()?;
     Some(url.origin().ascii_serialization())
+}
+
+fn normalize_github_copilot_domain(enterprise_url: Option<&str>) -> String {
+    let Some(value) = enterprise_url.map(str::trim).filter(|value| !value.is_empty()) else {
+        return "github.com".to_owned();
+    };
+
+    let candidate = if value.contains("://") {
+        value.to_owned()
+    } else {
+        format!("https://{value}")
+    };
+    reqwest::Url::parse(&candidate)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_owned))
+        .unwrap_or_else(|| "github.com".to_owned())
+}
+
+fn copilot_api_base_url_for_domain(enterprise_url: Option<&str>) -> String {
+    let Some(raw) = enterprise_url.map(str::trim).filter(|value| !value.is_empty()) else {
+        return "https://api.githubcopilot.com".to_owned();
+    };
+    format!("https://copilot-api.{}", normalize_github_copilot_domain(Some(raw)))
+}
+
+fn post_json_body<T: for<'de> Deserialize<'de>>(
+    url: &str,
+    body: &serde_json::Value,
+    headers: &BTreeMap<String, String>,
+) -> Result<T, ModelError> {
+    let client = reqwest::blocking::Client::builder()
+        .build()
+        .map_err(|error| {
+            ModelError::ProviderFailure(format!("failed to build HTTP client: {error}"))
+        })?;
+    let response = client
+        .post(url)
+        .headers(crate::model::http::build_headers(headers)?)
+        .json(body)
+        .send()
+        .map_err(|error| {
+            ModelError::ProviderFailure(format!("provider request failed: {error}"))
+        })?;
+
+    let status = response.status();
+    let payload = response.text().map_err(|error| {
+        ModelError::ProviderFailure(format!("failed to read response body: {error}"))
+    })?;
+    if !status.is_success() {
+        return Err(ModelError::ProviderFailure(format!(
+            "provider request returned {status}: {payload}"
+        )));
+    }
+
+    serde_json::from_str(&payload).map_err(|error| {
+        ModelError::ProviderFailure(format!("failed to parse JSON response: {error}"))
+    })
+}
+
+/// Starts a GitHub Copilot device-code login flow.
+pub fn start_github_copilot_device_authorization(
+    enterprise_url: Option<&str>,
+    device_code_url_override: Option<&str>,
+) -> Result<GitHubCopilotDeviceCodeAuth, ModelError> {
+    let domain = normalize_github_copilot_domain(enterprise_url);
+    let device_code_url = device_code_url_override
+        .map(str::to_owned)
+        .or_else(|| first_env(&["LIZ_GITHUB_COPILOT_DEVICE_CODE_URL"]))
+        .unwrap_or_else(|| format!("https://{domain}/login/device/code"));
+    let response: GitHubCopilotDeviceCodeResponse = post_json_body(
+        &device_code_url,
+        &serde_json::json!({
+            "client_id": GITHUB_COPILOT_DEVICE_CLIENT_ID,
+            "scope": "read:user",
+        }),
+        &std::collections::BTreeMap::from([
+            ("Accept".to_owned(), "application/json".to_owned()),
+            ("Content-Type".to_owned(), "application/json".to_owned()),
+            ("User-Agent".to_owned(), "liz-app-server".to_owned()),
+        ]),
+    )?;
+
+    Ok(GitHubCopilotDeviceCodeAuth {
+        verification_uri: response.verification_uri,
+        user_code: response.user_code,
+        device_code: response.device_code,
+        interval_seconds: response.interval.max(1),
+        api_base_url: copilot_api_base_url_for_domain(enterprise_url),
+    })
+}
+
+/// Polls a GitHub Copilot device-code login flow until a GitHub token is available.
+pub fn poll_github_copilot_device_authorization(
+    device_code: &str,
+    enterprise_url: Option<&str>,
+    interval_seconds: Option<u32>,
+    access_token_url_override: Option<&str>,
+) -> Result<GitHubCopilotDevicePollOutcome, ModelError> {
+    let domain = normalize_github_copilot_domain(enterprise_url);
+    let access_token_url = access_token_url_override
+        .map(str::to_owned)
+        .or_else(|| first_env(&["LIZ_GITHUB_COPILOT_ACCESS_TOKEN_URL"]))
+        .unwrap_or_else(|| format!("https://{domain}/login/oauth/access_token"));
+    let headers = std::collections::BTreeMap::from([
+        ("Accept".to_owned(), "application/json".to_owned()),
+        ("Content-Type".to_owned(), "application/json".to_owned()),
+        ("User-Agent".to_owned(), "liz-app-server".to_owned()),
+    ]);
+    let response: GitHubCopilotDevicePollResponseBody = post_json_body(
+        &access_token_url,
+        &serde_json::json!({
+            "client_id": GITHUB_COPILOT_DEVICE_CLIENT_ID,
+            "device_code": device_code,
+            "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+        }),
+        &headers,
+    )?;
+
+    if let Some(access_token) = response.access_token {
+        return Ok(GitHubCopilotDevicePollOutcome::Complete {
+            github_token: access_token,
+            api_base_url: copilot_api_base_url_for_domain(enterprise_url),
+        });
+    }
+
+    let retry_after_seconds = response
+        .interval
+        .or(interval_seconds)
+        .unwrap_or(5)
+        .saturating_add(3);
+    match response.error.as_deref() {
+        Some("slow_down") => Ok(GitHubCopilotDevicePollOutcome::SlowDown {
+            retry_after_seconds,
+        }),
+        Some("authorization_pending") | Some("expired_token") | Some("incorrect_device_code") => {
+            Ok(GitHubCopilotDevicePollOutcome::Pending {
+                retry_after_seconds,
+            })
+        }
+        Some(error) => Err(ModelError::ProviderFailure(format!(
+            "github copilot device-code login failed: {error}"
+        ))),
+        None => Err(ModelError::ProviderFailure(
+            "github copilot device-code login returned neither access token nor error".to_owned(),
+        )),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubCopilotDeviceCodeResponse {
+    verification_uri: String,
+    user_code: String,
+    device_code: String,
+    interval: u32,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubCopilotDevicePollResponseBody {
+    access_token: Option<String>,
+    error: Option<String>,
+    interval: Option<u32>,
 }
 
 /// Normalizes an OpenAI Codex authorize URL so the required OAuth scopes are always present.

@@ -7,20 +7,27 @@ use crate::runtime::policy_engine::{PolicyDecision, PolicyEngine};
 use crate::runtime::stores::RuntimeStores;
 use crate::runtime::thread_manager::ThreadManager;
 use crate::runtime::turn_manager::TurnManager;
+use crate::model::{
+    poll_github_copilot_device_authorization, start_github_copilot_device_authorization,
+    GitHubCopilotDevicePollOutcome,
+};
 use liz_protocol::memory::ResumeSummary;
 use liz_protocol::requests::{
-    ApprovalRespondRequest, ProviderAuthDeleteRequest, ProviderAuthListRequest,
-    ProviderAuthUpsertRequest, ThreadForkRequest, ThreadResumeRequest, ThreadStartRequest,
-    TurnCancelRequest, TurnStartRequest,
+    ApprovalRespondRequest, GitHubCopilotDevicePollRequest, GitHubCopilotDeviceStartRequest,
+    ProviderAuthDeleteRequest, ProviderAuthListRequest, ProviderAuthUpsertRequest,
+    ThreadForkRequest, ThreadResumeRequest, ThreadStartRequest, TurnCancelRequest,
+    TurnStartRequest,
 };
 use liz_protocol::responses::{
-    ApprovalRespondResponse, ProviderAuthDeleteResponse, ProviderAuthListResponse,
+    ApprovalRespondResponse, GitHubCopilotDevicePollResponse,
+    GitHubCopilotDeviceStartResponse, ProviderAuthDeleteResponse, ProviderAuthListResponse,
     ProviderAuthUpsertResponse, ThreadForkResponse, ThreadResumeResponse, ThreadStartResponse,
     TurnCancelResponse, TurnStartResponse,
 };
 use liz_protocol::{
     ApprovalDecision, ApprovalRequest, ApprovalStatus, Checkpoint, CheckpointScope,
-    ProviderAuthProfile, Thread, ThreadId, Turn,
+    GitHubCopilotDeviceCode, GitHubCopilotDevicePollStatus, ProviderAuthProfile,
+    ProviderCredential, Thread, ThreadId, Turn,
 };
 use std::collections::HashMap;
 
@@ -129,6 +136,87 @@ impl RuntimeCoordinator {
         Ok(ProviderAuthDeleteResponse {
             profile_id: request.profile_id,
         })
+    }
+
+    /// Starts a GitHub Copilot device-code login flow.
+    pub fn start_github_copilot_device_login(
+        &self,
+        request: GitHubCopilotDeviceStartRequest,
+    ) -> RuntimeResult<GitHubCopilotDeviceStartResponse> {
+        let device = start_github_copilot_device_authorization(
+            request.enterprise_url.as_deref(),
+            None,
+        )
+        .map_err(|error| RuntimeError::invalid_state("github_copilot_device_start_failed", error.to_string()))?;
+
+        Ok(GitHubCopilotDeviceStartResponse {
+            device: GitHubCopilotDeviceCode {
+                verification_uri: device.verification_uri,
+                user_code: device.user_code,
+                device_code: device.device_code,
+                interval_seconds: device.interval_seconds,
+                api_base_url: device.api_base_url,
+            },
+        })
+    }
+
+    /// Polls a GitHub Copilot device-code login flow and persists the resulting auth profile.
+    pub fn poll_github_copilot_device_login(
+        &mut self,
+        request: GitHubCopilotDevicePollRequest,
+    ) -> RuntimeResult<GitHubCopilotDevicePollResponse> {
+        let poll = poll_github_copilot_device_authorization(
+            &request.device_code,
+            request.enterprise_url.as_deref(),
+            request.interval_seconds,
+            None,
+        )
+        .map_err(|error| RuntimeError::invalid_state("github_copilot_device_poll_failed", error.to_string()))?;
+
+        match poll {
+            GitHubCopilotDevicePollOutcome::Pending { retry_after_seconds } => {
+                Ok(GitHubCopilotDevicePollResponse {
+                    status: GitHubCopilotDevicePollStatus::Pending,
+                    retry_after_seconds: Some(retry_after_seconds),
+                    profile: None,
+                })
+            }
+            GitHubCopilotDevicePollOutcome::SlowDown { retry_after_seconds } => {
+                Ok(GitHubCopilotDevicePollResponse {
+                    status: GitHubCopilotDevicePollStatus::SlowDown,
+                    retry_after_seconds: Some(retry_after_seconds),
+                    profile: None,
+                })
+            }
+            GitHubCopilotDevicePollOutcome::Complete {
+                github_token,
+                api_base_url,
+            } => {
+                let profile = ProviderAuthProfile {
+                    profile_id: request
+                        .profile_id
+                        .unwrap_or_else(|| "github-copilot:default".to_owned()),
+                    provider_id: "github-copilot".to_owned(),
+                    display_name: Some("GitHub Copilot".to_owned()),
+                    credential: ProviderCredential::Token {
+                        token: github_token,
+                        expires_at_ms: None,
+                        metadata: std::collections::BTreeMap::from([(
+                            "copilot.api_base_url".to_owned(),
+                            api_base_url,
+                        )]),
+                    },
+                };
+                let response = self.upsert_provider_auth_profile(ProviderAuthUpsertRequest {
+                    profile: profile.clone(),
+                })?;
+                Ok(GitHubCopilotDevicePollResponse {
+                    status: GitHubCopilotDevicePollStatus::Complete,
+                    retry_after_seconds: None,
+                    profile: Some(response.profile),
+                })
+            }
+        }
     }
 
     /// Resumes a thread and returns the current wake-up projection.

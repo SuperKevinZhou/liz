@@ -14,7 +14,10 @@ pub mod thread;
 pub mod turn;
 
 pub use approval::{ApprovalDecision, ApprovalRequest, ApprovalStatus};
-pub use auth::{ProviderAuthProfile, ProviderCredential};
+pub use auth::{
+    GitHubCopilotDeviceCode, GitHubCopilotDevicePollStatus, ProviderAuthProfile,
+    ProviderCredential,
+};
 pub use artifact::{ArtifactKind, ArtifactRef};
 pub use checkpoint::{Checkpoint, CheckpointScope};
 pub use events::{
@@ -34,16 +37,17 @@ pub use ids::{
 pub use memory::{MemoryCompilationSummary, MemoryWakeup, ResumeSummary};
 pub use primitives::{ProtocolVersion, RiskLevel, Timestamp};
 pub use requests::{
-    ApprovalRespondRequest, ClientRequest, ClientRequestEnvelope, ProviderAuthDeleteRequest,
-    ProviderAuthListRequest, ProviderAuthUpsertRequest, ThreadForkRequest, ThreadResumeRequest,
-    ThreadRollbackRequest, ThreadStartRequest, TurnCancelRequest, TurnInputKind, TurnStartRequest,
+    ApprovalRespondRequest, ClientRequest, ClientRequestEnvelope, GitHubCopilotDevicePollRequest,
+    GitHubCopilotDeviceStartRequest, ProviderAuthDeleteRequest, ProviderAuthListRequest,
+    ProviderAuthUpsertRequest, ThreadForkRequest, ThreadResumeRequest, ThreadRollbackRequest,
+    ThreadStartRequest, TurnCancelRequest, TurnInputKind, TurnStartRequest,
 };
 pub use responses::{
-    ApprovalRespondResponse, ErrorResponseEnvelope, MemoryCompileNowResponse,
-    ProviderAuthDeleteResponse, ProviderAuthListResponse, ProviderAuthUpsertResponse,
-    ResponseError, ResponsePayload, ServerResponseEnvelope, SuccessResponseEnvelope,
-    ThreadForkResponse, ThreadResumeResponse, ThreadRollbackResponse, ThreadStartResponse,
-    TurnCancelResponse, TurnStartResponse,
+    ApprovalRespondResponse, ErrorResponseEnvelope, GitHubCopilotDevicePollResponse,
+    GitHubCopilotDeviceStartResponse, MemoryCompileNowResponse, ProviderAuthDeleteResponse,
+    ProviderAuthListResponse, ProviderAuthUpsertResponse, ResponseError, ResponsePayload,
+    ServerResponseEnvelope, SuccessResponseEnvelope, ThreadForkResponse, ThreadResumeResponse,
+    ThreadRollbackResponse, ThreadStartResponse, TurnCancelResponse, TurnStartResponse,
 };
 pub use thread::{Thread, ThreadStatus};
 pub use turn::{Turn, TurnKind, TurnStatus};
