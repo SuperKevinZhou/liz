@@ -9,25 +9,28 @@ use crate::runtime::thread_manager::ThreadManager;
 use crate::runtime::turn_manager::TurnManager;
 use crate::model::{
     poll_github_copilot_device_authorization, start_github_copilot_device_authorization,
+    start_gitlab_oauth_authorization, exchange_gitlab_oauth_code,
     GitHubCopilotDevicePollOutcome,
 };
 use liz_protocol::memory::ResumeSummary;
 use liz_protocol::requests::{
     ApprovalRespondRequest, GitHubCopilotDevicePollRequest, GitHubCopilotDeviceStartRequest,
+    GitLabOAuthCompleteRequest, GitLabOAuthStartRequest, GitLabPatSaveRequest,
     ProviderAuthDeleteRequest, ProviderAuthListRequest, ProviderAuthUpsertRequest,
     ThreadForkRequest, ThreadResumeRequest, ThreadStartRequest, TurnCancelRequest,
     TurnStartRequest,
 };
 use liz_protocol::responses::{
     ApprovalRespondResponse, GitHubCopilotDevicePollResponse,
-    GitHubCopilotDeviceStartResponse, ProviderAuthDeleteResponse, ProviderAuthListResponse,
+    GitHubCopilotDeviceStartResponse, GitLabOAuthCompleteResponse, GitLabOAuthStartResponse,
+    GitLabPatSaveResponse, ProviderAuthDeleteResponse, ProviderAuthListResponse,
     ProviderAuthUpsertResponse, ThreadForkResponse, ThreadResumeResponse, ThreadStartResponse,
     TurnCancelResponse, TurnStartResponse,
 };
 use liz_protocol::{
     ApprovalDecision, ApprovalRequest, ApprovalStatus, Checkpoint, CheckpointScope,
-    GitHubCopilotDeviceCode, GitHubCopilotDevicePollStatus, ProviderAuthProfile,
-    ProviderCredential, Thread, ThreadId, Turn,
+    GitHubCopilotDeviceCode, GitHubCopilotDevicePollStatus, GitLabOAuthStart,
+    ProviderAuthProfile, ProviderCredential, Thread, ThreadId, Turn,
 };
 use std::collections::HashMap;
 
@@ -217,6 +220,114 @@ impl RuntimeCoordinator {
                 })
             }
         }
+    }
+
+    /// Starts a GitLab OAuth login flow.
+    pub fn start_gitlab_oauth_login(
+        &self,
+        request: GitLabOAuthStartRequest,
+    ) -> RuntimeResult<GitLabOAuthStartResponse> {
+        let oauth = start_gitlab_oauth_authorization(
+            &request.instance_url,
+            &request.client_id,
+            &request.redirect_uri,
+            &request.scopes,
+        )
+        .map_err(|error| RuntimeError::invalid_state("gitlab_oauth_start_failed", error.to_string()))?;
+
+        Ok(GitLabOAuthStartResponse {
+            oauth: GitLabOAuthStart {
+                authorize_url: oauth.authorize_url,
+                state: oauth.state,
+                code_verifier: oauth.code_verifier,
+            },
+        })
+    }
+
+    /// Completes a GitLab OAuth login flow and persists the resulting profile.
+    pub fn complete_gitlab_oauth_login(
+        &mut self,
+        request: GitLabOAuthCompleteRequest,
+    ) -> RuntimeResult<GitLabOAuthCompleteResponse> {
+        let token_url_override = std::env::var("LIZ_GITLAB_OAUTH_TOKEN_URL").ok();
+        let oauth = exchange_gitlab_oauth_code(
+            &request.instance_url,
+            &request.client_id,
+            request.client_secret.as_deref(),
+            &request.redirect_uri,
+            &request.code,
+            request.code_verifier.as_deref(),
+            token_url_override.as_deref(),
+        )
+        .map_err(|error| RuntimeError::invalid_state("gitlab_oauth_complete_failed", error.to_string()))?;
+
+        let profile = ProviderAuthProfile {
+            profile_id: request
+                .profile_id
+                .unwrap_or_else(|| "gitlab:default".to_owned()),
+            provider_id: "gitlab".to_owned(),
+            display_name: Some("GitLab OAuth".to_owned()),
+            credential: ProviderCredential::Token {
+                token: oauth.access_token,
+                expires_at_ms: oauth.expires_at_ms,
+                metadata: std::collections::BTreeMap::from_iter(
+                    [
+                        Some(("gitlab.auth_mode".to_owned(), "oauth".to_owned())),
+                        Some(("gitlab.instance_url".to_owned(), request.instance_url.clone())),
+                        Some(("gitlab.oauth_client_id".to_owned(), request.client_id.clone())),
+                        request
+                            .client_secret
+                            .clone()
+                            .map(|value| ("gitlab.oauth_client_secret".to_owned(), value)),
+                        oauth
+                            .refresh_token
+                            .clone()
+                            .map(|value| ("gitlab.oauth.refresh_token".to_owned(), value)),
+                        oauth.expires_at_ms.map(|value| {
+                            ("gitlab.oauth.expires_at_ms".to_owned(), value.to_string())
+                        }),
+                    ]
+                    .into_iter()
+                    .flatten(),
+                ),
+            },
+        };
+        let response = self.upsert_provider_auth_profile(ProviderAuthUpsertRequest {
+            profile,
+        })?;
+        Ok(GitLabOAuthCompleteResponse {
+            profile: response.profile,
+        })
+    }
+
+    /// Saves a GitLab personal access token as a provider auth profile.
+    pub fn save_gitlab_pat(
+        &mut self,
+        request: GitLabPatSaveRequest,
+    ) -> RuntimeResult<GitLabPatSaveResponse> {
+        let mut metadata = std::collections::BTreeMap::new();
+        metadata.insert("gitlab.auth_mode".to_owned(), "pat".to_owned());
+        if let Some(instance_url) = request.instance_url.clone() {
+            metadata.insert("gitlab.instance_url".to_owned(), instance_url);
+        }
+        let profile = ProviderAuthProfile {
+            profile_id: request
+                .profile_id
+                .unwrap_or_else(|| "gitlab:default".to_owned()),
+            provider_id: "gitlab".to_owned(),
+            display_name: request.display_name.or(Some("GitLab PAT".to_owned())),
+            credential: ProviderCredential::Token {
+                token: request.token,
+                expires_at_ms: None,
+                metadata,
+            },
+        };
+        let response = self.upsert_provider_auth_profile(ProviderAuthUpsertRequest {
+            profile,
+        })?;
+        Ok(GitLabPatSaveResponse {
+            profile: response.profile,
+        })
     }
 
     /// Resumes a thread and returns the current wake-up projection.

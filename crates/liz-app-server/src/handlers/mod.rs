@@ -30,6 +30,21 @@ pub fn handle_request(
     let ClientRequestEnvelope { request_id, request } = envelope;
 
     let response = match request {
+        ClientRequest::GitLabOAuthStart(request) => {
+            runtime.start_gitlab_oauth_login(request).map(|response| {
+                (ResponsePayload::GitLabOAuthStart(response), Vec::new())
+            })
+        }
+        ClientRequest::GitLabOAuthComplete(request) => {
+            runtime.complete_gitlab_oauth_login(request).map(|response| {
+                (ResponsePayload::GitLabOAuthComplete(response), Vec::new())
+            })
+        }
+        ClientRequest::GitLabPatSave(request) => {
+            runtime.save_gitlab_pat(request).map(|response| {
+                (ResponsePayload::GitLabPatSave(response), Vec::new())
+            })
+        }
         ClientRequest::GitHubCopilotDeviceStart(request) => {
             runtime.start_github_copilot_device_login(request).map(|response| {
                 (ResponsePayload::GitHubCopilotDeviceStart(response), Vec::new())

@@ -75,3 +75,14 @@ pub enum GitHubCopilotDevicePollStatus {
     /// Authorization completed successfully and a profile was stored.
     Complete,
 }
+
+/// OAuth bootstrap data for a GitLab authorization flow.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitLabOAuthStart {
+    /// Final authorize URL the client should open.
+    pub authorize_url: String,
+    /// CSRF state value that must round-trip through the callback.
+    pub state: String,
+    /// PKCE verifier that should be retained until code exchange.
+    pub code_verifier: String,
+}

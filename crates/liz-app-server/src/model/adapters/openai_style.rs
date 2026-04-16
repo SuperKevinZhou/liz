@@ -2,7 +2,7 @@
 
 use crate::model::auth::{
     resolve_copilot_runtime_auth, resolve_openai_codex_runtime_auth,
-    OpenAiCodexRuntimeAuthRequest,
+    resolve_gitlab_oauth_runtime_auth, OpenAiCodexRuntimeAuthRequest,
 };
 use crate::model::config::ResolvedProvider;
 use crate::model::family::ModelProviderFamily;
@@ -265,13 +265,50 @@ fn execute_live_http(
                             .to_owned(),
                     )
                 })?;
-                let api_key = provider.api_key.as_ref().ok_or_else(|| {
+                let mut api_key = provider.api_key.clone().ok_or_else(|| {
                     ModelError::ProviderFailure(
                         "gitlab provider requires a token for live mode".to_owned(),
                     )
                 })?;
+                if provider
+                    .metadata
+                    .get("gitlab.auth_mode")
+                    .map(String::as_str)
+                    == Some("oauth")
+                {
+                    let expires_at_ms = provider
+                        .metadata
+                        .get("gitlab.oauth.expires_at_ms")
+                        .and_then(|value| value.parse::<u64>().ok());
+                    let runtime = resolve_gitlab_oauth_runtime_auth(
+                        provider.api_key.as_deref(),
+                        provider
+                            .metadata
+                            .get("gitlab.oauth.refresh_token")
+                            .map(String::as_str),
+                        expires_at_ms,
+                        provider
+                            .metadata
+                            .get("gitlab.instance_url")
+                            .map(String::as_str)
+                            .unwrap_or(base_url),
+                        provider
+                            .metadata
+                            .get("gitlab.oauth_client_id")
+                            .map(String::as_str),
+                        provider
+                            .metadata
+                            .get("gitlab.oauth_client_secret")
+                            .map(String::as_str),
+                        provider
+                            .metadata
+                            .get("gitlab.oauth_token_url")
+                            .map(String::as_str),
+                    )?;
+                    api_key = runtime.access_token;
+                }
                 let mut headers = provider.headers.clone();
-                if gitlab_uses_private_token(api_key, provider) {
+                if gitlab_uses_private_token(&api_key, provider) {
                     headers
                         .entry("PRIVATE-TOKEN".to_owned())
                         .or_insert_with(|| api_key.clone());

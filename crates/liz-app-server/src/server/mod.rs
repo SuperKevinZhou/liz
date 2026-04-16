@@ -354,6 +354,20 @@ fn provider_override_from_auth_profile(profile: &ProviderAuthProfile) -> Provide
                                 .insert("openai_codex.email".to_owned(), email.clone());
                         }
                     }
+                    "gitlab" => {
+                        override_config
+                            .metadata
+                            .insert("gitlab.auth_mode".to_owned(), "oauth".to_owned());
+                        override_config
+                            .metadata
+                            .insert("gitlab.oauth.refresh_token".to_owned(), refresh_token.clone());
+                        if let Some(expires_at_ms) = expires_at_ms {
+                            override_config.metadata.insert(
+                                "gitlab.oauth.expires_at_ms".to_owned(),
+                                expires_at_ms.to_string(),
+                            );
+                        }
+                    }
                     _ => {
                         override_config
                             .metadata

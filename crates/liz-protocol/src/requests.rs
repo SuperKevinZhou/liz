@@ -32,6 +32,15 @@ pub struct ClientRequestEnvelope {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "method", content = "params")]
 pub enum ClientRequest {
+    /// Starts a GitLab OAuth login flow.
+    #[serde(rename = "provider_auth/gitlab_oauth_start")]
+    GitLabOAuthStart(GitLabOAuthStartRequest),
+    /// Completes a GitLab OAuth login flow and persists a profile.
+    #[serde(rename = "provider_auth/gitlab_oauth_complete")]
+    GitLabOAuthComplete(GitLabOAuthCompleteRequest),
+    /// Saves a GitLab personal access token as a provider auth profile.
+    #[serde(rename = "provider_auth/gitlab_pat_save")]
+    GitLabPatSave(GitLabPatSaveRequest),
     /// Starts a GitHub Copilot device-code login flow.
     #[serde(rename = "provider_auth/github_copilot_device_start")]
     GitHubCopilotDeviceStart(GitHubCopilotDeviceStartRequest),
@@ -68,6 +77,51 @@ pub enum ClientRequest {
     /// Rolls back a thread to a prior checkpoint.
     #[serde(rename = "thread/rollback")]
     ThreadRollback(ThreadRollbackRequest),
+}
+
+/// Starts a GitLab OAuth login flow.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitLabOAuthStartRequest {
+    /// GitLab instance URL, for example `https://gitlab.com`.
+    pub instance_url: String,
+    /// OAuth application client id.
+    pub client_id: String,
+    /// Redirect URI registered with the OAuth application.
+    pub redirect_uri: String,
+    /// Requested OAuth scopes.
+    pub scopes: Vec<String>,
+}
+
+/// Completes a GitLab OAuth login flow.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitLabOAuthCompleteRequest {
+    /// GitLab instance URL, for example `https://gitlab.com`.
+    pub instance_url: String,
+    /// OAuth application client id.
+    pub client_id: String,
+    /// Optional OAuth application client secret.
+    pub client_secret: Option<String>,
+    /// Redirect URI registered with the OAuth application.
+    pub redirect_uri: String,
+    /// Authorization code returned from GitLab.
+    pub code: String,
+    /// Optional PKCE verifier used during authorize URL generation.
+    pub code_verifier: Option<String>,
+    /// Optional profile id to persist on success.
+    pub profile_id: Option<String>,
+}
+
+/// Saves a GitLab personal access token as a provider auth profile.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitLabPatSaveRequest {
+    /// Optional GitLab instance URL, for example `https://gitlab.com`.
+    pub instance_url: Option<String>,
+    /// The personal access token to persist.
+    pub token: String,
+    /// Optional profile id to persist.
+    pub profile_id: Option<String>,
+    /// Optional display label for the stored profile.
+    pub display_name: Option<String>,
 }
 
 /// Starts a GitHub Copilot device-code login flow.

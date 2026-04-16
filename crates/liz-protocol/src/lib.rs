@@ -15,8 +15,8 @@ pub mod turn;
 
 pub use approval::{ApprovalDecision, ApprovalRequest, ApprovalStatus};
 pub use auth::{
-    GitHubCopilotDeviceCode, GitHubCopilotDevicePollStatus, ProviderAuthProfile,
-    ProviderCredential,
+    GitHubCopilotDeviceCode, GitHubCopilotDevicePollStatus, GitLabOAuthStart,
+    ProviderAuthProfile, ProviderCredential,
 };
 pub use artifact::{ArtifactKind, ArtifactRef};
 pub use checkpoint::{Checkpoint, CheckpointScope};
@@ -38,13 +38,15 @@ pub use memory::{MemoryCompilationSummary, MemoryWakeup, ResumeSummary};
 pub use primitives::{ProtocolVersion, RiskLevel, Timestamp};
 pub use requests::{
     ApprovalRespondRequest, ClientRequest, ClientRequestEnvelope, GitHubCopilotDevicePollRequest,
-    GitHubCopilotDeviceStartRequest, ProviderAuthDeleteRequest, ProviderAuthListRequest,
+    GitHubCopilotDeviceStartRequest, GitLabOAuthCompleteRequest, GitLabOAuthStartRequest,
+    GitLabPatSaveRequest, ProviderAuthDeleteRequest, ProviderAuthListRequest,
     ProviderAuthUpsertRequest, ThreadForkRequest, ThreadResumeRequest, ThreadRollbackRequest,
     ThreadStartRequest, TurnCancelRequest, TurnInputKind, TurnStartRequest,
 };
 pub use responses::{
     ApprovalRespondResponse, ErrorResponseEnvelope, GitHubCopilotDevicePollResponse,
-    GitHubCopilotDeviceStartResponse, MemoryCompileNowResponse, ProviderAuthDeleteResponse,
+    GitHubCopilotDeviceStartResponse, GitLabOAuthCompleteResponse, GitLabOAuthStartResponse,
+    GitLabPatSaveResponse, MemoryCompileNowResponse, ProviderAuthDeleteResponse,
     ProviderAuthListResponse, ProviderAuthUpsertResponse, ResponseError, ResponsePayload,
     ServerResponseEnvelope, SuccessResponseEnvelope, ThreadForkResponse, ThreadResumeResponse,
     ThreadRollbackResponse, ThreadStartResponse, TurnCancelResponse, TurnStartResponse,

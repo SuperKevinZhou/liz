@@ -6,7 +6,9 @@ use aws_sigv4::http_request::{sign, SignableBody, SignableRequest, SigningSettin
 use aws_types::region::Region;
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
+use rand::RngCore;
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::env;
 use std::path::PathBuf;
@@ -82,6 +84,28 @@ pub enum GitHubCopilotDevicePollOutcome {
         /// The Copilot API base URL associated with the selected deployment.
         api_base_url: String,
     },
+}
+
+/// OAuth bootstrap data used to authorize against GitLab.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitLabOAuthStartAuth {
+    /// Final authorize URL the caller should open.
+    pub authorize_url: String,
+    /// CSRF state value that must round-trip through the callback.
+    pub state: String,
+    /// PKCE verifier that should be retained until code exchange.
+    pub code_verifier: String,
+}
+
+/// Runtime GitLab OAuth credential used for agentic chat requests.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitLabOAuthRuntimeAuth {
+    /// Current access token.
+    pub access_token: String,
+    /// Optional refresh token.
+    pub refresh_token: Option<String>,
+    /// Expiry timestamp in milliseconds since epoch.
+    pub expires_at_ms: Option<u64>,
 }
 
 /// Runtime OpenAI Codex OAuth credentials used for native Codex requests.
@@ -622,6 +646,142 @@ pub fn poll_github_copilot_device_authorization(
     }
 }
 
+/// Starts a GitLab OAuth authorization flow using the standard authorize endpoint and PKCE.
+pub fn start_gitlab_oauth_authorization(
+    instance_url: &str,
+    client_id: &str,
+    redirect_uri: &str,
+    scopes: &[String],
+) -> Result<GitLabOAuthStartAuth, ModelError> {
+    let state = generate_oauth_random_string(32);
+    let code_verifier = generate_oauth_random_string(43);
+    let code_challenge = pkce_code_challenge(&code_verifier);
+
+    let mut url = reqwest::Url::parse(&format!(
+        "{}/oauth/authorize",
+        instance_url.trim_end_matches('/')
+    ))
+    .map_err(|error| {
+        ModelError::ProviderFailure(format!("failed to build GitLab authorize URL: {error}"))
+    })?;
+    url.query_pairs_mut()
+        .append_pair("response_type", "code")
+        .append_pair("client_id", client_id)
+        .append_pair("redirect_uri", redirect_uri)
+        .append_pair("state", &state)
+        .append_pair("code_challenge", &code_challenge)
+        .append_pair("code_challenge_method", "S256");
+    if !scopes.is_empty() {
+        url.query_pairs_mut()
+            .append_pair("scope", &scopes.join(" "));
+    }
+
+    Ok(GitLabOAuthStartAuth {
+        authorize_url: url.to_string(),
+        state,
+        code_verifier,
+    })
+}
+
+/// Completes a GitLab OAuth authorization flow by exchanging the callback code for tokens.
+pub fn exchange_gitlab_oauth_code(
+    instance_url: &str,
+    client_id: &str,
+    client_secret: Option<&str>,
+    redirect_uri: &str,
+    code: &str,
+    code_verifier: Option<&str>,
+    token_url_override: Option<&str>,
+) -> Result<GitLabOAuthRuntimeAuth, ModelError> {
+    let url = token_url_override
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("{}/oauth/token", instance_url.trim_end_matches('/')));
+    let mut body = vec![
+        ("grant_type", "authorization_code"),
+        ("client_id", client_id),
+        ("redirect_uri", redirect_uri),
+        ("code", code),
+    ];
+    if let Some(client_secret) = client_secret.filter(|value| !value.trim().is_empty()) {
+        body.push(("client_secret", client_secret));
+    }
+    if let Some(code_verifier) = code_verifier.filter(|value| !value.trim().is_empty()) {
+        body.push(("code_verifier", code_verifier));
+    }
+    materialize_gitlab_oauth_runtime_auth(post_form_json(&url, &body)?)
+}
+
+/// Refreshes a GitLab OAuth credential using the standard token endpoint.
+pub fn refresh_gitlab_oauth_token(
+    instance_url: &str,
+    client_id: &str,
+    client_secret: Option<&str>,
+    refresh_token: &str,
+    token_url_override: Option<&str>,
+) -> Result<GitLabOAuthRuntimeAuth, ModelError> {
+    let url = token_url_override
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("{}/oauth/token", instance_url.trim_end_matches('/')));
+    let mut body = vec![
+        ("grant_type", "refresh_token"),
+        ("client_id", client_id),
+        ("refresh_token", refresh_token),
+    ];
+    if let Some(client_secret) = client_secret.filter(|value| !value.trim().is_empty()) {
+        body.push(("client_secret", client_secret));
+    }
+    materialize_gitlab_oauth_runtime_auth(post_form_json(&url, &body)?)
+}
+
+/// Resolves a live GitLab OAuth credential, refreshing it when required.
+pub fn resolve_gitlab_oauth_runtime_auth(
+    access_token: Option<&str>,
+    refresh_token: Option<&str>,
+    expires_at_ms: Option<u64>,
+    instance_url: &str,
+    client_id: Option<&str>,
+    client_secret: Option<&str>,
+    token_url_override: Option<&str>,
+) -> Result<GitLabOAuthRuntimeAuth, ModelError> {
+    let now = current_unix_time_ms();
+    if let (Some(access_token), Some(expires_at_ms)) = (
+        access_token.map(str::trim).filter(|value| !value.is_empty()),
+        expires_at_ms,
+    ) {
+        if expires_at_ms > now {
+            return Ok(GitLabOAuthRuntimeAuth {
+                access_token: access_token.to_owned(),
+                refresh_token: refresh_token.map(str::to_owned),
+                expires_at_ms: Some(expires_at_ms),
+            });
+        }
+    }
+
+    let refresh_token = refresh_token
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            ModelError::ProviderFailure(
+                "gitlab oauth requires a refresh token when the access token is expired".to_owned(),
+            )
+        })?;
+    let client_id = client_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            ModelError::ProviderFailure(
+                "gitlab oauth refresh requires a client id".to_owned(),
+            )
+        })?;
+    refresh_gitlab_oauth_token(
+        instance_url,
+        client_id,
+        client_secret,
+        refresh_token,
+        token_url_override,
+    )
+}
+
 #[derive(Debug, Deserialize)]
 struct GitHubCopilotDeviceCodeResponse {
     verification_uri: String,
@@ -635,6 +795,13 @@ struct GitHubCopilotDevicePollResponseBody {
     access_token: Option<String>,
     error: Option<String>,
     interval: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitLabOAuthTokenResponse {
+    access_token: String,
+    refresh_token: Option<String>,
+    expires_in: Option<u64>,
 }
 
 /// Normalizes an OpenAI Codex authorize URL so the required OAuth scopes are always present.
@@ -826,6 +993,72 @@ fn post_form(url: &str, body: &[(&str, &str)]) -> Result<OpenAiCodexRawTokenResp
             "failed to parse OpenAI Codex OAuth response: {error}"
         ))
     })
+}
+
+fn post_form_json<T: for<'de> Deserialize<'de>>(
+    url: &str,
+    body: &[(&str, &str)],
+) -> Result<T, ModelError> {
+    let client = reqwest::blocking::Client::builder()
+        .build()
+        .map_err(|error| {
+            ModelError::ProviderFailure(format!("failed to build OAuth client: {error}"))
+        })?;
+    let response = client
+        .post(url)
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .form(body)
+        .send()
+        .map_err(|error| {
+            ModelError::ProviderFailure(format!("OAuth request failed: {error}"))
+        })?;
+
+    let status = response.status();
+    let body = response.text().map_err(|error| {
+        ModelError::ProviderFailure(format!("failed to read OAuth response body: {error}"))
+    })?;
+    if !status.is_success() {
+        return Err(ModelError::ProviderFailure(format!(
+            "OAuth endpoint returned {status}: {body}"
+        )));
+    }
+
+    serde_json::from_str(&body).map_err(|error| {
+        ModelError::ProviderFailure(format!("failed to parse OAuth response: {error}"))
+    })
+}
+
+fn materialize_gitlab_oauth_runtime_auth(
+    response: GitLabOAuthTokenResponse,
+) -> Result<GitLabOAuthRuntimeAuth, ModelError> {
+    Ok(GitLabOAuthRuntimeAuth {
+        access_token: response.access_token,
+        refresh_token: response.refresh_token,
+        expires_at_ms: response
+            .expires_in
+            .map(|expires_in| current_unix_time_ms() + expires_in * 1000),
+    })
+}
+
+fn generate_oauth_random_string(length: usize) -> String {
+    const ALPHABET: &[u8] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+    let mut bytes = vec![0_u8; length];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    bytes
+        .into_iter()
+        .map(|value| ALPHABET[usize::from(value) % ALPHABET.len()] as char)
+        .collect()
+}
+
+fn pkce_code_challenge(verifier: &str) -> String {
+    let hash = Sha256::digest(verifier.as_bytes());
+    STANDARD
+        .encode(hash)
+        .replace('+', "-")
+        .replace('/', "_")
+        .trim_end_matches('=')
+        .to_owned()
 }
 
 fn materialize_openai_codex_runtime_auth(

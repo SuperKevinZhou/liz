@@ -2,7 +2,8 @@
 
 use crate::approval::ApprovalRequest;
 use crate::auth::{
-    GitHubCopilotDeviceCode, GitHubCopilotDevicePollStatus, ProviderAuthProfile,
+    GitHubCopilotDeviceCode, GitHubCopilotDevicePollStatus, GitLabOAuthStart,
+    ProviderAuthProfile,
 };
 use crate::checkpoint::{Checkpoint, CheckpointScope};
 use crate::ids::{RequestId, ThreadId};
@@ -59,6 +60,15 @@ pub struct ResponseError {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "method", content = "data")]
 pub enum ResponsePayload {
+    /// Acknowledges `provider_auth/gitlab_oauth_start`.
+    #[serde(rename = "provider_auth/gitlab_oauth_start")]
+    GitLabOAuthStart(GitLabOAuthStartResponse),
+    /// Acknowledges `provider_auth/gitlab_oauth_complete`.
+    #[serde(rename = "provider_auth/gitlab_oauth_complete")]
+    GitLabOAuthComplete(GitLabOAuthCompleteResponse),
+    /// Acknowledges `provider_auth/gitlab_pat_save`.
+    #[serde(rename = "provider_auth/gitlab_pat_save")]
+    GitLabPatSave(GitLabPatSaveResponse),
     /// Acknowledges `provider_auth/github_copilot_device_start`.
     #[serde(rename = "provider_auth/github_copilot_device_start")]
     GitHubCopilotDeviceStart(GitHubCopilotDeviceStartResponse),
@@ -98,6 +108,27 @@ pub enum ResponsePayload {
     /// Acknowledges `memory/compile_now`.
     #[serde(rename = "memory/compile_now")]
     MemoryCompileNow(MemoryCompileNowResponse),
+}
+
+/// The response payload for `provider_auth/gitlab_oauth_start`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitLabOAuthStartResponse {
+    /// The OAuth bootstrap data that the client should open and preserve.
+    pub oauth: GitLabOAuthStart,
+}
+
+/// The response payload for `provider_auth/gitlab_oauth_complete`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitLabOAuthCompleteResponse {
+    /// The persisted provider auth profile.
+    pub profile: ProviderAuthProfile,
+}
+
+/// The response payload for `provider_auth/gitlab_pat_save`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitLabPatSaveResponse {
+    /// The persisted provider auth profile.
+    pub profile: ProviderAuthProfile,
 }
 
 /// The response payload for `provider_auth/github_copilot_device_start`.

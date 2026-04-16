@@ -16,9 +16,11 @@ aws-types = "0.55.3"
 base64 = "0.21.7"
 http = "0.2.12"
 liz-protocol = { path = "../liz-protocol" }
+rand = "0.8.5"
 reqwest = { version = "0.12.24", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 serde.workspace = true
 serde_json.workspace = true
+sha2 = "0.10.9"
 tokio = { version = "1.48.0", features = ["rt-multi-thread"] }
 yup-oauth2 = { version = "12.1.0", default-features = false, features = ["hyper-rustls", "ring", "service_account"] }
 

@@ -15,11 +15,13 @@ mod registry;
 pub use capabilities::ModelCapabilities;
 pub use auth::{
     build_openai_codex_authorize_url, exchange_openai_codex_authorization_code,
+    exchange_gitlab_oauth_code, resolve_gitlab_oauth_runtime_auth,
     normalize_openai_codex_authorize_url, poll_github_copilot_device_authorization,
     refresh_openai_codex_token, resolve_copilot_runtime_auth,
     resolve_openai_codex_runtime_auth, resolve_openai_codex_stable_subject,
-    start_github_copilot_device_authorization, CopilotRuntimeAuth,
-    GitHubCopilotDeviceCodeAuth, GitHubCopilotDevicePollOutcome,
+    start_github_copilot_device_authorization, start_gitlab_oauth_authorization,
+    CopilotRuntimeAuth, GitHubCopilotDeviceCodeAuth, GitHubCopilotDevicePollOutcome,
+    GitLabOAuthRuntimeAuth, GitLabOAuthStartAuth,
     OpenAiCodexRuntimeAuth, OpenAiCodexRuntimeAuthRequest,
 };
 pub use config::{ModelGatewayConfig, ProviderOverride, ResolvedProvider};
