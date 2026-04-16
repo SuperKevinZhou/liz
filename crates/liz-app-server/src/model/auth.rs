@@ -25,6 +25,15 @@ struct GoogleCredentialType {
     credential_type: String,
 }
 
+/// Runtime GitHub Copilot credentials resolved from a GitHub user token.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CopilotRuntimeAuth {
+    /// Short-lived Copilot API token.
+    pub token: String,
+    /// Final Copilot runtime base URL.
+    pub base_url: String,
+}
+
 /// Resolves a Google ADC bearer token for Vertex AI requests.
 pub fn google_vertex_bearer_token() -> Result<String, ModelError> {
     let runtime = tokio::runtime::Runtime::new().map_err(|error| {
@@ -275,4 +284,77 @@ fn sign_bedrock_request_with_credentials(
 fn first_env(keys: &[&str]) -> Option<String> {
     keys.iter()
         .find_map(|key| env::var(key).ok().filter(|value| !value.trim().is_empty()))
+}
+
+#[derive(Debug, Deserialize)]
+struct CopilotTokenResponse {
+    token: String,
+}
+
+/// Exchanges a GitHub token for a GitHub Copilot runtime token.
+pub fn resolve_copilot_runtime_auth(
+    github_token: &str,
+    token_url_override: Option<&str>,
+    base_url_override: Option<&str>,
+) -> Result<CopilotRuntimeAuth, ModelError> {
+    let token_url =
+        token_url_override.unwrap_or("https://api.github.com/copilot_internal/v2/token");
+    let client = reqwest::blocking::Client::builder()
+        .build()
+        .map_err(|error| {
+            ModelError::ProviderFailure(format!(
+                "failed to build GitHub Copilot auth client: {error}"
+            ))
+        })?;
+
+    let response = client
+        .get(token_url)
+        .header("Accept", "application/json")
+        .header("Authorization", format!("Bearer {github_token}"))
+        .header("Editor-Version", "vscode/1.96.2")
+        .header("User-Agent", "GitHubCopilotChat/0.26.7")
+        .header("X-Github-Api-Version", "2025-04-01")
+        .send()
+        .map_err(|error| {
+            ModelError::ProviderFailure(format!(
+                "github copilot token exchange failed: {error}"
+            ))
+        })?;
+
+    let status = response.status();
+    let body = response.text().map_err(|error| {
+        ModelError::ProviderFailure(format!(
+            "failed to read GitHub Copilot token response: {error}"
+        ))
+    })?;
+    if !status.is_success() {
+        return Err(ModelError::ProviderFailure(format!(
+            "github copilot token exchange returned {status}: {body}"
+        )));
+    }
+
+    let payload: CopilotTokenResponse = serde_json::from_str(&body).map_err(|error| {
+        ModelError::ProviderFailure(format!(
+            "failed to parse GitHub Copilot token exchange response: {error}"
+        ))
+    })?;
+
+    Ok(CopilotRuntimeAuth {
+        base_url: base_url_override
+            .map(str::to_owned)
+            .or_else(|| derive_copilot_api_base_url_from_token(&payload.token))
+            .unwrap_or_else(|| "https://api.individual.githubcopilot.com".to_owned()),
+        token: payload.token,
+    })
+}
+
+fn derive_copilot_api_base_url_from_token(token: &str) -> Option<String> {
+    let proxy_endpoint = token
+        .split(';')
+        .find_map(|part| part.trim().strip_prefix("proxy-ep="))
+        .map(str::trim)?;
+    let mut url = reqwest::Url::parse(proxy_endpoint).ok()?;
+    let host = url.host_str()?.replace("proxy.", "api.");
+    url.set_host(Some(&host)).ok()?;
+    Some(url.origin().ascii_serialization())
 }

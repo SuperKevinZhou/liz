@@ -405,6 +405,187 @@ fn bedrock_live_request_uses_sigv4_when_credential_chain_is_available() {
     std::env::remove_var("AWS_REGION");
 }
 
+#[test]
+fn github_copilot_live_request_exchanges_token_and_uses_chat_completions() {
+    let _guard = env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");
+
+    let capture = Arc::new(Mutex::new(Vec::<String>::new()));
+    let base_url = spawn_json_server_sequence(
+        capture.clone(),
+        vec![
+            r#"{"token":"copilot-runtime-token","expires_at":4102444800}"#,
+            r#"{"choices":[{"message":{"content":"hello from copilot chat"}}]}"#,
+        ],
+    );
+
+    let mut overrides = BTreeMap::new();
+    overrides.insert(
+        "github-copilot".to_owned(),
+        ProviderOverride {
+            base_url: Some(base_url.clone()),
+            api_key: Some("github-user-token".to_owned()),
+            model_id: Some("gpt-4o".to_owned()),
+            headers: BTreeMap::new(),
+            metadata: BTreeMap::from([(
+                String::from("copilot.token_url"),
+                format!("{base_url}/copilot/token"),
+            )]),
+        },
+    );
+
+    let gateway = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "github-copilot".to_owned(),
+        overrides,
+    });
+    let summary = gateway
+        .run_turn(demo_request(), |_| {})
+        .expect("github-copilot chat request should succeed");
+
+    let captures = capture
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    let exchange = captures.first().expect("exchange request");
+    let chat = captures.get(1).expect("chat request");
+    let exchange_lower = exchange.to_ascii_lowercase();
+    assert!(exchange.contains("GET /copilot/token HTTP/1.1"));
+    assert!(
+        exchange_lower.contains("authorization: bearer github-user-token")
+    );
+    assert!(exchange_lower.contains("editor-version: vscode/1.96.2"));
+    assert!(exchange_lower.contains("user-agent: githubcopilotchat/0.26.7"));
+    assert!(exchange_lower.contains("x-github-api-version: 2025-04-01"));
+
+    let lowercase = chat.to_ascii_lowercase();
+    assert!(chat.contains("POST /v1/chat/completions HTTP/1.1"));
+    assert!(lowercase.contains("authorization: bearer copilot-runtime-token"));
+    assert!(lowercase.contains("openai-intent: conversation-edits"));
+    assert!(lowercase.contains("x-initiator: user"));
+    assert_eq!(
+        summary.assistant_message.as_deref(),
+        Some("hello from copilot chat")
+    );
+
+    std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
+}
+
+#[test]
+fn github_copilot_live_request_uses_responses_api_for_gpt5_models() {
+    let _guard = env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");
+
+    let capture = Arc::new(Mutex::new(Vec::<String>::new()));
+    let base_url = spawn_json_server_sequence(
+        capture.clone(),
+        vec![
+            r#"{"token":"copilot-runtime-token","expires_at":4102444800}"#,
+            r#"{"output":[{"content":[{"text":"hello from copilot responses"}]}]}"#,
+        ],
+    );
+
+    let mut overrides = BTreeMap::new();
+    overrides.insert(
+        "github-copilot".to_owned(),
+        ProviderOverride {
+            base_url: Some(base_url.clone()),
+            api_key: Some("github-user-token".to_owned()),
+            model_id: Some("gpt-5.4".to_owned()),
+            headers: BTreeMap::new(),
+            metadata: BTreeMap::from([(
+                String::from("copilot.token_url"),
+                format!("{base_url}/copilot/token"),
+            )]),
+        },
+    );
+
+    let gateway = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "github-copilot".to_owned(),
+        overrides,
+    });
+    let summary = gateway
+        .run_turn(demo_request(), |_| {})
+        .expect("github-copilot responses request should succeed");
+
+    let captures = capture
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    let runtime = captures.get(1).expect("responses request");
+    assert!(runtime.contains("POST /v1/responses HTTP/1.1"));
+    assert!(runtime.contains(r#""model":"gpt-5.4""#));
+    assert!(runtime.contains(r#""input":"Run a patch tool command for this task""#));
+    assert_eq!(
+        summary.assistant_message.as_deref(),
+        Some("hello from copilot responses")
+    );
+
+    std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
+}
+
+#[test]
+fn github_copilot_live_request_uses_messages_transport_for_claude_models() {
+    let _guard = env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");
+
+    let capture = Arc::new(Mutex::new(Vec::<String>::new()));
+    let base_url = spawn_json_server_sequence(
+        capture.clone(),
+        vec![
+            r#"{"token":"copilot-runtime-token","expires_at":4102444800}"#,
+            r#"{"content":[{"text":"hello from copilot claude"}]}"#,
+        ],
+    );
+
+    let mut overrides = BTreeMap::new();
+    overrides.insert(
+        "github-copilot".to_owned(),
+        ProviderOverride {
+            base_url: Some(base_url.clone()),
+            api_key: Some("github-user-token".to_owned()),
+            model_id: Some("claude-sonnet-4-6".to_owned()),
+            headers: BTreeMap::new(),
+            metadata: BTreeMap::from([(
+                String::from("copilot.token_url"),
+                format!("{base_url}/copilot/token"),
+            )]),
+        },
+    );
+
+    let gateway = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "github-copilot".to_owned(),
+        overrides,
+    });
+    let summary = gateway
+        .run_turn(demo_request(), |_| {})
+        .expect("github-copilot claude request should succeed");
+
+    let captures = capture
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    let messages = captures.get(1).expect("messages request");
+    let lowercase = messages.to_ascii_lowercase();
+    assert!(messages.contains("POST /v1/messages HTTP/1.1"));
+    assert!(lowercase.contains("authorization: bearer copilot-runtime-token"));
+    assert!(lowercase.contains("anthropic-version: 2023-06-01"));
+    assert!(lowercase.contains("anthropic-beta: interleaved-thinking-2025-05-14"));
+    assert!(messages.contains(r#""model":"claude-sonnet-4-6""#));
+    assert!(messages.contains(r#""content":"Run a patch tool command for this task""#));
+    assert_eq!(
+        summary.assistant_message.as_deref(),
+        Some("hello from copilot claude")
+    );
+
+    std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
+}
+
 fn spawn_json_server(capture: Arc<Mutex<String>>, response_body: &'static str) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
     let address = listener.local_addr().expect("address should resolve");
@@ -425,6 +606,37 @@ fn spawn_json_server(capture: Arc<Mutex<String>>, response_body: &'static str) -
             .write_all(response.as_bytes())
             .expect("response should be writable");
         stream.flush().expect("response should flush");
+    });
+
+    format!("http://{}", address)
+}
+
+fn spawn_json_server_sequence(
+    capture: Arc<Mutex<Vec<String>>>,
+    response_bodies: Vec<&'static str>,
+) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("address should resolve");
+
+    thread::spawn(move || {
+        for response_body in response_bodies {
+            let (mut stream, _) = listener.accept().expect("server should accept");
+            let request = read_http_request(&mut stream);
+            capture
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .push(request);
+
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response_body.len(),
+                response_body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("response should be writable");
+            stream.flush().expect("response should flush");
+        }
     });
 
     format!("http://{}", address)

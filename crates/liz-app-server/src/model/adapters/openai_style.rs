@@ -1,5 +1,6 @@
 //! Adapter for OpenAI-style, OpenAI-compatible, Copilot, and GitLab provider families.
 
+use crate::model::auth::resolve_copilot_runtime_auth;
 use crate::model::config::ResolvedProvider;
 use crate::model::family::ModelProviderFamily;
 use crate::model::gateway::{ModelError, ModelRunSummary, ModelTurnRequest};
@@ -43,7 +44,13 @@ impl OpenAiStyleAdapter {
             ModelProviderFamily::GitHubCopilot => json!({
                 "model": provider.model_id,
                 "input": request.prompt,
-                "mode": if should_use_copilot_responses_api(&provider.model_id) { "responses" } else { "chat" },
+                "mode": if copilot_uses_anthropic_messages_model(&provider.model_id) {
+                    "messages"
+                } else if should_use_copilot_responses_api(&provider.model_id) {
+                    "responses"
+                } else {
+                    "chat"
+                },
             })
             .to_string(),
             ModelProviderFamily::GitLabDuo => json!({
@@ -83,7 +90,12 @@ impl OpenAiStyleAdapter {
                 },
             },
             ModelProviderFamily::GitHubCopilot => {
-                if should_use_copilot_responses_api(&provider.model_id) {
+                if copilot_uses_anthropic_messages_model(&provider.model_id) {
+                    InvocationTransport::ProviderOperation {
+                        operation: "github-copilot.messages",
+                        base_url: provider.base_url.clone(),
+                    }
+                } else if should_use_copilot_responses_api(&provider.model_id) {
                     InvocationTransport::ProviderOperation {
                         operation: "github-copilot.responses",
                         base_url: provider.base_url.clone(),
@@ -127,7 +139,7 @@ fn execute_live_http(
     request: ModelTurnRequest,
     sink: &mut dyn FnMut(NormalizedTurnEvent),
 ) -> Result<ModelRunSummary, ModelError> {
-    let (url, body) = match &plan.transport {
+    let (url, body, headers) = match &plan.transport {
         InvocationTransport::HttpJson {
             base_url, path, ..
         } => {
@@ -143,24 +155,94 @@ fn execute_live_http(
                     "stream": false,
                 }),
             };
-            (format!("{}{}", trim_trailing_slash(base_url), path), body)
+            (
+                format!("{}{}", trim_trailing_slash(base_url), path),
+                body,
+                default_openai_style_headers(provider, plan),
+            )
         }
-        InvocationTransport::ProviderOperation { .. } => {
-            return simulate_stream(plan.clone(), request, sink);
-        }
-    };
+        InvocationTransport::ProviderOperation { .. } => match plan.family {
+            ModelProviderFamily::GitHubCopilot => {
+                let github_token = provider.api_key.as_ref().ok_or_else(|| {
+                    ModelError::ProviderFailure(
+                        "github-copilot requires a GitHub token for live mode".to_owned(),
+                    )
+                })?;
+                let runtime = resolve_copilot_runtime_auth(
+                    github_token,
+                    provider
+                        .metadata
+                        .get("copilot.token_url")
+                        .map(String::as_str),
+                    provider
+                        .metadata
+                        .get("copilot.api_base_url")
+                        .map(String::as_str)
+                        .or(provider.base_url.as_deref()),
+                )?;
+                let mut headers = provider.headers.clone();
+                headers
+                    .entry("Authorization".to_owned())
+                    .or_insert_with(|| format!("Bearer {}", runtime.token));
+                headers
+                    .entry("Editor-Version".to_owned())
+                    .or_insert_with(|| "vscode/1.96.2".to_owned());
+                headers
+                    .entry("User-Agent".to_owned())
+                    .or_insert_with(|| "GitHubCopilotChat/0.26.7".to_owned());
+                headers
+                    .entry("Openai-Intent".to_owned())
+                    .or_insert_with(|| "conversation-edits".to_owned());
+                headers
+                    .entry("X-Initiator".to_owned())
+                    .or_insert_with(|| "user".to_owned());
 
-    let mut headers = provider.headers.clone();
-    if let Some(api_key) = provider.api_key.as_ref() {
-        headers
-            .entry("Authorization".to_owned())
-            .or_insert_with(|| format!("Bearer {api_key}"));
-    }
-    if matches!(plan.family, ModelProviderFamily::GitLabDuo) {
-        headers
-            .entry("Authorization".to_owned())
-            .or_insert_with(|| format!("Bearer {}", provider.api_key.clone().unwrap_or_default()));
-    }
+                if copilot_uses_anthropic_messages_model(&provider.model_id) {
+                    headers
+                        .entry("anthropic-version".to_owned())
+                        .or_insert_with(|| "2023-06-01".to_owned());
+                    headers
+                        .entry("anthropic-beta".to_owned())
+                        .or_insert_with(|| "interleaved-thinking-2025-05-14".to_owned());
+                    (
+                        format!("{}/v1/messages", trim_trailing_slash(&runtime.base_url)),
+                        json!({
+                            "model": provider.model_id,
+                            "max_tokens": 4096,
+                            "messages": [{"role": "user", "content": request.prompt}],
+                            "stream": false,
+                        }),
+                        headers,
+                    )
+                } else if should_use_copilot_responses_api(&provider.model_id) {
+                    (
+                        format!("{}/v1/responses", trim_trailing_slash(&runtime.base_url)),
+                        json!({
+                            "model": provider.model_id,
+                            "input": request.prompt,
+                            "stream": false,
+                        }),
+                        headers,
+                    )
+                } else {
+                    (
+                        format!(
+                            "{}/v1/chat/completions",
+                            trim_trailing_slash(&runtime.base_url)
+                        ),
+                        json!({
+                            "model": provider.model_id,
+                            "messages": [{"role": "user", "content": request.prompt}],
+                            "stream": false,
+                        }),
+                        headers,
+                    )
+                }
+            }
+            ModelProviderFamily::GitLabDuo => return simulate_stream(plan.clone(), request, sink),
+            _ => return simulate_stream(plan.clone(), request, sink),
+        },
+    };
 
     let response = post_json(&build_client()?, &url, &headers, &body)?;
     let assistant_message = extract_openai_style_text(&response).unwrap_or_else(|| {
@@ -283,11 +365,28 @@ fn should_attempt_live_http(provider: &ResolvedProvider, plan: &ProviderInvocati
     match plan.family {
         ModelProviderFamily::OpenAiResponses => provider.api_key.is_some(),
         ModelProviderFamily::OpenAiCompatible => provider.base_url.is_some() || provider.api_key.is_some(),
-        ModelProviderFamily::GitHubCopilot | ModelProviderFamily::GitLabDuo => {
-            provider.api_key.is_some() && provider.base_url.is_some()
-        }
+        ModelProviderFamily::GitHubCopilot => provider.api_key.is_some(),
+        ModelProviderFamily::GitLabDuo => provider.api_key.is_some() && provider.base_url.is_some(),
         _ => false,
     }
+}
+
+fn default_openai_style_headers(
+    provider: &ResolvedProvider,
+    plan: &ProviderInvocationPlan,
+) -> std::collections::BTreeMap<String, String> {
+    let mut headers = provider.headers.clone();
+    if let Some(api_key) = provider.api_key.as_ref() {
+        headers
+            .entry("Authorization".to_owned())
+            .or_insert_with(|| format!("Bearer {api_key}"));
+    }
+    if matches!(plan.family, ModelProviderFamily::GitLabDuo) {
+        headers
+            .entry("Authorization".to_owned())
+            .or_insert_with(|| format!("Bearer {}", provider.api_key.clone().unwrap_or_default()));
+    }
+    headers
 }
 
 fn extract_openai_style_text(response: &serde_json::Value) -> Option<String> {
@@ -305,7 +404,16 @@ fn extract_openai_style_text(response: &serde_json::Value) -> Option<String> {
                                 .map(str::to_owned)
                         })
                     })
-            })
+                })
+        })
+        .or_else(|| {
+            response
+                .get("content")
+                .and_then(|value| value.as_array())
+                .and_then(|items| items.first())
+                .and_then(|item| item.get("text"))
+                .and_then(|value| value.as_str())
+                .map(str::to_owned)
         })
         .or_else(|| {
             response
@@ -338,6 +446,10 @@ fn should_use_copilot_responses_api(model_id: &str) -> bool {
         .unwrap_or_default();
 
     version >= 5 && !model_id.starts_with("gpt-5-mini")
+}
+
+fn copilot_uses_anthropic_messages_model(model_id: &str) -> bool {
+    model_id.to_ascii_lowercase().contains("claude")
 }
 
 fn needs_tool_call(prompt: &str) -> bool {
