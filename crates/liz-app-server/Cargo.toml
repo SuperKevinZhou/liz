@@ -20,6 +20,7 @@ reqwest = { version = "0.12.24", default-features = false, features = ["blocking
 serde.workspace = true
 serde_json.workspace = true
 tokio = { version = "1.48.0", features = ["rt-multi-thread"] }
+tungstenite = "0.24.0"
 yup-oauth2 = { version = "12.1.0", default-features = false, features = ["hyper-rustls", "ring", "service_account"] }
 
 [dev-dependencies]
