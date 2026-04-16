@@ -87,13 +87,6 @@ fn builtin_specs() -> Vec<ProviderSpec> {
         )
         .with_auth_strategies(vec![
             auth_strategy(
-                ProviderAuthKind::CliSession,
-                "claude-cli",
-                &["ANTHROPIC_OAUTH_TOKEN"],
-                &[],
-                &["Supports reusing an existing Claude CLI session."],
-            ),
-            auth_strategy(
                 ProviderAuthKind::SetupToken,
                 "setup-token",
                 &[],
@@ -325,24 +318,6 @@ fn builtin_specs() -> Vec<ProviderSpec> {
             ],
             &["Native ChatGPT/Codex OAuth path with refresh-token support."],
         )]),
-        spec(
-            "codex",
-            "Codex",
-            ModelProviderFamily::OpenAiResponses,
-            ProviderAuthKind::ApiKey,
-            Some("https://api.openai.com"),
-            "gpt-5.4",
-            &["OPENAI_API_KEY"],
-            &[],
-            &[],
-            ModelCapabilities::openai_streaming()
-                .with_prompt_caching(true)
-                .with_server_side_conversation_state(true),
-            &[
-                "Alias of the public OpenAI Responses path.",
-                "Does not imply native Codex app-server or OAuth support.",
-            ],
-        ),
         spec(
             "xai",
             "xAI",

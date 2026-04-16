@@ -144,12 +144,6 @@ fn special_providers_expose_explicit_auth_strategies() {
         anthropic
             .auth_strategies
             .iter()
-            .any(|strategy| strategy.label == "claude-cli")
-    );
-    assert!(
-        anthropic
-            .auth_strategies
-            .iter()
             .any(|strategy| strategy.label == "setup-token")
     );
 
@@ -195,9 +189,6 @@ fn special_providers_expose_explicit_auth_strategies() {
     assert_eq!(openai_codex.auth_kind, liz_app_server::model::ProviderAuthKind::OAuth);
     assert_eq!(openai_codex.auth_strategies.len(), 1);
     assert_eq!(openai_codex.auth_strategies[0].label, "chatgpt-oauth");
-
-    let codex = registry.provider("codex").expect("codex spec");
-    assert_eq!(codex.auth_kind, liz_app_server::model::ProviderAuthKind::ApiKey);
 }
 
 #[test]
