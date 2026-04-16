@@ -152,7 +152,10 @@ fn builtin_specs() -> Vec<ProviderSpec> {
             &["AWS_REGION", "AWS_PROFILE"],
             &[],
             ModelCapabilities::bedrock_converse(),
-            &["Uses Bedrock Converse/ConverseStream semantics.", "Applies region-specific model prefixes when needed."],
+            &[
+                "Uses Bedrock Converse/ConverseStream semantics.",
+                "Accepts Bedrock runtime endpoints, foundation model IDs, and inference profiles.",
+            ],
         )
         .with_auth_strategies(vec![
             auth_strategy(

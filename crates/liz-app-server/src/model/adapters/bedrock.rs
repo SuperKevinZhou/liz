@@ -1,9 +1,12 @@
 //! Adapter for AWS Bedrock providers.
 
+use crate::model::auth::sign_bedrock_request;
 use crate::model::config::ResolvedProvider;
 use crate::model::gateway::{ModelError, ModelRunSummary, ModelTurnRequest};
+use crate::model::http::{build_client, post_json};
 use crate::model::invocation::{InvocationTransport, ProviderInvocationPlan};
 use crate::model::normalized_stream::{NormalizedTurnEvent, UsageDelta};
+use reqwest::Url;
 use serde_json::json;
 
 /// AWS Bedrock family adapter.
@@ -18,16 +21,19 @@ impl AwsBedrockAdapter {
         request: ModelTurnRequest,
         sink: &mut dyn FnMut(NormalizedTurnEvent),
     ) -> Result<ModelRunSummary, ModelError> {
-        let resolved_model = prefix_bedrock_model(provider, &provider.model_id);
+        let resolved_model = normalize_bedrock_model_id(&provider.model_id);
+        let region = resolve_bedrock_region(provider);
+        let base_url = resolve_bedrock_base_url(provider, &region);
         let plan = ProviderInvocationPlan {
             provider_id: provider.spec.id.to_owned(),
             display_name: provider.spec.display_name.to_owned(),
             family: provider.spec.family,
             model_id: resolved_model.clone(),
             auth_kind: provider.spec.auth_kind,
-            transport: InvocationTransport::ProviderOperation {
-                operation: "aws.bedrock.converse_stream",
-                base_url: provider.base_url.clone(),
+            transport: InvocationTransport::HttpJson {
+                method: "POST",
+                base_url,
+                path: format!("/model/{resolved_model}/converse"),
             },
             headers: provider.headers.clone(),
             payload_preview: json!({
@@ -43,11 +49,15 @@ impl AwsBedrockAdapter {
                 .collect(),
         };
 
+        if should_attempt_live_http(provider) {
+            return execute_live_http(provider, &plan, &region, request, sink);
+        }
+
         sink(NormalizedTurnEvent::AssistantDelta {
             chunk: format!("Using {}. ", plan.display_name),
         });
         sink(NormalizedTurnEvent::AssistantDelta {
-            chunk: format!("Resolved Bedrock model {}.", plan.model_id),
+            chunk: format!("Resolved Bedrock model {} in {}.", plan.model_id, region),
         });
         sink(NormalizedTurnEvent::ProviderRawEvent {
             label: format!("request-plan {}", plan.payload_preview),
@@ -75,78 +85,137 @@ impl AwsBedrockAdapter {
     }
 }
 
-fn prefix_bedrock_model(provider: &ResolvedProvider, model_id: &str) -> String {
-    if ["global.", "us.", "eu.", "jp.", "apac.", "au."]
-        .iter()
-        .any(|prefix| model_id.starts_with(prefix))
-    {
-        return model_id.to_owned();
+fn execute_live_http(
+    provider: &ResolvedProvider,
+    plan: &ProviderInvocationPlan,
+    region: &str,
+    request: ModelTurnRequest,
+    sink: &mut dyn FnMut(NormalizedTurnEvent),
+) -> Result<ModelRunSummary, ModelError> {
+    let InvocationTransport::HttpJson {
+        base_url, path, ..
+    } = &plan.transport
+    else {
+        return Err(ModelError::ProviderFailure(
+            "amazon-bedrock transport must be HTTP JSON".to_owned(),
+        ));
+    };
+
+    let url = format!("{}{}", trim_trailing_slash(base_url), path);
+    let body = json!({
+        "messages": [{"role": "user", "content": [{"text": request.prompt}]}],
+        "inferenceConfig": {
+            "maxTokens": 4096,
+        },
+    });
+    let body_text = serde_json::to_vec(&body).map_err(|error| {
+        ModelError::ProviderFailure(format!(
+            "failed to serialize Amazon Bedrock request body: {error}"
+        ))
+    })?;
+
+    let mut headers = provider.headers.clone();
+    headers
+        .entry("content-type".to_owned())
+        .or_insert_with(|| "application/json".to_owned());
+    headers
+        .entry("accept".to_owned())
+        .or_insert_with(|| "application/json".to_owned());
+
+    let final_headers = if let Some(token) = provider.api_key.as_ref() {
+        headers
+            .entry("Authorization".to_owned())
+            .or_insert_with(|| format!("Bearer {token}"));
+        headers
+    } else {
+        sign_bedrock_request("POST", &url, &headers, &body_text, region)?
+    };
+
+    let response = post_json(&build_client()?, &url, &final_headers, &body)?;
+    let assistant_message = response
+        .get("output")
+        .and_then(|value| value.get("message"))
+        .and_then(|value| value.get("content"))
+        .and_then(|value| value.as_array())
+        .and_then(|items| items.first())
+        .and_then(|item| item.get("text"))
+        .and_then(|value| value.as_str())
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("{} response received.", plan.display_name));
+
+    sink(NormalizedTurnEvent::AssistantDelta {
+        chunk: format!("Live response from {}.", plan.display_name),
+    });
+    sink(NormalizedTurnEvent::AssistantMessage {
+        message: assistant_message.clone(),
+    });
+
+    Ok(ModelRunSummary {
+        assistant_message: Some(assistant_message),
+        usage: UsageDelta {
+            input_tokens: estimate_tokens(&request.prompt),
+            output_tokens: estimate_tokens(&plan.model_id),
+            reasoning_tokens: 0,
+            cache_hit_tokens: 0,
+            cache_write_tokens: 0,
+        },
+    })
+}
+
+fn should_attempt_live_http(provider: &ResolvedProvider) -> bool {
+    if std::env::var("LIZ_PROVIDER_ENABLE_LIVE").ok().as_deref() != Some("1") {
+        return false;
     }
 
-    let region = provider
+    provider.api_key.is_some()
+        || provider.metadata.contains_key("aws.profile")
+        || std::env::var("AWS_ACCESS_KEY_ID").is_ok()
+        || std::env::var("AWS_PROFILE").is_ok()
+        || std::env::var("AWS_WEB_IDENTITY_TOKEN_FILE").is_ok()
+        || std::env::var("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI").is_ok()
+        || std::env::var("AWS_CONTAINER_CREDENTIALS_FULL_URI").is_ok()
+}
+
+fn normalize_bedrock_model_id(model_id: &str) -> String {
+    model_id.trim().to_owned()
+}
+
+fn resolve_bedrock_base_url(provider: &ResolvedProvider, region: &str) -> String {
+    provider.base_url.clone().unwrap_or_else(|| {
+        format!("https://bedrock-runtime.{region}.amazonaws.com")
+    })
+}
+
+fn resolve_bedrock_region(provider: &ResolvedProvider) -> String {
+    provider
         .metadata
         .get("aws.region")
-        .map(String::as_str)
-        .unwrap_or("us-east-1");
-    let region_prefix = region.split('-').next().unwrap_or("us");
-    let lower = model_id.to_ascii_lowercase();
+        .cloned()
+        .or_else(|| {
+            provider
+                .base_url
+                .as_ref()
+                .and_then(|value| extract_bedrock_region_from_url(value))
+        })
+        .or_else(|| first_env(&["AWS_REGION", "AWS_DEFAULT_REGION"]))
+        .unwrap_or_else(|| "us-east-1".to_owned())
+}
 
-    if region_prefix == "us"
-        && !region.starts_with("us-gov")
-        && ["nova-micro", "nova-lite", "nova-pro", "nova-premier", "nova-2", "claude", "deepseek"]
-            .iter()
-            .any(|marker| lower.contains(marker))
-    {
-        return format!("us.{model_id}");
+fn extract_bedrock_region_from_url(url: &str) -> Option<String> {
+    let host = Url::parse(url).ok()?.host_str()?.to_owned();
+    if let Some(rest) = host.strip_prefix("bedrock-runtime.") {
+        return rest.split('.').next().map(str::to_owned);
     }
+    None
+}
 
-    if region_prefix == "eu"
-        && [
-            "eu-west-1",
-            "eu-west-2",
-            "eu-west-3",
-            "eu-north-1",
-            "eu-central-1",
-            "eu-south-1",
-            "eu-south-2",
-        ]
-        .iter()
-        .any(|candidate| region == *candidate)
-        && ["claude", "nova-lite", "nova-micro", "llama3", "pixtral"]
-            .iter()
-            .any(|marker| lower.contains(marker))
-    {
-        return format!("eu.{model_id}");
-    }
+fn first_env(keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|key| std::env::var(key).ok().filter(|value| !value.trim().is_empty()))
+}
 
-    if ["ap-southeast-2", "ap-southeast-4"].contains(&region)
-        && [
-            "anthropic.claude-sonnet-4-6",
-            "anthropic.claude-haiku",
-        ]
-            .iter()
-            .any(|marker| lower.contains(marker))
-    {
-        return format!("au.{model_id}");
-    }
-
-    if region == "ap-northeast-1"
-        && ["claude", "nova-lite", "nova-micro", "nova-pro"]
-            .iter()
-            .any(|marker| lower.contains(marker))
-    {
-        return format!("jp.{model_id}");
-    }
-
-    if region.starts_with("ap-")
-        && ["claude", "nova-lite", "nova-micro", "nova-pro"]
-            .iter()
-            .any(|marker| lower.contains(marker))
-    {
-        return format!("apac.{model_id}");
-    }
-
-    model_id.to_owned()
+fn trim_trailing_slash(value: &str) -> &str {
+    value.trim_end_matches('/')
 }
 
 fn estimate_tokens(text: &str) -> u32 {

@@ -92,7 +92,7 @@ impl ResolvedProvider {
         let mut base_url = override_config
             .and_then(|config| config.base_url.clone())
             .or_else(|| spec.default_base_url.map(str::to_owned));
-        let api_key = override_config
+        let mut api_key = override_config
             .and_then(|config| config.api_key.clone())
             .or_else(|| {
                 let keys = spec.credential_env_keys();
@@ -202,7 +202,10 @@ impl ResolvedProvider {
                 }
             }
             "amazon-bedrock" | "amazon-bedrock-mantle" => {
-                if let Some(region) = first_env(&["AWS_REGION"]) {
+                if override_config.and_then(|config| config.api_key.as_ref()).is_none() {
+                    api_key = first_env(&["AWS_BEARER_TOKEN_BEDROCK"]);
+                }
+                if let Some(region) = first_env(&["AWS_REGION", "AWS_DEFAULT_REGION"]) {
                     metadata.entry("aws.region".to_owned()).or_insert(region);
                 }
                 if let Some(profile) = first_env(&["AWS_PROFILE"]) {
