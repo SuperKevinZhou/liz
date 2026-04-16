@@ -112,6 +112,12 @@ impl ProviderSpec {
         self
     }
 
+    /// Replaces the provider notes with a more specific static note set.
+    pub fn with_notes(mut self, notes: &'static [&'static str]) -> Self {
+        self.notes = notes;
+        self
+    }
+
     /// Returns every env key mentioned by the provider's auth strategies.
     pub fn credential_env_keys(&self) -> Vec<&'static str> {
         let mut keys = self.api_key_envs.to_vec();

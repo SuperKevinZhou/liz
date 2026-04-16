@@ -222,6 +222,17 @@ fn special_providers_expose_explicit_auth_strategies() {
     );
     assert_eq!(copilot_proxy.default_base_url, Some("http://localhost:3000/v1"));
 
+    for provider_id in ["groq", "cerebras", "poe", "zenmux"] {
+        let provider = registry.provider(provider_id).expect("alias provider spec");
+        assert!(
+            provider
+                .notes
+                .iter()
+                .any(|note| note.contains("Compatibility alias")),
+            "{provider_id} should be explicitly marked as a compatibility alias",
+        );
+    }
+
     let sap_ai_core = registry.provider("sap-ai-core").expect("sap-ai-core spec");
     assert_eq!(
         sap_ai_core.auth_kind,
