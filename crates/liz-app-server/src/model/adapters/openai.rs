@@ -4,6 +4,7 @@ use crate::model::adapters::ProviderAdapter;
 use crate::model::capabilities::ModelCapabilities;
 use crate::model::gateway::{ModelError, ModelRunSummary, ModelTurnRequest};
 use crate::model::normalized_stream::{NormalizedTurnEvent, UsageDelta};
+use serde_json::json;
 
 /// A provider-shaped delta chunk modeled after OpenAI's streaming semantics.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,11 +70,7 @@ impl ProviderAdapter for OpenAiAdapter {
                 }
                 OpenAiChunk::ToolCallArgumentsDone { call_id, tool_name, arguments } => {
                     saw_tool_commit = true;
-                    sink(NormalizedTurnEvent::ToolCallCommitted {
-                        call_id,
-                        tool_name,
-                        arguments,
-                    });
+                    sink(NormalizedTurnEvent::ToolCallCommitted { call_id, tool_name, arguments });
                 }
                 OpenAiChunk::Usage(delta) => {
                     usage.add_assign(&delta);
@@ -86,14 +83,9 @@ impl ProviderAdapter for OpenAiAdapter {
             assistant = "Committed tool plan for the current turn.".to_owned();
         }
 
-        sink(NormalizedTurnEvent::AssistantMessage {
-            message: assistant.clone(),
-        });
+        sink(NormalizedTurnEvent::AssistantMessage { message: assistant.clone() });
 
-        Ok(ModelRunSummary {
-            assistant_message: Some(assistant),
-            usage,
-        })
+        Ok(ModelRunSummary { assistant_message: Some(assistant), usage })
     }
 }
 
@@ -118,11 +110,7 @@ fn synthesize_chunks(request: &ModelTurnRequest) -> Vec<OpenAiChunk> {
         chunks.push(OpenAiChunk::ToolCallArgumentsDone {
             call_id: "call_01".to_owned(),
             tool_name,
-            arguments: format!(
-                "{{\"goal\":\"{}\",\"thread_id\":\"{}\"}}",
-                prompt,
-                request.thread.id
-            ),
+            arguments: synthesize_tool_arguments(prompt, request.thread.id.as_str()),
         });
     }
 
@@ -153,6 +141,37 @@ fn infer_tool_name(prompt: &str) -> String {
     } else {
         "workspace.read".to_owned()
     }
+}
+
+fn synthesize_tool_arguments(prompt: &str, thread_id: &str) -> String {
+    let tool_name = infer_tool_name(prompt);
+    if tool_name == "shell.exec" {
+        let command = extract_shell_command(prompt).unwrap_or_else(|| prompt.to_owned());
+        json!({
+            "command": command,
+            "working_dir": serde_json::Value::Null,
+            "thread_id": thread_id,
+        })
+        .to_string()
+    } else {
+        json!({
+            "goal": prompt,
+            "thread_id": thread_id,
+        })
+        .to_string()
+    }
+}
+
+fn extract_shell_command(prompt: &str) -> Option<String> {
+    let lower = prompt.to_ascii_lowercase();
+    lower.find("run command:").map(|index| {
+        prompt[index + "run command:".len()..]
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_owned()
+    })
 }
 
 fn truncate_preview(prompt: &str) -> String {

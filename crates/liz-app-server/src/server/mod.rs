@@ -9,10 +9,11 @@ use crate::model::{ModelGateway, ModelTurnRequest, NormalizedTurnEvent};
 use crate::runtime::RuntimeCoordinator;
 use crate::storage::StoragePaths;
 use liz_protocol::{
-    ApprovalDecision, ApprovalRequestedEvent, AssistantChunkEvent, AssistantCompletedEvent,
-    CheckpointCreatedEvent, ClientRequestEnvelope, ServerEvent, ServerEventPayload,
-    ServerResponseEnvelope, ThreadId, TurnCancelRequest, TurnCompletedEvent, TurnFailedEvent,
-    TurnId,
+    ApprovalDecision, ApprovalRequestedEvent, ArtifactCreatedEvent, AssistantChunkEvent,
+    AssistantCompletedEvent, CheckpointCreatedEvent, ClientRequestEnvelope, DiffAvailableEvent,
+    ExecutorOutputChunkEvent, ExecutorTaskId, ServerEvent, ServerEventPayload,
+    ServerResponseEnvelope, ThreadId, ToolCallRequest, ToolCompletedEvent, TurnCancelRequest,
+    TurnCompletedEvent, TurnFailedEvent, TurnId,
 };
 use std::sync::mpsc::Receiver;
 
@@ -205,10 +206,11 @@ impl AppServer {
     ) {
         let thread_id = thread.id.clone();
         let turn_id = turn.id.clone();
+        let model_gateway = self.model_gateway.clone();
 
-        let run_result =
-            self.model_gateway.run_turn(ModelTurnRequest { thread, turn, prompt }, |event| {
-                self.publish_model_event(&thread_id, &turn_id, event)
+        let run_result = model_gateway
+            .run_turn(ModelTurnRequest { thread, turn, prompt }, |event| {
+                self.handle_model_event(&thread_id, &turn_id, event)
             });
 
         match run_result {
@@ -238,55 +240,174 @@ impl AppServer {
         }
     }
 
-    fn publish_model_event(
-        &self,
+    fn handle_model_event(
+        &mut self,
         thread_id: &ThreadId,
         turn_id: &TurnId,
         event: NormalizedTurnEvent,
     ) {
-        let payload = match event {
+        match event {
             NormalizedTurnEvent::AssistantDelta { chunk } => {
-                ServerEventPayload::AssistantChunk(AssistantChunkEvent {
-                    chunk,
-                    stream_id: Some("primary".to_owned()),
-                    is_final: false,
-                })
+                self.event_bus.publish(crate::events::PendingEvent::new(
+                    thread_id.clone(),
+                    Some(turn_id.clone()),
+                    ServerEventPayload::AssistantChunk(AssistantChunkEvent {
+                        chunk,
+                        stream_id: Some("primary".to_owned()),
+                        is_final: false,
+                    }),
+                ));
             }
             NormalizedTurnEvent::AssistantMessage { message } => {
-                ServerEventPayload::AssistantCompleted(AssistantCompletedEvent { message })
+                self.event_bus.publish(crate::events::PendingEvent::new(
+                    thread_id.clone(),
+                    Some(turn_id.clone()),
+                    ServerEventPayload::AssistantCompleted(AssistantCompletedEvent { message }),
+                ));
             }
             NormalizedTurnEvent::ToolCallStarted { call_id, tool_name, summary } => {
-                ServerEventPayload::ToolCallStarted(liz_protocol::ToolCallStartedEvent {
-                    call_id,
-                    tool_name,
-                    summary,
-                })
+                self.event_bus.publish(crate::events::PendingEvent::new(
+                    thread_id.clone(),
+                    Some(turn_id.clone()),
+                    ServerEventPayload::ToolCallStarted(liz_protocol::ToolCallStartedEvent {
+                        call_id,
+                        tool_name,
+                        summary,
+                    }),
+                ));
             }
             NormalizedTurnEvent::ToolCallDelta { call_id, tool_name, delta_summary, preview } => {
-                ServerEventPayload::ToolCallUpdated(liz_protocol::ToolCallUpdatedEvent {
-                    call_id,
-                    tool_name,
-                    delta_summary,
-                    preview,
-                })
+                self.event_bus.publish(crate::events::PendingEvent::new(
+                    thread_id.clone(),
+                    Some(turn_id.clone()),
+                    ServerEventPayload::ToolCallUpdated(liz_protocol::ToolCallUpdatedEvent {
+                        call_id,
+                        tool_name,
+                        delta_summary,
+                        preview,
+                    }),
+                ));
             }
             NormalizedTurnEvent::ToolCallCommitted { call_id, tool_name, arguments } => {
-                ServerEventPayload::ToolCallCommitted(liz_protocol::ToolCallCommittedEvent {
-                    call_id,
-                    tool_name,
-                    arguments_summary: arguments,
-                    risk_hint: None,
-                })
+                self.event_bus.publish(crate::events::PendingEvent::new(
+                    thread_id.clone(),
+                    Some(turn_id.clone()),
+                    ServerEventPayload::ToolCallCommitted(liz_protocol::ToolCallCommittedEvent {
+                        call_id,
+                        tool_name: tool_name.clone(),
+                        arguments_summary: arguments.clone(),
+                        risk_hint: None,
+                    }),
+                ));
+                if let Some(invocation) = parse_tool_invocation(&tool_name, &arguments) {
+                    self.execute_model_tool(thread_id, turn_id, invocation);
+                }
             }
-            NormalizedTurnEvent::UsageDelta(_) | NormalizedTurnEvent::ProviderRawEvent { .. } => {
-                return
-            }
+            NormalizedTurnEvent::UsageDelta(_) | NormalizedTurnEvent::ProviderRawEvent { .. } => {}
+        }
+    }
+
+    fn execute_model_tool(
+        &mut self,
+        thread_id: &ThreadId,
+        turn_id: &TurnId,
+        invocation: liz_protocol::ToolInvocation,
+    ) {
+        let request = ToolCallRequest {
+            thread_id: thread_id.clone(),
+            turn_id: Some(turn_id.clone()),
+            invocation,
         };
+        let Ok(executed) = self.executor.execute_tool(&request) else {
+            return;
+        };
+        let executor_task_id = executor_task_id_for_result(thread_id, &executed.result);
+        let output_chunks = executed.output_chunks.clone();
+        let artifacts = executed
+            .artifacts
+            .into_iter()
+            .map(|artifact| (artifact.kind, artifact.summary, artifact.body))
+            .collect::<Vec<_>>();
+        let Ok((execution_turn_id, artifact_refs)) = self.runtime.record_tool_execution(
+            thread_id,
+            Some(turn_id),
+            executed.tool_name.as_str(),
+            &executed.summary,
+            artifacts,
+        ) else {
+            return;
+        };
+
+        for artifact in artifact_refs.iter().cloned() {
+            self.event_bus.publish(crate::events::PendingEvent::new(
+                artifact.thread_id.clone(),
+                Some(artifact.turn_id.clone()),
+                ServerEventPayload::ArtifactCreated(ArtifactCreatedEvent {
+                    artifact: artifact.clone(),
+                }),
+            ));
+            if matches!(artifact.kind, liz_protocol::ArtifactKind::Diff) {
+                self.event_bus.publish(crate::events::PendingEvent::new(
+                    artifact.thread_id.clone(),
+                    Some(artifact.turn_id.clone()),
+                    ServerEventPayload::DiffAvailable(DiffAvailableEvent { artifact }),
+                ));
+            }
+        }
+
+        for chunk in output_chunks {
+            self.event_bus.publish(crate::events::PendingEvent::new(
+                thread_id.clone(),
+                Some(execution_turn_id.clone()),
+                ServerEventPayload::ExecutorOutputChunk(ExecutorOutputChunkEvent {
+                    executor_task_id: executor_task_id.clone(),
+                    stream: chunk.stream,
+                    chunk: chunk.chunk,
+                }),
+            ));
+        }
 
         self.event_bus.publish(crate::events::PendingEvent::new(
             thread_id.clone(),
-            Some(turn_id.clone()),
-            payload,
+            Some(execution_turn_id),
+            ServerEventPayload::ToolCompleted(ToolCompletedEvent {
+                tool_name: executed.tool_name.as_str().to_owned(),
+                summary: executed.summary,
+                artifact_ids: artifact_refs.iter().map(|artifact| artifact.id.clone()).collect(),
+            }),
         ));
+    }
+}
+
+fn parse_tool_invocation(tool_name: &str, arguments: &str) -> Option<liz_protocol::ToolInvocation> {
+    let value: serde_json::Value = serde_json::from_str(arguments).ok()?;
+    match tool_name {
+        "shell.exec" => {
+            Some(liz_protocol::ToolInvocation::ShellExec(liz_protocol::ShellExecRequest {
+                command: value.get("command")?.as_str()?.to_owned(),
+                working_dir: value
+                    .get("working_dir")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_owned),
+            }))
+        }
+        _ => None,
+    }
+}
+
+fn executor_task_id_for_result(
+    thread_id: &ThreadId,
+    result: &liz_protocol::ToolResult,
+) -> ExecutorTaskId {
+    match result {
+        liz_protocol::ToolResult::ShellSpawn(result) => result.task_id.clone(),
+        liz_protocol::ToolResult::ShellWait(result) => result.task_id.clone(),
+        liz_protocol::ToolResult::ShellReadOutput(result) => result.task_id.clone(),
+        liz_protocol::ToolResult::ShellTerminate(result) => result.task_id.clone(),
+        _ => ExecutorTaskId::new(format!(
+            "executor_{}_{}",
+            thread_id,
+            result.tool_name().as_str().replace('.', "_")
+        )),
     }
 }
