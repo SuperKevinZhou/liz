@@ -48,8 +48,10 @@ pub use responses::{
 };
 pub use thread::{Thread, ThreadStatus};
 pub use tool::{
-    ToolCallRequest, ToolCallResponse, ToolInvocation, ToolName, ToolResult, WorkspaceListEntry,
+    ToolCallRequest, ToolCallResponse, ToolInvocation, ToolName, ToolResult,
+    WorkspaceApplyPatchRequest, WorkspaceApplyPatchResult, WorkspaceListEntry,
     WorkspaceListRequest, WorkspaceListResult, WorkspaceReadRequest, WorkspaceReadResult,
-    WorkspaceSearchMatch, WorkspaceSearchRequest, WorkspaceSearchResult,
+    WorkspaceSearchMatch, WorkspaceSearchRequest, WorkspaceSearchResult, WorkspaceWriteTextRequest,
+    WorkspaceWriteTextResult,
 };
 pub use turn::{Turn, TurnKind, TurnStatus};

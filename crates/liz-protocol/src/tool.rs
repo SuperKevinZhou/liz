@@ -14,6 +14,10 @@ pub enum ToolName {
     WorkspaceSearch,
     /// Reads a text file from the workspace.
     WorkspaceRead,
+    /// Replaces the full contents of a text file.
+    WorkspaceWriteText,
+    /// Applies a bounded patch to a text file.
+    WorkspaceApplyPatch,
 }
 
 impl ToolName {
@@ -23,6 +27,8 @@ impl ToolName {
             Self::WorkspaceList => "workspace.list",
             Self::WorkspaceSearch => "workspace.search",
             Self::WorkspaceRead => "workspace.read",
+            Self::WorkspaceWriteText => "workspace.write_text",
+            Self::WorkspaceApplyPatch => "workspace.apply_patch",
         }
     }
 }
@@ -40,6 +46,12 @@ pub enum ToolInvocation {
     /// Invokes `workspace.read`.
     #[serde(rename = "workspace.read")]
     WorkspaceRead(WorkspaceReadRequest),
+    /// Invokes `workspace.write_text`.
+    #[serde(rename = "workspace.write_text")]
+    WorkspaceWriteText(WorkspaceWriteTextRequest),
+    /// Invokes `workspace.apply_patch`.
+    #[serde(rename = "workspace.apply_patch")]
+    WorkspaceApplyPatch(WorkspaceApplyPatchRequest),
 }
 
 impl ToolInvocation {
@@ -49,6 +61,8 @@ impl ToolInvocation {
             Self::WorkspaceList(_) => ToolName::WorkspaceList,
             Self::WorkspaceSearch(_) => ToolName::WorkspaceSearch,
             Self::WorkspaceRead(_) => ToolName::WorkspaceRead,
+            Self::WorkspaceWriteText(_) => ToolName::WorkspaceWriteText,
+            Self::WorkspaceApplyPatch(_) => ToolName::WorkspaceApplyPatch,
         }
     }
 }
@@ -66,6 +80,12 @@ pub enum ToolResult {
     /// Result payload for `workspace.read`.
     #[serde(rename = "workspace.read")]
     WorkspaceRead(WorkspaceReadResult),
+    /// Result payload for `workspace.write_text`.
+    #[serde(rename = "workspace.write_text")]
+    WorkspaceWriteText(WorkspaceWriteTextResult),
+    /// Result payload for `workspace.apply_patch`.
+    #[serde(rename = "workspace.apply_patch")]
+    WorkspaceApplyPatch(WorkspaceApplyPatchResult),
 }
 
 impl ToolResult {
@@ -75,6 +95,8 @@ impl ToolResult {
             Self::WorkspaceList(_) => ToolName::WorkspaceList,
             Self::WorkspaceSearch(_) => ToolName::WorkspaceSearch,
             Self::WorkspaceRead(_) => ToolName::WorkspaceRead,
+            Self::WorkspaceWriteText(_) => ToolName::WorkspaceWriteText,
+            Self::WorkspaceApplyPatch(_) => ToolName::WorkspaceApplyPatch,
         }
     }
 }
@@ -187,6 +209,50 @@ pub struct WorkspaceReadResult {
     pub end_line: usize,
     /// The total number of lines in the file.
     pub total_lines: usize,
+}
+
+/// Input for `workspace.write_text`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceWriteTextRequest {
+    /// The file path to write.
+    pub path: String,
+    /// The full replacement contents for the file.
+    pub content: String,
+}
+
+/// Output for `workspace.write_text`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceWriteTextResult {
+    /// The file path that was written.
+    pub path: String,
+    /// Whether the contents changed.
+    pub changed: bool,
+    /// The number of bytes now stored in the file.
+    pub byte_length: usize,
+}
+
+/// Input for `workspace.apply_patch`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceApplyPatchRequest {
+    /// The file path to patch.
+    pub path: String,
+    /// The exact text to search for.
+    pub search: String,
+    /// The replacement text to insert.
+    pub replace: String,
+    /// Whether every match should be replaced instead of only the first one.
+    pub replace_all: bool,
+}
+
+/// Output for `workspace.apply_patch`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceApplyPatchResult {
+    /// The file path that was patched.
+    pub path: String,
+    /// The number of replacements that were applied.
+    pub replacements: usize,
+    /// Whether the file contents changed.
+    pub changed: bool,
 }
 
 /// Response payload for one tool execution.

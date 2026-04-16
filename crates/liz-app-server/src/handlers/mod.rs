@@ -4,9 +4,9 @@ use crate::events::PendingEvent;
 use crate::executor::ExecutorGateway;
 use crate::runtime::{RuntimeCoordinator, RuntimeError};
 use liz_protocol::events::{
-    ApprovalResolvedEvent, ArtifactCreatedEvent, ThreadForkedEvent, ThreadInterruptedEvent,
-    ThreadResumedEvent, ThreadStartedEvent, ThreadUpdatedEvent, ToolCompletedEvent,
-    TurnCancelledEvent, TurnStartedEvent,
+    ApprovalResolvedEvent, ArtifactCreatedEvent, DiffAvailableEvent, ThreadForkedEvent,
+    ThreadInterruptedEvent, ThreadResumedEvent, ThreadStartedEvent, ThreadUpdatedEvent,
+    ToolCompletedEvent, TurnCancelledEvent, TurnStartedEvent,
 };
 use liz_protocol::requests::ClientRequest;
 use liz_protocol::responses::{
@@ -140,12 +140,22 @@ pub fn handle_request(
             let mut events = artifact_refs
                 .iter()
                 .cloned()
-                .map(|artifact| {
-                    PendingEvent::new(
+                .flat_map(|artifact| {
+                    let mut pending = vec![PendingEvent::new(
                         artifact.thread_id.clone(),
                         Some(artifact.turn_id.clone()),
-                        ServerEventPayload::ArtifactCreated(ArtifactCreatedEvent { artifact }),
-                    )
+                        ServerEventPayload::ArtifactCreated(ArtifactCreatedEvent {
+                            artifact: artifact.clone(),
+                        }),
+                    )];
+                    if matches!(artifact.kind, liz_protocol::ArtifactKind::Diff) {
+                        pending.push(PendingEvent::new(
+                            artifact.thread_id.clone(),
+                            Some(artifact.turn_id.clone()),
+                            ServerEventPayload::DiffAvailable(DiffAvailableEvent { artifact }),
+                        ));
+                    }
+                    pending
                 })
                 .collect::<Vec<_>>();
             events.push(PendingEvent::new(

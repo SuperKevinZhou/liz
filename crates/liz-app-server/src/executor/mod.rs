@@ -50,6 +50,7 @@ impl ExecutorGateway {
                     summary,
                     ToolResult::WorkspaceList(result),
                     &request.invocation,
+                    None,
                 ))
             }
             ToolInvocation::WorkspaceSearch(input) => {
@@ -65,6 +66,7 @@ impl ExecutorGateway {
                     summary,
                     ToolResult::WorkspaceSearch(result),
                     &request.invocation,
+                    None,
                 ))
             }
             ToolInvocation::WorkspaceRead(input) => {
@@ -78,6 +80,39 @@ impl ExecutorGateway {
                     summary,
                     ToolResult::WorkspaceRead(result),
                     &request.invocation,
+                    None,
+                ))
+            }
+            ToolInvocation::WorkspaceWriteText(input) => {
+                let write = workspace::write_text(input)?;
+                let summary = if write.result.changed {
+                    format!("Wrote {} bytes to {}", write.result.byte_length, write.result.path)
+                } else {
+                    format!(
+                        "Confirmed {} already matched the requested contents",
+                        write.result.path
+                    )
+                };
+                Ok(executed_tool(
+                    ToolName::WorkspaceWriteText,
+                    summary,
+                    ToolResult::WorkspaceWriteText(write.result),
+                    &request.invocation,
+                    Some(diff_artifact(&input.path, &write.before, &write.after)),
+                ))
+            }
+            ToolInvocation::WorkspaceApplyPatch(input) => {
+                let patch = workspace::apply_patch(input)?;
+                let summary = format!(
+                    "Patched {} replacement(s) in {}",
+                    patch.result.replacements, patch.result.path
+                );
+                Ok(executed_tool(
+                    ToolName::WorkspaceApplyPatch,
+                    summary,
+                    ToolResult::WorkspaceApplyPatch(patch.result),
+                    &request.invocation,
+                    Some(diff_artifact(&input.path, &patch.before, &patch.after)),
                 ))
             }
         }
@@ -89,11 +124,14 @@ fn executed_tool(
     summary: String,
     result: ToolResult,
     invocation: &ToolInvocation,
+    extra_artifact: Option<PendingArtifact>,
 ) -> ExecutedTool {
     let snapshot_body = match &result {
         ToolResult::WorkspaceList(output) => serialize_snapshot(output),
         ToolResult::WorkspaceSearch(output) => serialize_snapshot(output),
         ToolResult::WorkspaceRead(output) => serialize_snapshot(output),
+        ToolResult::WorkspaceWriteText(output) => serialize_snapshot(output),
+        ToolResult::WorkspaceApplyPatch(output) => serialize_snapshot(output),
     };
     let trace_body = serde_json::to_string_pretty(&ToolTraceArtifact {
         tool_name: tool_name.as_str().to_owned(),
@@ -103,19 +141,23 @@ fn executed_tool(
     })
     .expect("tool trace should serialize");
 
-    ExecutedTool {
-        tool_name,
-        summary: summary.clone(),
-        result,
-        artifacts: vec![
-            PendingArtifact {
-                kind: ArtifactKind::ToolTrace,
-                summary: format!("Tool trace for {}", tool_name.as_str()),
-                body: trace_body,
-            },
-            PendingArtifact { kind: ArtifactKind::Snapshot, summary, body: snapshot_body },
-        ],
+    let mut artifacts = vec![
+        PendingArtifact {
+            kind: ArtifactKind::ToolTrace,
+            summary: format!("Tool trace for {}", tool_name.as_str()),
+            body: trace_body,
+        },
+        PendingArtifact {
+            kind: ArtifactKind::Snapshot,
+            summary: summary.clone(),
+            body: snapshot_body,
+        },
+    ];
+    if let Some(extra_artifact) = extra_artifact {
+        artifacts.push(extra_artifact);
     }
+
+    ExecutedTool { tool_name, summary: summary.clone(), result, artifacts }
 }
 
 fn serialize_snapshot<T: Serialize>(value: &T) -> String {
@@ -128,4 +170,30 @@ struct ToolTraceArtifact<'a> {
     invocation: &'a ToolInvocation,
     summary: String,
     result: &'a ToolResult,
+}
+
+fn diff_artifact(path: &str, before: &str, after: &str) -> PendingArtifact {
+    PendingArtifact {
+        kind: ArtifactKind::Diff,
+        summary: format!("Diff for {path}"),
+        body: render_diff(path, before, after),
+    }
+}
+
+fn render_diff(path: &str, before: &str, after: &str) -> String {
+    let mut diff = String::new();
+    diff.push_str(&format!("--- {path}\n"));
+    diff.push_str(&format!("+++ {path}\n"));
+    diff.push_str("@@\n");
+    for line in before.lines() {
+        diff.push('-');
+        diff.push_str(line);
+        diff.push('\n');
+    }
+    for line in after.lines() {
+        diff.push('+');
+        diff.push_str(line);
+        diff.push('\n');
+    }
+    diff
 }
