@@ -427,6 +427,66 @@ fn background_shell_can_terminate() {
         .any(|event| matches!(event.payload, ServerEventPayload::ToolCompleted(_))));
 }
 
+#[test]
+fn shell_exec_fails_closed_when_default_sandbox_backend_is_unavailable() {
+    if !cfg!(target_os = "windows") {
+        return;
+    }
+
+    let temp_dir = TempDir::new().expect("temp dir should be created");
+    let workspace_root = temp_dir.path().join("workspace");
+    fs::create_dir_all(&workspace_root).expect("workspace root should exist");
+
+    let server = AppServer::new(StoragePaths::new(temp_dir.path().join(".liz")));
+    let client = spawn_loopback_websocket(server);
+
+    client
+        .send_request(envelope(
+            "request_51",
+            ClientRequest::ThreadStart(ThreadStartRequest {
+                title: Some("Shell sandbox fail-closed".to_owned()),
+                initial_goal: Some("Refuse unsupported default sandbox execution".to_owned()),
+                workspace_ref: Some(workspace_root.to_string_lossy().to_string()),
+            }),
+        ))
+        .expect("thread request should be sent");
+    let response = client.recv_response().expect("thread response should arrive");
+    let thread = match response {
+        ServerResponseEnvelope::Success(success) => match success.response {
+            ResponsePayload::ThreadStart(response) => response.thread,
+            other => panic!("unexpected response payload: {other:?}"),
+        },
+        other => panic!("unexpected response envelope: {other:?}"),
+    };
+    client.recv_event_timeout(Duration::from_secs(1)).expect("thread_started event should arrive");
+
+    client
+        .send_request(envelope(
+            "request_52",
+            ClientRequest::ToolCall(ToolCallRequest {
+                thread_id: thread.id,
+                turn_id: None,
+                invocation: ToolInvocation::ShellExec(ShellExecRequest {
+                    command: "Write-Output 'hello'".to_owned(),
+                    working_dir: Some(workspace_root.to_string_lossy().to_string()),
+                    sandbox: None,
+                }),
+            }),
+        ))
+        .expect("tool request should be sent");
+
+    match client.recv_response().expect("tool response should arrive") {
+        ServerResponseEnvelope::Error(error) => {
+            assert_eq!(error.error.code, "windows_sandbox_user_unimplemented");
+            assert!(
+                error.error.message.contains("sandbox-user"),
+                "unexpected error response: {error:?}"
+            );
+        }
+        other => panic!("expected tool error response, got {other:?}"),
+    }
+}
+
 fn send_tool(
     client: &liz_app_server::server::LoopbackWebSocketClient,
     request_id: &str,
