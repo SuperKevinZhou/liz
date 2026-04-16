@@ -112,7 +112,8 @@ impl SandboxConfig {
     /// Loads sandbox defaults from environment variables.
     pub fn from_env() -> Self {
         Self {
-            default_mode: parse_sandbox_mode("LIZ_SANDBOX_MODE").unwrap_or(SandboxMode::WorkspaceWrite),
+            default_mode: parse_sandbox_mode("LIZ_SANDBOX_MODE")
+                .unwrap_or(SandboxMode::WorkspaceWrite),
             default_network_access: parse_network_access("LIZ_SANDBOX_NETWORK")
                 .unwrap_or(SandboxNetworkAccess::Restricted),
             windows_backend: WindowsSandboxBackend::from_env(),
@@ -121,12 +122,13 @@ impl SandboxConfig {
     }
 
     /// Resolves the effective sandbox request for one shell tool invocation.
-    pub fn resolve_request(&self, request: Option<&ShellSandboxRequest>) -> EffectiveSandboxRequest {
+    pub fn resolve_request(
+        &self,
+        request: Option<&ShellSandboxRequest>,
+    ) -> EffectiveSandboxRequest {
         let override_request = request.cloned();
-        let mode = override_request
-            .as_ref()
-            .map(|request| request.mode)
-            .unwrap_or(self.default_mode);
+        let mode =
+            override_request.as_ref().map(|request| request.mode).unwrap_or(self.default_mode);
         let network_access = override_request
             .as_ref()
             .map(|request| request.network_access)
@@ -148,7 +150,9 @@ impl SandboxConfig {
             PlatformSandboxBackend::LinuxHelper
         } else if cfg!(target_os = "windows") {
             match self.windows_backend {
-                WindowsSandboxBackend::RestrictedToken => PlatformSandboxBackend::WindowsRestrictedToken,
+                WindowsSandboxBackend::RestrictedToken => {
+                    PlatformSandboxBackend::WindowsRestrictedToken
+                }
                 WindowsSandboxBackend::SandboxUser => PlatformSandboxBackend::WindowsSandboxUser,
             }
         } else {

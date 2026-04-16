@@ -42,15 +42,12 @@ impl LocalShellExecutor {
             request.working_dir.as_deref(),
             request.sandbox.as_ref(),
         )?;
-        let output = prepared
-            .command
-            .output()
-            .map_err(|error| {
-                RuntimeError::invalid_state(
-                    "shell_exec_failed",
-                    format!("failed to execute shell command: {error}"),
-                )
-            })?;
+        let output = prepared.command.output().map_err(|error| {
+            RuntimeError::invalid_state(
+                "shell_exec_failed",
+                format!("failed to execute shell command: {error}"),
+            )
+        })?;
         let decorated_stdout =
             decorate_stdout(prepared.sandbox.clone(), &String::from_utf8_lossy(&output.stdout));
 
@@ -226,7 +223,7 @@ impl LocalShellExecutor {
     ) -> RuntimeResult<PreparedShellCommand> {
         let sandbox = self.sandbox.resolve_request(sandbox_override);
         sandbox.ensure_supported()?;
-        let command_process = build_shell_command(command, working_dir, &sandbox)?;
+        let command_process = build_shell_command(command, working_dir, &sandbox, &self.sandbox)?;
         Ok(PreparedShellCommand { command: command_process, sandbox })
     }
 }
@@ -286,11 +283,7 @@ struct BackgroundShellState {
 }
 
 impl BackgroundShellState {
-    fn new(
-        command: String,
-        working_dir: Option<String>,
-        sandbox: EffectiveSandboxRequest,
-    ) -> Self {
+    fn new(command: String, working_dir: Option<String>, sandbox: EffectiveSandboxRequest) -> Self {
         Self {
             stdout: String::new(),
             stderr: String::new(),
@@ -314,11 +307,14 @@ fn build_shell_command(
     command: &str,
     working_dir: Option<&str>,
     sandbox: &EffectiveSandboxRequest,
+    config: &SandboxConfig,
 ) -> RuntimeResult<Command> {
     let mut built = match sandbox.mode {
-        SandboxMode::DangerFullAccess | SandboxMode::ExternalSandbox => direct_shell_command(command),
+        SandboxMode::DangerFullAccess | SandboxMode::ExternalSandbox => {
+            direct_shell_command(command)
+        }
         SandboxMode::ReadOnly | SandboxMode::WorkspaceWrite => {
-            sandboxed_shell_command(command, working_dir, sandbox)?
+            sandboxed_shell_command(command, working_dir, sandbox, config)?
         }
     };
 
@@ -349,6 +345,7 @@ fn sandboxed_shell_command(
     command: &str,
     working_dir: Option<&str>,
     sandbox: &EffectiveSandboxRequest,
+    config: &SandboxConfig,
 ) -> RuntimeResult<Command> {
     match sandbox.backend {
         PlatformSandboxBackend::MacosSeatbelt => {
@@ -363,37 +360,97 @@ fn sandboxed_shell_command(
             Ok(command_process)
         }
         PlatformSandboxBackend::LinuxHelper => {
-            let helper = std::env::var("LIZ_LINUX_SANDBOX_HELPER").map_err(|_| {
-                RuntimeError::invalid_state(
-                    "linux_sandbox_helper_missing",
-                    "sandbox mode requires LIZ_LINUX_SANDBOX_HELPER to point at the Linux sandbox helper",
-                )
-            })?;
-            let mut command_process = Command::new(helper);
-            command_process
-                .arg("--sandbox-mode")
-                .arg(sandbox.mode.as_str())
-                .arg("--network-access")
-                .arg(sandbox.network_access.as_str());
-            if let Some(working_dir) = working_dir {
-                command_process.arg("--working-dir").arg(working_dir);
-            }
-            command_process.arg("--").arg("sh").arg("-lc").arg(command);
-            Ok(command_process)
+            let helper = helper_path_for_backend(sandbox.backend)?;
+            Ok(build_linux_helper_command(
+                &helper,
+                command,
+                working_dir,
+                sandbox,
+                config.linux_variant,
+            ))
         }
-        PlatformSandboxBackend::WindowsRestrictedToken => Err(RuntimeError::unsupported(
-            "windows_restricted_token_unimplemented",
-            "windows restricted-token sandbox execution is not implemented yet",
-        )),
-        PlatformSandboxBackend::WindowsSandboxUser => Err(RuntimeError::unsupported(
-            "windows_sandbox_user_unimplemented",
-            "windows sandbox-user execution is not implemented yet",
-        )),
+        PlatformSandboxBackend::WindowsRestrictedToken => {
+            let helper = helper_path_for_backend(sandbox.backend)?;
+            Ok(build_windows_helper_command(&helper, command, working_dir, sandbox))
+        }
+        PlatformSandboxBackend::WindowsSandboxUser => {
+            let helper = helper_path_for_backend(sandbox.backend)?;
+            Ok(build_windows_helper_command(&helper, command, working_dir, sandbox))
+        }
         PlatformSandboxBackend::None => Err(RuntimeError::invalid_state(
             "sandbox_backend_unavailable",
             "sandbox mode requires a platform backend",
         )),
     }
+}
+
+fn helper_path_for_backend(backend: PlatformSandboxBackend) -> RuntimeResult<String> {
+    let (env_key, error_code, description) = match backend {
+        PlatformSandboxBackend::LinuxHelper => {
+            ("LIZ_LINUX_SANDBOX_HELPER", "linux_sandbox_helper_missing", "Linux sandbox helper")
+        }
+        PlatformSandboxBackend::WindowsRestrictedToken => (
+            "LIZ_WINDOWS_RESTRICTED_TOKEN_HELPER",
+            "windows_restricted_token_helper_missing",
+            "Windows restricted-token sandbox helper",
+        ),
+        PlatformSandboxBackend::WindowsSandboxUser => (
+            "LIZ_WINDOWS_SANDBOX_USER_HELPER",
+            "windows_sandbox_user_helper_missing",
+            "Windows sandbox-user helper",
+        ),
+        PlatformSandboxBackend::MacosSeatbelt | PlatformSandboxBackend::None => {
+            return Err(RuntimeError::invalid_state(
+                "sandbox_backend_helper_not_applicable",
+                "helper path lookup is not applicable to this backend",
+            ))
+        }
+    };
+    std::env::var(env_key).map_err(|_| {
+        RuntimeError::invalid_state(error_code, format!("{description} is required in {env_key}"))
+    })
+}
+
+fn build_linux_helper_command(
+    helper: &str,
+    command: &str,
+    working_dir: Option<&str>,
+    sandbox: &EffectiveSandboxRequest,
+    linux_variant: crate::executor::LinuxSandboxVariant,
+) -> Command {
+    let mut command_process = Command::new(helper);
+    command_process
+        .arg("--sandbox-mode")
+        .arg(sandbox.mode.as_str())
+        .arg("--network-access")
+        .arg(sandbox.network_access.as_str());
+    if let Some(working_dir) = working_dir {
+        command_process.arg("--working-dir").arg(working_dir);
+    }
+    if matches!(linux_variant, crate::executor::LinuxSandboxVariant::LegacyLandlock) {
+        command_process.arg("--use-legacy-landlock");
+    }
+    command_process.arg("--").arg("sh").arg("-lc").arg(command);
+    command_process
+}
+
+fn build_windows_helper_command(
+    helper: &str,
+    command: &str,
+    working_dir: Option<&str>,
+    sandbox: &EffectiveSandboxRequest,
+) -> Command {
+    let mut command_process = Command::new(helper);
+    command_process
+        .arg("--sandbox-mode")
+        .arg(sandbox.mode.as_str())
+        .arg("--network-access")
+        .arg(sandbox.network_access.as_str());
+    if let Some(working_dir) = working_dir {
+        command_process.arg("--working-dir").arg(working_dir);
+    }
+    command_process.arg("--").arg("powershell").arg("-NoProfile").arg("-Command").arg(command);
+    command_process
 }
 
 fn build_macos_policy(
@@ -403,9 +460,7 @@ fn build_macos_policy(
 ) -> String {
     let workspace_root = working_dir.unwrap_or(".");
     let file_write_policy = if matches!(mode, SandboxMode::WorkspaceWrite) {
-        format!(
-            "(allow file-write* (subpath \"{workspace_root}\"))\n"
-        )
+        format!("(allow file-write* (subpath \"{workspace_root}\"))\n")
     } else {
         String::new()
     };
@@ -414,7 +469,9 @@ fn build_macos_policy(
         SandboxNetworkAccess::Restricted => {
             "(allow network-outbound (remote ip \"localhost:*\"))\n".to_owned()
         }
-        SandboxNetworkAccess::Enabled => "(allow network-outbound)\n(allow network-inbound)\n".to_owned(),
+        SandboxNetworkAccess::Enabled => {
+            "(allow network-outbound)\n(allow network-inbound)\n".to_owned()
+        }
     };
 
     format!(
@@ -423,10 +480,7 @@ fn build_macos_policy(
 }
 
 fn decorate_stdout(sandbox: EffectiveSandboxRequest, stdout: &str) -> String {
-    if matches!(
-        sandbox.mode,
-        SandboxMode::DangerFullAccess | SandboxMode::ExternalSandbox
-    ) {
+    if matches!(sandbox.mode, SandboxMode::DangerFullAccess | SandboxMode::ExternalSandbox) {
         stdout.to_owned()
     } else {
         format!(
@@ -512,7 +566,8 @@ fn wait_for_exit_code(child: &mut Child) -> RuntimeResult<Option<i32>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_macos_policy, build_shell_command, sandboxed_shell_command, EffectiveSandboxRequest,
+        build_linux_helper_command, build_macos_policy, build_shell_command,
+        build_windows_helper_command, sandboxed_shell_command, EffectiveSandboxRequest,
     };
     use crate::executor::{PlatformSandboxBackend, SandboxConfig, WindowsSandboxBackend};
     use liz_protocol::{SandboxMode, SandboxNetworkAccess, ShellSandboxRequest};
@@ -526,7 +581,7 @@ mod tests {
             request: None,
         };
 
-        let command = build_shell_command("echo test", None, &sandbox)
+        let command = build_shell_command("echo test", None, &sandbox, &SandboxConfig::default())
             .expect("danger-full-access command should build");
         let program = command.get_program().to_string_lossy().to_ascii_lowercase();
         assert!(program.contains("powershell") || program == "sh");
@@ -549,9 +604,9 @@ mod tests {
             network_access: SandboxNetworkAccess::Restricted,
         }));
 
-        let error = sandboxed_shell_command("Write-Output test", None, &effective)
+        let error = sandboxed_shell_command("Write-Output test", None, &effective, &config)
             .expect_err("unsupported backend should fail closed");
-        assert_eq!(error.code(), "windows_sandbox_user_unimplemented");
+        assert_eq!(error.code(), "windows_sandbox_user_helper_missing");
     }
 
     #[test]
@@ -564,5 +619,51 @@ mod tests {
 
         assert!(policy.contains("(allow file-write* (subpath \"/tmp/workspace\"))"));
         assert!(policy.contains("(allow network-outbound (remote ip \"localhost:*\"))"));
+    }
+
+    #[test]
+    fn linux_helper_command_supports_legacy_landlock_flag() {
+        let sandbox = EffectiveSandboxRequest {
+            mode: SandboxMode::WorkspaceWrite,
+            network_access: SandboxNetworkAccess::Restricted,
+            backend: PlatformSandboxBackend::LinuxHelper,
+            request: None,
+        };
+
+        let command = build_linux_helper_command(
+            "/usr/local/bin/liz-linux-sandbox",
+            "echo test",
+            Some("/tmp/workspace"),
+            &sandbox,
+            crate::executor::LinuxSandboxVariant::LegacyLandlock,
+        );
+        let arguments =
+            command.get_args().map(|value| value.to_string_lossy().to_string()).collect::<Vec<_>>();
+
+        assert!(arguments.contains(&"--use-legacy-landlock".to_owned()));
+        assert!(arguments.contains(&"--working-dir".to_owned()));
+    }
+
+    #[test]
+    fn windows_helper_command_wraps_powershell_payload() {
+        let sandbox = EffectiveSandboxRequest {
+            mode: SandboxMode::WorkspaceWrite,
+            network_access: SandboxNetworkAccess::Restricted,
+            backend: PlatformSandboxBackend::WindowsRestrictedToken,
+            request: None,
+        };
+
+        let command = build_windows_helper_command(
+            "C:\\sandbox\\restricted-token.exe",
+            "Write-Output test",
+            Some("D:\\repo"),
+            &sandbox,
+        );
+        let arguments =
+            command.get_args().map(|value| value.to_string_lossy().to_string()).collect::<Vec<_>>();
+
+        assert!(arguments.contains(&"powershell".to_owned()));
+        assert!(arguments.contains(&"-Command".to_owned()));
+        assert!(arguments.contains(&"Write-Output test".to_owned()));
     }
 }

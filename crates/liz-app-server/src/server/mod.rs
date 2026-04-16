@@ -389,11 +389,24 @@ fn parse_tool_invocation(tool_name: &str, arguments: &str) -> Option<liz_protoco
                     .get("working_dir")
                     .and_then(|value| value.as_str())
                     .map(str::to_owned),
-                sandbox: None,
+                sandbox: parse_shell_sandbox_request(value.get("sandbox")),
             }))
         }
         _ => None,
     }
+}
+
+fn parse_shell_sandbox_request(
+    value: Option<&serde_json::Value>,
+) -> Option<liz_protocol::ShellSandboxRequest> {
+    let value = value?;
+    let mode =
+        serde_json::from_value::<liz_protocol::SandboxMode>(value.get("mode")?.clone()).ok()?;
+    let network_access = serde_json::from_value::<liz_protocol::SandboxNetworkAccess>(
+        value.get("network_access")?.clone(),
+    )
+    .ok()?;
+    Some(liz_protocol::ShellSandboxRequest { mode, network_access })
 }
 
 fn executor_task_id_for_result(
@@ -410,5 +423,38 @@ fn executor_task_id_for_result(
             thread_id,
             result.tool_name().as_str().replace('.', "_")
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_tool_invocation;
+    use liz_protocol::{SandboxMode, SandboxNetworkAccess, ToolInvocation};
+
+    #[test]
+    fn parses_shell_exec_with_sandbox_override() {
+        let invocation = parse_tool_invocation(
+            "shell.exec",
+            r#"{
+                "command":"echo hello",
+                "working_dir":"/tmp/workspace",
+                "sandbox":{
+                    "mode":"danger-full-access",
+                    "network_access":"enabled"
+                }
+            }"#,
+        )
+        .expect("shell.exec invocation should parse");
+
+        match invocation {
+            ToolInvocation::ShellExec(request) => {
+                let sandbox = request.sandbox.expect("sandbox override should be present");
+                assert_eq!(sandbox.mode, SandboxMode::DangerFullAccess);
+                assert_eq!(sandbox.network_access, SandboxNetworkAccess::Enabled);
+                assert_eq!(request.command, "echo hello");
+                assert_eq!(request.working_dir.as_deref(), Some("/tmp/workspace"));
+            }
+            other => panic!("unexpected invocation: {other:?}"),
+        }
     }
 }

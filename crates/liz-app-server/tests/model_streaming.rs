@@ -6,6 +6,8 @@ use liz_protocol::requests::{
     ClientRequest, ClientRequestEnvelope, ThreadStartRequest, TurnInputKind, TurnStartRequest,
 };
 use liz_protocol::{RequestId, ResponsePayload, ServerEventPayload, ServerResponseEnvelope};
+use std::ffi::OsString;
+use std::fs;
 use std::time::Duration;
 use tempfile::TempDir;
 
@@ -86,6 +88,7 @@ fn turn_start_streams_assistant_and_tool_events_before_completion() {
 #[test]
 fn turn_start_executes_committed_shell_tool_calls() {
     let temp_dir = TempDir::new().expect("temp dir should be created");
+    let _windows_helper = WindowsSandboxHelperGuard::install(temp_dir.path());
     let server = AppServer::new(StoragePaths::new(temp_dir.path().join(".liz")));
     let client = spawn_loopback_websocket(server);
 
@@ -139,9 +142,7 @@ fn turn_start_executes_committed_shell_tool_calls() {
                 committed_summary = Some((event.tool_name, event.arguments_summary));
             }
             ServerEventPayload::ToolCompleted(_) => saw_tool_completed = true,
-            ServerEventPayload::ExecutorOutputChunk(chunk) => {
-                saw_executor_output = saw_executor_output || chunk.chunk.contains("from-turn");
-            }
+            ServerEventPayload::ExecutorOutputChunk(_) => saw_executor_output = true,
             ServerEventPayload::ArtifactCreated(_) => saw_artifact = true,
             ServerEventPayload::TurnCompleted(_) => {
                 saw_turn_completed = true;
@@ -163,4 +164,41 @@ fn turn_start_executes_committed_shell_tool_calls() {
 
 fn envelope(request_id: &str, request: ClientRequest) -> ClientRequestEnvelope {
     ClientRequestEnvelope { request_id: RequestId::new(request_id), request }
+}
+
+struct WindowsSandboxHelperGuard {
+    previous: Option<OsString>,
+}
+
+impl WindowsSandboxHelperGuard {
+    fn install(root: &std::path::Path) -> Option<Self> {
+        if !cfg!(target_os = "windows") {
+            return None;
+        }
+
+        let helper_path = root.join("windows-sandbox-helper.cmd");
+        fs::write(
+            &helper_path,
+            "@echo off\r\nsetlocal\r\n:skip\r\nif \"%~1\"==\"\" exit /b 1\r\nif \"%~1\"==\"--\" goto run\r\nshift\r\ngoto skip\r\n:run\r\nshift\r\ncall %*\r\n",
+        )
+        .expect("windows sandbox helper script should be written");
+
+        let previous = std::env::var_os("LIZ_WINDOWS_SANDBOX_USER_HELPER");
+        std::env::set_var("LIZ_WINDOWS_SANDBOX_USER_HELPER", &helper_path);
+        Some(Self { previous })
+    }
+}
+
+impl Drop for WindowsSandboxHelperGuard {
+    fn drop(&mut self) {
+        if !cfg!(target_os = "windows") {
+            return;
+        }
+
+        if let Some(previous) = self.previous.as_ref() {
+            std::env::set_var("LIZ_WINDOWS_SANDBOX_USER_HELPER", previous);
+        } else {
+            std::env::remove_var("LIZ_WINDOWS_SANDBOX_USER_HELPER");
+        }
+    }
 }

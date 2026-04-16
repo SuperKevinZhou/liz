@@ -7,8 +7,8 @@ use liz_protocol::{
     RequestId, ResponsePayload, SandboxBackendKind, SandboxMode, SandboxNetworkAccess,
     ServerEventPayload, ServerResponseEnvelope, ShellExecRequest, ShellReadOutputRequest,
     ShellSandboxRequest, ShellSpawnRequest, ShellTerminateRequest, ShellWaitRequest,
-    ToolCallRequest, ToolInvocation, ToolResult, WorkspaceApplyPatchRequest,
-    WorkspaceListRequest, WorkspaceReadRequest, WorkspaceSearchRequest, WorkspaceWriteTextRequest,
+    ToolCallRequest, ToolInvocation, ToolResult, WorkspaceApplyPatchRequest, WorkspaceListRequest,
+    WorkspaceReadRequest, WorkspaceSearchRequest, WorkspaceWriteTextRequest,
 };
 use std::fs;
 use std::time::Duration;
@@ -477,9 +477,9 @@ fn shell_exec_fails_closed_when_default_sandbox_backend_is_unavailable() {
 
     match client.recv_response().expect("tool response should arrive") {
         ServerResponseEnvelope::Error(error) => {
-            assert_eq!(error.error.code, "windows_sandbox_user_unimplemented");
+            assert_eq!(error.error.code, "windows_sandbox_user_helper_missing");
             assert!(
-                error.error.message.contains("sandbox-user"),
+                error.error.message.contains("LIZ_WINDOWS_SANDBOX_USER_HELPER"),
                 "unexpected error response: {error:?}"
             );
         }
