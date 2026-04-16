@@ -36,8 +36,7 @@ impl WebSocketAppClient {
     /// Connects the reference client to a real websocket app-server endpoint.
     pub fn connect(url: &str) -> Result<Self, AppClientError> {
         let socket_addr = parse_socket_addr(url)?;
-        let stream = TcpStream::connect(socket_addr).map_err(AppClientError::Io)?;
-        let (socket, _) = client(url, stream).map_err(map_handshake_error)?;
+        let socket = connect_socket(url, socket_addr)?;
         let (request_tx, request_rx) = mpsc::channel();
         let (response_tx, response_rx) = mpsc::channel();
         let (event_tx, event_rx) = mpsc::channel();
@@ -181,6 +180,34 @@ fn parse_socket_addr(url: &str) -> Result<SocketAddr, AppClientError> {
         .map_err(|error| AppClientError::Protocol(format!("invalid websocket url {url}: {error}")))
 }
 
+fn connect_socket(url: &str, socket_addr: SocketAddr) -> Result<WebSocket<TcpStream>, AppClientError> {
+    let mut last_error = None;
+
+    for _attempt in 0..10 {
+        let stream = match TcpStream::connect(socket_addr) {
+            Ok(stream) => stream,
+            Err(error) if connect_error_is_retryable(&error) => {
+                last_error = Some(AppClientError::Io(error));
+                thread::sleep(READ_POLL_INTERVAL);
+                continue;
+            }
+            Err(error) => return Err(AppClientError::Io(error)),
+        };
+        match client(url, stream) {
+            Ok((socket, _)) => return Ok(socket),
+            Err(error) if handshake_error_is_retryable(&error) => {
+                last_error = Some(map_handshake_error(error));
+                thread::sleep(READ_POLL_INTERVAL);
+            }
+            Err(error) => return Err(map_handshake_error(error)),
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| {
+        AppClientError::Protocol("websocket client handshake did not finish".to_owned())
+    }))
+}
+
 fn map_tungstenite_error(error: tungstenite::Error) -> AppClientError {
     match error {
         tungstenite::Error::ConnectionClosed
@@ -207,4 +234,20 @@ fn map_handshake_error(
             AppClientError::Protocol("websocket client handshake was interrupted".to_owned())
         }
     }
+}
+
+fn handshake_error_is_retryable(
+    error: &tungstenite::HandshakeError<tungstenite::handshake::client::ClientHandshake<TcpStream>>,
+) -> bool {
+    match error {
+        tungstenite::HandshakeError::Interrupted(_) => true,
+        tungstenite::HandshakeError::Failure(error) => error.to_string().contains("Handshake not finished"),
+    }
+}
+
+fn connect_error_is_retryable(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        ErrorKind::ConnectionRefused | ErrorKind::ConnectionAborted | ErrorKind::ConnectionReset
+    )
 }
