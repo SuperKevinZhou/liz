@@ -51,6 +51,11 @@ impl StoragePaths {
         self.root.join("global_memory.json")
     }
 
+    /// Returns the file used to persist provider auth profiles.
+    pub fn auth_profiles_file(&self) -> PathBuf {
+        self.root.join("auth_profiles.json")
+    }
+
     /// Returns the JSON file for a thread record.
     pub fn thread_file(&self, thread_id: &ThreadId) -> PathBuf {
         self.threads_dir().join(format!("{thread_id}.json"))

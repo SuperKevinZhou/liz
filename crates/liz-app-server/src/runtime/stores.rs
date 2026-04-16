@@ -1,9 +1,10 @@
 //! Runtime-facing storage bundle helpers.
 
 use crate::storage::{
-    ArtifactStore, CheckpointStore, FsArtifactStore, FsCheckpointStore, FsGlobalMemoryStore,
-    FsThreadStore, FsTurnLog, GlobalMemorySnapshot, GlobalMemoryStore, StoragePaths,
-    StorageResult, StoredArtifact, ThreadStore, TurnLog, TurnLogEntry,
+    ArtifactStore, AuthProfileSnapshot, AuthProfileStore, CheckpointStore, FsArtifactStore,
+    FsAuthProfileStore, FsCheckpointStore, FsGlobalMemoryStore, FsThreadStore, FsTurnLog,
+    GlobalMemorySnapshot, GlobalMemoryStore, StoragePaths, StorageResult, StoredArtifact,
+    ThreadStore, TurnLog, TurnLogEntry,
 };
 use liz_protocol::{ArtifactId, Checkpoint, CheckpointId, Thread, ThreadId};
 
@@ -15,6 +16,7 @@ pub struct RuntimeStores {
     checkpoint_store: FsCheckpointStore,
     global_memory_store: FsGlobalMemoryStore,
     artifact_store: FsArtifactStore,
+    auth_profile_store: FsAuthProfileStore,
 }
 
 impl RuntimeStores {
@@ -25,7 +27,8 @@ impl RuntimeStores {
             turn_log: FsTurnLog::new(paths.clone()),
             checkpoint_store: FsCheckpointStore::new(paths.clone()),
             global_memory_store: FsGlobalMemoryStore::new(paths.clone()),
-            artifact_store: FsArtifactStore::new(paths),
+            artifact_store: FsArtifactStore::new(paths.clone()),
+            auth_profile_store: FsAuthProfileStore::new(paths),
         }
     }
 
@@ -82,5 +85,15 @@ impl RuntimeStores {
     /// Reads an artifact when it exists.
     pub fn get_artifact(&self, artifact_id: &ArtifactId) -> StorageResult<Option<StoredArtifact>> {
         self.artifact_store.get_artifact(artifact_id)
+    }
+
+    /// Reads the persisted auth profile snapshot.
+    pub fn read_auth_profiles(&self) -> StorageResult<AuthProfileSnapshot> {
+        self.auth_profile_store.read_snapshot()
+    }
+
+    /// Writes the persisted auth profile snapshot.
+    pub fn write_auth_profiles(&self, snapshot: &AuthProfileSnapshot) -> StorageResult<()> {
+        self.auth_profile_store.write_snapshot(snapshot)
     }
 }

@@ -9,17 +9,18 @@ use crate::runtime::thread_manager::ThreadManager;
 use crate::runtime::turn_manager::TurnManager;
 use liz_protocol::memory::ResumeSummary;
 use liz_protocol::requests::{
-    ApprovalRespondRequest, ThreadForkRequest, ThreadResumeRequest, ThreadStartRequest,
-    TurnCancelRequest,
-    TurnStartRequest,
+    ApprovalRespondRequest, ProviderAuthDeleteRequest, ProviderAuthListRequest,
+    ProviderAuthUpsertRequest, ThreadForkRequest, ThreadResumeRequest, ThreadStartRequest,
+    TurnCancelRequest, TurnStartRequest,
 };
 use liz_protocol::responses::{
-    ApprovalRespondResponse, ThreadForkResponse, ThreadResumeResponse, ThreadStartResponse,
+    ApprovalRespondResponse, ProviderAuthDeleteResponse, ProviderAuthListResponse,
+    ProviderAuthUpsertResponse, ThreadForkResponse, ThreadResumeResponse, ThreadStartResponse,
     TurnCancelResponse, TurnStartResponse,
 };
 use liz_protocol::{
-    ApprovalDecision, ApprovalRequest, ApprovalStatus, Checkpoint, CheckpointScope, Thread,
-    ThreadId, Turn,
+    ApprovalDecision, ApprovalRequest, ApprovalStatus, Checkpoint, CheckpointScope,
+    ProviderAuthProfile, Thread, ThreadId, Turn,
 };
 use std::collections::HashMap;
 
@@ -63,6 +64,71 @@ impl RuntimeCoordinator {
     pub fn start_thread(&mut self, request: ThreadStartRequest) -> RuntimeResult<ThreadStartResponse> {
         let thread = self.thread_manager.start_thread(&self.stores, &mut self.ids, request)?;
         Ok(ThreadStartResponse { thread })
+    }
+
+    /// Lists persisted provider auth profiles.
+    pub fn list_provider_auth_profiles(
+        &self,
+        request: ProviderAuthListRequest,
+    ) -> RuntimeResult<ProviderAuthListResponse> {
+        let mut snapshot = self.stores.read_auth_profiles()?;
+        if let Some(provider_id) = request.provider_id.as_deref() {
+            snapshot
+                .profiles
+                .retain(|profile| profile.provider_id == provider_id);
+        }
+        Ok(ProviderAuthListResponse {
+            profiles: snapshot.profiles,
+        })
+    }
+
+    /// Creates or replaces a provider auth profile.
+    pub fn upsert_provider_auth_profile(
+        &mut self,
+        request: ProviderAuthUpsertRequest,
+    ) -> RuntimeResult<ProviderAuthUpsertResponse> {
+        validate_provider_auth_profile(&request.profile)?;
+
+        let mut snapshot = self.stores.read_auth_profiles()?;
+        if let Some(existing) = snapshot
+            .profiles
+            .iter_mut()
+            .find(|profile| profile.profile_id == request.profile.profile_id)
+        {
+            *existing = request.profile.clone();
+        } else {
+            snapshot.profiles.push(request.profile.clone());
+        }
+        snapshot
+            .profiles
+            .sort_by(|left, right| left.profile_id.cmp(&right.profile_id));
+        self.stores.write_auth_profiles(&snapshot)?;
+
+        Ok(ProviderAuthUpsertResponse {
+            profile: request.profile,
+        })
+    }
+
+    /// Deletes a provider auth profile.
+    pub fn delete_provider_auth_profile(
+        &mut self,
+        request: ProviderAuthDeleteRequest,
+    ) -> RuntimeResult<ProviderAuthDeleteResponse> {
+        let mut snapshot = self.stores.read_auth_profiles()?;
+        let original_len = snapshot.profiles.len();
+        snapshot
+            .profiles
+            .retain(|profile| profile.profile_id != request.profile_id);
+        if snapshot.profiles.len() == original_len {
+            return Err(RuntimeError::not_found(
+                "provider_auth_profile_not_found",
+                format!("provider auth profile {} does not exist", request.profile_id),
+            ));
+        }
+        self.stores.write_auth_profiles(&snapshot)?;
+        Ok(ProviderAuthDeleteResponse {
+            profile_id: request.profile_id,
+        })
     }
 
     /// Resumes a thread and returns the current wake-up projection.
@@ -277,4 +343,20 @@ impl Default for RuntimeCoordinator {
     fn default() -> Self {
         Self::new(RuntimeStores::from_default_layout())
     }
+}
+
+fn validate_provider_auth_profile(profile: &ProviderAuthProfile) -> RuntimeResult<()> {
+    if profile.profile_id.trim().is_empty() {
+        return Err(RuntimeError::invalid_state(
+            "provider_auth_profile_id_required",
+            "provider auth profile id must not be empty",
+        ));
+    }
+    if profile.provider_id.trim().is_empty() {
+        return Err(RuntimeError::invalid_state(
+            "provider_auth_provider_id_required",
+            "provider auth provider id must not be empty",
+        ));
+    }
+    Ok(())
 }

@@ -30,6 +30,19 @@ pub fn handle_request(
     let ClientRequestEnvelope { request_id, request } = envelope;
 
     let response = match request {
+        ClientRequest::ProviderAuthList(request) => runtime.list_provider_auth_profiles(request).map(|response| {
+            (ResponsePayload::ProviderAuthList(response), Vec::new())
+        }),
+        ClientRequest::ProviderAuthUpsert(request) => {
+            runtime.upsert_provider_auth_profile(request).map(|response| {
+                (ResponsePayload::ProviderAuthUpsert(response), Vec::new())
+            })
+        }
+        ClientRequest::ProviderAuthDelete(request) => {
+            runtime.delete_provider_auth_profile(request).map(|response| {
+                (ResponsePayload::ProviderAuthDelete(response), Vec::new())
+            })
+        }
         ClientRequest::ThreadStart(request) => runtime.start_thread(request).map(|response| {
             let thread = response.thread.clone();
             (

@@ -1,6 +1,7 @@
 //! Storage interfaces and filesystem layout primitives for the app server.
 
 pub mod artifact_store;
+pub mod auth_profile_store;
 pub mod checkpoint_store;
 pub mod error;
 mod fs;
@@ -10,6 +11,7 @@ pub mod thread_store;
 pub mod turn_log;
 
 pub use artifact_store::{ArtifactStore, FsArtifactStore, StoredArtifact};
+pub use auth_profile_store::{AuthProfileSnapshot, AuthProfileStore, FsAuthProfileStore};
 pub use checkpoint_store::{CheckpointStore, FsCheckpointStore};
 pub use error::{StorageError, StorageResult};
 pub use global_memory_store::{

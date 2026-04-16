@@ -1,6 +1,7 @@
 //! Client request envelopes and request payloads.
 
 use crate::approval::ApprovalDecision;
+use crate::auth::ProviderAuthProfile;
 use crate::checkpoint::CheckpointScope;
 use crate::ids::{ApprovalId, CheckpointId, RequestId, ThreadId, TurnId};
 use serde::{Deserialize, Serialize};
@@ -31,6 +32,15 @@ pub struct ClientRequestEnvelope {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "method", content = "params")]
 pub enum ClientRequest {
+    /// Lists persisted provider auth profiles.
+    #[serde(rename = "provider_auth/list")]
+    ProviderAuthList(ProviderAuthListRequest),
+    /// Creates or replaces a provider auth profile.
+    #[serde(rename = "provider_auth/upsert")]
+    ProviderAuthUpsert(ProviderAuthUpsertRequest),
+    /// Deletes a provider auth profile.
+    #[serde(rename = "provider_auth/delete")]
+    ProviderAuthDelete(ProviderAuthDeleteRequest),
     /// Starts a new thread.
     #[serde(rename = "thread/start")]
     ThreadStart(ThreadStartRequest),
@@ -52,6 +62,27 @@ pub enum ClientRequest {
     /// Rolls back a thread to a prior checkpoint.
     #[serde(rename = "thread/rollback")]
     ThreadRollback(ThreadRollbackRequest),
+}
+
+/// Lists provider auth profiles, optionally scoped to one provider.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderAuthListRequest {
+    /// Optional provider identifier filter.
+    pub provider_id: Option<String>,
+}
+
+/// Creates or replaces a provider auth profile.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderAuthUpsertRequest {
+    /// The full profile payload to persist.
+    pub profile: ProviderAuthProfile,
+}
+
+/// Deletes a provider auth profile.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderAuthDeleteRequest {
+    /// The profile identifier to delete.
+    pub profile_id: String,
 }
 
 /// Starts a new thread.

@@ -1,6 +1,7 @@
 //! Server response envelopes and typed response payloads.
 
 use crate::approval::ApprovalRequest;
+use crate::auth::ProviderAuthProfile;
 use crate::checkpoint::{Checkpoint, CheckpointScope};
 use crate::ids::{RequestId, ThreadId};
 use crate::memory::{MemoryCompilationSummary, ResumeSummary};
@@ -56,6 +57,15 @@ pub struct ResponseError {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "method", content = "data")]
 pub enum ResponsePayload {
+    /// Acknowledges `provider_auth/list`.
+    #[serde(rename = "provider_auth/list")]
+    ProviderAuthList(ProviderAuthListResponse),
+    /// Acknowledges `provider_auth/upsert`.
+    #[serde(rename = "provider_auth/upsert")]
+    ProviderAuthUpsert(ProviderAuthUpsertResponse),
+    /// Acknowledges `provider_auth/delete`.
+    #[serde(rename = "provider_auth/delete")]
+    ProviderAuthDelete(ProviderAuthDeleteResponse),
     /// Acknowledges `thread/start`.
     #[serde(rename = "thread/start")]
     ThreadStart(ThreadStartResponse),
@@ -80,6 +90,27 @@ pub enum ResponsePayload {
     /// Acknowledges `memory/compile_now`.
     #[serde(rename = "memory/compile_now")]
     MemoryCompileNow(MemoryCompileNowResponse),
+}
+
+/// The response payload for `provider_auth/list`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderAuthListResponse {
+    /// The matching persisted profiles.
+    pub profiles: Vec<ProviderAuthProfile>,
+}
+
+/// The response payload for `provider_auth/upsert`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderAuthUpsertResponse {
+    /// The persisted auth profile after write.
+    pub profile: ProviderAuthProfile,
+}
+
+/// The response payload for `provider_auth/delete`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderAuthDeleteResponse {
+    /// The deleted profile identifier.
+    pub profile_id: String,
 }
 
 /// The response payload for `thread/start`.
