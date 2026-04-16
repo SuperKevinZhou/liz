@@ -220,6 +220,19 @@ pub struct ZaiDetectedEndpoint {
     pub model_id: String,
 }
 
+/// Parsed SAP AI Core service-key fields used for runtime auth and routing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SapAiCoreServiceKey {
+    /// OAuth client id from the service key.
+    pub client_id: String,
+    /// OAuth client secret from the service key.
+    pub client_secret: String,
+    /// OAuth issuer base URL from the service key.
+    pub oauth_base_url: String,
+    /// AI API base URL from the service key.
+    pub ai_api_url: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct OpenAiCodexRawTokenResponse {
     access_token: String,
@@ -394,6 +407,89 @@ pub fn detect_zai_endpoint(
     }
 
     Ok(None)
+}
+
+/// Parses a SAP AI Core service-key JSON payload.
+pub fn parse_sap_ai_core_service_key(raw: &str) -> Result<SapAiCoreServiceKey, ModelError> {
+    let payload: SapAiCoreServiceKeyPayload = serde_json::from_str(raw).map_err(|error| {
+        ModelError::ProviderFailure(format!(
+            "failed to parse SAP AI Core service key JSON: {error}"
+        ))
+    })?;
+
+    let client_id = payload.clientid.trim();
+    let client_secret = payload.clientsecret.trim();
+    let oauth_base_url = payload.url.trim();
+    let ai_api_url = payload.serviceurls.ai_api_url.trim();
+    if client_id.is_empty()
+        || client_secret.is_empty()
+        || oauth_base_url.is_empty()
+        || ai_api_url.is_empty()
+    {
+        return Err(ModelError::ProviderFailure(
+            "SAP AI Core service key is missing clientid, clientsecret, url, or serviceurls.AI_API_URL"
+                .to_owned(),
+        ));
+    }
+
+    Ok(SapAiCoreServiceKey {
+        client_id: client_id.to_owned(),
+        client_secret: client_secret.to_owned(),
+        oauth_base_url: oauth_base_url.trim_end_matches('/').to_owned(),
+        ai_api_url: ai_api_url.trim_end_matches('/').to_owned(),
+    })
+}
+
+/// Resolves a runtime bearer token for SAP AI Core from an explicit token or service-key metadata.
+pub fn resolve_sap_ai_core_runtime_auth(
+    explicit_token: Option<&str>,
+    client_id: Option<&str>,
+    client_secret: Option<&str>,
+    oauth_base_url: Option<&str>,
+) -> Result<String, ModelError> {
+    if let Some(token) = explicit_token.map(str::trim).filter(|value| !value.is_empty()) {
+        if !token.starts_with('{') {
+            return Ok(token.to_owned());
+        }
+    }
+
+    let client_id = client_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            ModelError::ProviderFailure(
+                "sap-ai-core requires a service key client id or explicit bearer token".to_owned(),
+            )
+        })?;
+    let client_secret = client_secret
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            ModelError::ProviderFailure(
+                "sap-ai-core requires a service key client secret or explicit bearer token"
+                    .to_owned(),
+            )
+        })?;
+    let oauth_base_url = oauth_base_url
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            ModelError::ProviderFailure(
+                "sap-ai-core requires a service key oauth base URL or explicit bearer token"
+                    .to_owned(),
+            )
+        })?;
+
+    let token_url = format!("{}/oauth/token", oauth_base_url.trim_end_matches('/'));
+    let response: SapAiCoreTokenResponseBody = post_form_json(
+        &token_url,
+        &[
+            ("grant_type", "client_credentials"),
+            ("client_id", client_id),
+            ("client_secret", client_secret),
+        ],
+    )?;
+    Ok(response.access_token)
 }
 
 /// Resolves a Bedrock Mantle bearer token from either an explicit API key or the AWS credential chain.
@@ -1401,6 +1497,25 @@ struct MiniMaxOAuthTokenResponseBody {
     refresh_token: Option<String>,
     expired_in: Option<u64>,
     resource_url: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SapAiCoreServiceKeyPayload {
+    clientid: String,
+    clientsecret: String,
+    url: String,
+    serviceurls: SapAiCoreServiceUrls,
+}
+
+#[derive(Debug, Deserialize)]
+struct SapAiCoreServiceUrls {
+    #[serde(rename = "AI_API_URL")]
+    ai_api_url: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SapAiCoreTokenResponseBody {
+    access_token: String,
 }
 
 /// Normalizes an OpenAI Codex authorize URL so the required OAuth scopes are always present.

@@ -531,6 +531,71 @@ fn bedrock_mantle_live_request_mints_bearer_token_from_aws_credentials() {
 }
 
 #[test]
+fn sap_ai_core_live_request_exchanges_service_key_and_uses_deployment_chat_path() {
+    let _guard = env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");
+
+    let captures = Arc::new(Mutex::new(Vec::<String>::new()));
+    let base_url = spawn_json_server_sequence(
+        captures.clone(),
+        vec![
+            r#"{"access_token":"sap-runtime-token"}"#,
+            r#"{"choices":[{"message":{"content":"hello from sap ai core"}}]}"#,
+        ],
+    );
+    std::env::set_var(
+        "AICORE_SERVICE_KEY",
+        format!(
+            r#"{{"clientid":"sap-client","clientsecret":"sap-secret","url":"{base_url}","serviceurls":{{"AI_API_URL":"{base_url}"}}}}"#
+        ),
+    );
+    std::env::set_var("AICORE_DEPLOYMENT_ID", "deployment-prod");
+    std::env::set_var("AICORE_RESOURCE_GROUP", "rg-prod");
+
+    let gateway = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "sap-ai-core".to_owned(),
+        overrides: BTreeMap::new(),
+    });
+    let summary = gateway
+        .run_turn(demo_request(), |_| {})
+        .expect("sap ai core request should succeed");
+
+    let requests = captures
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    assert_eq!(requests.len(), 2);
+
+    let token_request = &requests[0];
+    assert!(token_request.contains("POST /oauth/token HTTP/1.1"));
+    assert!(token_request.contains("grant_type=client_credentials"));
+    assert!(token_request.contains("client_id=sap-client"));
+    assert!(token_request.contains("client_secret=sap-secret"));
+
+    let runtime_request = &requests[1];
+    assert!(
+        runtime_request.contains(
+            "POST /v2/inference/deployments/deployment-prod/chat/completions HTTP/1.1"
+        )
+    );
+    let runtime_lower = runtime_request.to_ascii_lowercase();
+    assert!(runtime_lower.contains("authorization: bearer sap-runtime-token"));
+    assert!(runtime_lower.contains("ai-resource-group: rg-prod"));
+    assert!(runtime_request.contains(r#""model":"deployment-prod""#));
+    assert_eq!(
+        summary.assistant_message.as_deref(),
+        Some("hello from sap ai core")
+    );
+
+    std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
+    std::env::remove_var("AICORE_SERVICE_KEY");
+    std::env::remove_var("AICORE_DEPLOYMENT_ID");
+    std::env::remove_var("AICORE_RESOURCE_GROUP");
+}
+
+#[test]
 fn minimax_live_request_uses_anthropic_messages_with_bearer_auth() {
     let _guard = env_lock()
         .lock()

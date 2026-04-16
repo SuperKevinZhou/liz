@@ -452,7 +452,39 @@ fn builtin_specs() -> Vec<ProviderSpec> {
             "anthropic/claude-sonnet-4-6",
         ),
         openai_compatible_spec("cloudflare-workers-ai", "Cloudflare Workers AI", "@cf/meta/llama-3.1-70b-instruct"),
-        openai_compatible_spec("sap-ai-core", "SAP AI Core", "anthropic/claude-sonnet-4-6"),
+        spec(
+            "sap-ai-core",
+            "SAP AI Core",
+            ModelProviderFamily::OpenAiCompatible,
+            ProviderAuthKind::ServiceKey,
+            None,
+            "anthropic--claude-sonnet-4-6",
+            &["AICORE_SERVICE_KEY"],
+            &["AICORE_DEPLOYMENT_ID", "AICORE_RESOURCE_GROUP"],
+            &[],
+            ModelCapabilities::openai_compatible()
+                .with_tool_call_streaming(true)
+                .with_image_input(true)
+                .with_max_context_window(200_000),
+            &[
+                "Uses SAP AI Core service-key auth and deployment-scoped OpenAI-compatible inference endpoints.",
+                "Resolves bearer tokens from the service key before calling AI_API_URL/v2/inference/deployments/{deployment_id}.",
+            ],
+        )
+        .with_auth_strategies(vec![auth_strategy(
+            ProviderAuthKind::ServiceKey,
+            "service-key",
+            &["AICORE_SERVICE_KEY"],
+            &[
+                "AICORE_DEPLOYMENT_ID",
+                "AICORE_RESOURCE_GROUP",
+                "provider.sap-ai-core.baseUrl",
+            ],
+            &[
+                "Parses clientid, clientsecret, url, and serviceurls.AI_API_URL from the service key JSON.",
+                "Mints OAuth bearer tokens through the SAP AI Core OAuth endpoint.",
+            ],
+        )]),
         openai_compatible_spec("deepseek", "DeepSeek", "deepseek-chat"),
         openai_compatible_spec("mistral", "Mistral", "mistral-large-latest"),
         openai_compatible_spec("moonshot", "Moonshot", "moonshot-v1-128k"),
@@ -742,7 +774,6 @@ fn openai_compatible_spec(
         "opencode" | "opencode-go" => &["OPENCODE_API_KEY"][..],
         "github-copilot" => &["GITHUB_COPILOT_TOKEN"][..],
         "gitlab" => &["GITLAB_TOKEN"][..],
-        "sap-ai-core" => &["AICORE_SERVICE_KEY"][..],
         "cloudflare-ai-gateway" => &["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_AI_GATEWAY_API_KEY"][..],
         "cloudflare-workers-ai" => &["CLOUDFLARE_API_KEY"][..],
         "azure" => &["AZURE_OPENAI_API_KEY", "AZURE_API_KEY"][..],
@@ -795,8 +826,6 @@ fn openai_compatible_spec(
 
     let auth_kind = if matches!(id, "ollama" | "llama.cpp" | "lmstudio" | "vllm" | "sglang") {
         ProviderAuthKind::Local
-    } else if id == "sap-ai-core" {
-        ProviderAuthKind::ServiceKey
     } else if id == "github-copilot" {
         ProviderAuthKind::DeviceCode
     } else if id == "gitlab" {

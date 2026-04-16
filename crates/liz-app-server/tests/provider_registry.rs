@@ -205,6 +205,18 @@ fn special_providers_expose_explicit_auth_strategies() {
     assert_eq!(openai_codex.auth_strategies.len(), 1);
     assert_eq!(openai_codex.auth_strategies[0].label, "chatgpt-oauth");
 
+    let sap_ai_core = registry.provider("sap-ai-core").expect("sap-ai-core spec");
+    assert_eq!(
+        sap_ai_core.auth_kind,
+        liz_app_server::model::ProviderAuthKind::ServiceKey
+    );
+    assert!(
+        sap_ai_core
+            .auth_strategies
+            .iter()
+            .any(|strategy| strategy.label == "service-key")
+    );
+
     let qwen = registry.provider("qwen").expect("qwen spec");
     assert_eq!(qwen.auth_kind, liz_app_server::model::ProviderAuthKind::ApiKey);
     assert!(
@@ -537,9 +549,51 @@ fn stepfun_env_resolution_supports_plan_region_selection() {
 }
 
 #[test]
+fn sap_ai_core_env_resolution_parses_service_key_and_builds_deployment_route() {
+    let _guard = env_lock().lock().expect("env lock");
+    std::env::set_var(
+        "AICORE_SERVICE_KEY",
+        r#"{"clientid":"sap-client","clientsecret":"sap-secret","url":"https://sap.example.com","serviceurls":{"AI_API_URL":"https://sap-api.example.com"}}"#,
+    );
+    std::env::set_var("AICORE_DEPLOYMENT_ID", "deployment-prod");
+    std::env::set_var("AICORE_RESOURCE_GROUP", "rg-prod");
+
+    let provider = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "sap-ai-core".to_owned(),
+        overrides: BTreeMap::new(),
+    })
+    .resolved_primary_provider()
+    .expect("sap-ai-core provider should resolve");
+
+    assert_eq!(
+        provider.base_url.as_deref(),
+        Some("https://sap-api.example.com/v2/inference/deployments/deployment-prod")
+    );
+    assert_eq!(provider.model_id, "deployment-prod");
+    assert_eq!(
+        provider
+            .metadata
+            .get("sap_ai_core.oauth_base_url")
+            .map(String::as_str),
+        Some("https://sap.example.com")
+    );
+    assert_eq!(
+        provider
+            .metadata
+            .get("sap_ai_core.resource_group")
+            .map(String::as_str),
+        Some("rg-prod")
+    );
+
+    std::env::remove_var("AICORE_SERVICE_KEY");
+    std::env::remove_var("AICORE_DEPLOYMENT_ID");
+    std::env::remove_var("AICORE_RESOURCE_GROUP");
+}
+
+#[test]
 fn openai_compatible_provider_without_builtin_base_url_still_runs() {
     let gateway = ModelGateway::from_config(ModelGatewayConfig {
-        primary_provider: "sap-ai-core".to_owned(),
+        primary_provider: "copilot-proxy".to_owned(),
         overrides: BTreeMap::new(),
     });
     let request = demo_request();

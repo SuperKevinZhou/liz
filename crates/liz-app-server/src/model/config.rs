@@ -1,6 +1,6 @@
 //! Provider-resolution config and environment seams.
 
-use crate::model::auth::detect_zai_endpoint;
+use crate::model::auth::{detect_zai_endpoint, parse_sap_ai_core_service_key};
 use crate::model::provider_spec::{ProviderAuthKind, ProviderSpec};
 use std::collections::BTreeMap;
 use std::env;
@@ -160,6 +160,57 @@ impl ResolvedProvider {
                         base_url = Some(format!(
                             "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1"
                         ));
+                    }
+                }
+            }
+            "sap-ai-core" => {
+                if let Some(raw_service_key) = api_key
+                    .clone()
+                    .or_else(|| first_env(&["AICORE_SERVICE_KEY"]))
+                {
+                    if let Ok(service_key) = parse_sap_ai_core_service_key(&raw_service_key) {
+                        api_key = None;
+                        metadata
+                            .entry("sap_ai_core.client_id".to_owned())
+                            .or_insert(service_key.client_id);
+                        metadata
+                            .entry("sap_ai_core.client_secret".to_owned())
+                            .or_insert(service_key.client_secret);
+                        metadata
+                            .entry("sap_ai_core.oauth_base_url".to_owned())
+                            .or_insert(service_key.oauth_base_url.clone());
+                        metadata
+                            .entry("sap_ai_core.ai_api_url".to_owned())
+                            .or_insert(service_key.ai_api_url.clone());
+
+                        let deployment_id = override_config
+                            .and_then(|config| config.metadata.get("sap_ai_core.deployment_id"))
+                            .cloned()
+                            .or_else(|| first_env(&["AICORE_DEPLOYMENT_ID"]));
+                        if let Some(deployment_id) = deployment_id {
+                            metadata
+                                .entry("sap_ai_core.deployment_id".to_owned())
+                                .or_insert(deployment_id.clone());
+                            if model_id == spec.default_model {
+                                model_id = deployment_id.clone();
+                            }
+                            if override_config.and_then(|config| config.base_url.as_ref()).is_none() {
+                                base_url = Some(format!(
+                                    "{}/v2/inference/deployments/{}",
+                                    service_key.ai_api_url.trim_end_matches('/'),
+                                    deployment_id
+                                ));
+                            }
+                        }
+
+                        let resource_group = override_config
+                            .and_then(|config| config.metadata.get("sap_ai_core.resource_group"))
+                            .cloned()
+                            .or_else(|| first_env(&["AICORE_RESOURCE_GROUP"]))
+                            .unwrap_or_else(|| "default".to_owned());
+                        metadata
+                            .entry("sap_ai_core.resource_group".to_owned())
+                            .or_insert(resource_group);
                     }
                 }
             }

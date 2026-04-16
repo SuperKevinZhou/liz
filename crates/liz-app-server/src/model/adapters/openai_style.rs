@@ -3,6 +3,7 @@
 use crate::model::auth::{
     resolve_bedrock_mantle_runtime_auth, resolve_copilot_runtime_auth,
     resolve_gitlab_oauth_runtime_auth, resolve_openai_codex_runtime_auth,
+    resolve_sap_ai_core_runtime_auth,
     OpenAiCodexRuntimeAuthRequest,
 };
 use crate::model::config::ResolvedProvider;
@@ -505,6 +506,34 @@ fn default_openai_style_headers(
         );
         if let Some(account_id) = runtime.account_id {
             headers.insert("ChatGPT-Account-Id".to_owned(), account_id);
+        }
+        return Ok(headers);
+    }
+
+    if provider.spec.id == "sap-ai-core" {
+        let bearer = resolve_sap_ai_core_runtime_auth(
+            provider.api_key.as_deref(),
+            provider
+                .metadata
+                .get("sap_ai_core.client_id")
+                .map(String::as_str),
+            provider
+                .metadata
+                .get("sap_ai_core.client_secret")
+                .map(String::as_str),
+            provider
+                .metadata
+                .get("sap_ai_core.oauth_base_url")
+                .map(String::as_str),
+        )?;
+        headers.insert("Authorization".to_owned(), format!("Bearer {bearer}"));
+        if let Some(resource_group) = provider
+            .metadata
+            .get("sap_ai_core.resource_group")
+            .map(String::as_str)
+            .filter(|value| !value.trim().is_empty())
+        {
+            headers.insert("AI-Resource-Group".to_owned(), resource_group.to_owned());
         }
         return Ok(headers);
     }
