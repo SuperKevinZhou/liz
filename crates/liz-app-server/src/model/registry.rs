@@ -300,7 +300,7 @@ fn builtin_specs() -> Vec<ProviderSpec> {
             "openai-codex",
             "OpenAI Codex",
             ModelProviderFamily::OpenAiResponses,
-            ProviderAuthKind::OAuth,
+            ProviderAuthKind::ApiKey,
             Some("https://api.openai.com"),
             "gpt-5.4",
             &["OPENAI_API_KEY"],
@@ -309,20 +309,23 @@ fn builtin_specs() -> Vec<ProviderSpec> {
             ModelCapabilities::openai_streaming()
                 .with_prompt_caching(true)
                 .with_server_side_conversation_state(true),
-            &["Codex-flavored OpenAI path.", "OAuth-oriented provider variant."],
+            &[
+                "Temporary alias of the public OpenAI Responses path.",
+                "Does not imply native Codex OAuth support.",
+            ],
         )
         .with_auth_strategies(vec![auth_strategy(
-            ProviderAuthKind::OAuth,
-            "chatgpt-oauth",
-            &[],
-            &[],
-            &["Stored as a ChatGPT OAuth-backed provider variant."],
+            ProviderAuthKind::ApiKey,
+            "api-key",
+            &["OPENAI_API_KEY"],
+            &["models.providers.openai-codex.baseUrl"],
+            &["Alias-only OpenAI API-key path until native Codex OAuth is implemented."],
         )]),
         spec(
             "codex",
             "Codex",
             ModelProviderFamily::OpenAiResponses,
-            ProviderAuthKind::OAuth,
+            ProviderAuthKind::ApiKey,
             Some("https://api.openai.com"),
             "gpt-5.4",
             &["OPENAI_API_KEY"],
@@ -331,7 +334,10 @@ fn builtin_specs() -> Vec<ProviderSpec> {
             ModelCapabilities::openai_streaming()
                 .with_prompt_caching(true)
                 .with_server_side_conversation_state(true),
-            &["App-server backed Codex integration.", "Treated as an OpenAI Responses family variant."],
+            &[
+                "Alias of the public OpenAI Responses path.",
+                "Does not imply native Codex app-server or OAuth support.",
+            ],
         ),
         spec(
             "xai",
