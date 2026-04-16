@@ -2,6 +2,7 @@
 
 use crate::artifact::ArtifactRef;
 use crate::ids::{ExecutorTaskId, ThreadId, TurnId};
+use crate::sandbox::ShellSandboxRequest;
 use serde::{Deserialize, Serialize};
 
 /// The stable tool names exposed by the runtime.
@@ -317,6 +318,8 @@ pub struct ShellExecRequest {
     pub command: String,
     /// The working directory for the command, if different from the process cwd.
     pub working_dir: Option<String>,
+    /// Optional sandbox override for this command.
+    pub sandbox: Option<ShellSandboxRequest>,
 }
 
 /// Output for `shell.exec`.
@@ -341,6 +344,8 @@ pub struct ShellSpawnRequest {
     pub command: String,
     /// The working directory for the command, if different from the process cwd.
     pub working_dir: Option<String>,
+    /// Optional sandbox override for this command.
+    pub sandbox: Option<ShellSandboxRequest>,
 }
 
 /// Output for `shell.spawn`.

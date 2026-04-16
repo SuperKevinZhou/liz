@@ -248,6 +248,7 @@ fn shell_exec_returns_output_and_emits_executor_chunks() {
         ToolInvocation::ShellExec(ShellExecRequest {
             command: "Write-Output 'hello'; [Console]::Error.WriteLine('warn')".to_owned(),
             working_dir: Some(workspace_root.to_string_lossy().to_string()),
+            sandbox: None,
         }),
         &thread.id,
     );
@@ -301,6 +302,7 @@ fn background_shell_can_spawn_read_and_wait() {
         ToolInvocation::ShellSpawn(ShellSpawnRequest {
             command: "[Console]::Out.WriteLine('bg-out'); [Console]::Error.WriteLine('bg-err'); Start-Sleep -Milliseconds 600".to_owned(),
             working_dir: Some(workspace_root.to_string_lossy().to_string()),
+            sandbox: None,
         }),
         &thread.id,
     );
@@ -388,6 +390,7 @@ fn background_shell_can_terminate() {
         ToolInvocation::ShellSpawn(ShellSpawnRequest {
             command: "Start-Sleep -Seconds 5".to_owned(),
             working_dir: Some(workspace_root.to_string_lossy().to_string()),
+            sandbox: None,
         }),
         &thread.id,
     );

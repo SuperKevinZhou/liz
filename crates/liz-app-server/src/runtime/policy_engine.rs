@@ -1,17 +1,17 @@
 //! Minimal policy evaluation for scoped turns and risky actions.
 
 use crate::runtime::context_assembler::{AssembledContext, RetrievalScope};
-use liz_protocol::RiskLevel;
+use liz_protocol::{RiskLevel, SandboxMode, SandboxNetworkAccess};
 
 /// A compact record of the sandbox context that informed the policy decision.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SandboxContextRecord {
     /// The file-system sandbox mode.
-    pub filesystem_mode: String,
+    pub filesystem_mode: SandboxMode,
     /// The writable roots available to the runtime.
     pub writable_roots: Vec<String>,
     /// The network-access posture for the turn.
-    pub network_access: String,
+    pub network_access: SandboxNetworkAccess,
 }
 
 /// The outcome of evaluating one turn against the current policy.
@@ -71,9 +71,9 @@ impl PolicyEngine {
             requires_approval,
             reason,
             sandbox_context: SandboxContextRecord {
-                filesystem_mode: "workspace-write".to_owned(),
+                filesystem_mode: SandboxMode::WorkspaceWrite,
                 writable_roots: vec!["workspace".to_owned()],
-                network_access: "restricted".to_owned(),
+                network_access: SandboxNetworkAccess::Restricted,
             },
         }
     }

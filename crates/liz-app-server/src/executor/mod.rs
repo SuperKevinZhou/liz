@@ -1,9 +1,14 @@
 //! Tool-surface execution and normalization.
 
+mod sandbox;
 mod shell;
 mod workspace;
 
 use crate::runtime::RuntimeResult;
+pub use sandbox::{
+    EffectiveSandboxRequest, LinuxSandboxVariant, PlatformSandboxBackend, SandboxConfig,
+    WindowsSandboxBackend,
+};
 use liz_protocol::{
     ArtifactKind, ExecutorStream, ToolCallRequest, ToolInvocation, ToolName, ToolResult,
 };

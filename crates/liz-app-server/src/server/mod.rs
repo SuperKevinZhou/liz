@@ -389,6 +389,7 @@ fn parse_tool_invocation(tool_name: &str, arguments: &str) -> Option<liz_protoco
                     .get("working_dir")
                     .and_then(|value| value.as_str())
                     .map(str::to_owned),
+                sandbox: None,
             }))
         }
         _ => None,

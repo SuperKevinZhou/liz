@@ -10,6 +10,7 @@ pub mod memory;
 pub mod primitives;
 pub mod requests;
 pub mod responses;
+pub mod sandbox;
 pub mod thread;
 pub mod tool;
 pub mod turn;
@@ -46,14 +47,14 @@ pub use responses::{
     ThreadForkResponse, ThreadResumeResponse, ThreadRollbackResponse, ThreadStartResponse,
     TurnCancelResponse, TurnStartResponse,
 };
+pub use sandbox::{SandboxMode, SandboxNetworkAccess, ShellSandboxRequest};
 pub use thread::{Thread, ThreadStatus};
 pub use tool::{
-    ShellExecRequest, ShellExecResult, ShellReadOutputRequest, ShellReadOutputResult,
-    ShellSpawnRequest, ShellSpawnResult, ShellTerminateRequest, ShellTerminateResult,
-    ShellWaitRequest, ShellWaitResult, ToolCallRequest, ToolCallResponse, ToolInvocation, ToolName,
-    ToolResult, WorkspaceApplyPatchRequest, WorkspaceApplyPatchResult, WorkspaceListEntry,
-    WorkspaceListRequest, WorkspaceListResult, WorkspaceReadRequest, WorkspaceReadResult,
-    WorkspaceSearchMatch, WorkspaceSearchRequest, WorkspaceSearchResult, WorkspaceWriteTextRequest,
-    WorkspaceWriteTextResult,
+    ShellExecRequest, ShellExecResult, ShellReadOutputRequest, ShellReadOutputResult, ShellSpawnRequest,
+    ShellSpawnResult, ShellTerminateRequest, ShellTerminateResult, ShellWaitRequest, ShellWaitResult,
+    ToolCallRequest, ToolCallResponse, ToolInvocation, ToolName, ToolResult,
+    WorkspaceApplyPatchRequest, WorkspaceApplyPatchResult, WorkspaceListEntry, WorkspaceListRequest,
+    WorkspaceListResult, WorkspaceReadRequest, WorkspaceReadResult, WorkspaceSearchMatch,
+    WorkspaceSearchRequest, WorkspaceSearchResult, WorkspaceWriteTextRequest, WorkspaceWriteTextResult,
 };
 pub use turn::{Turn, TurnKind, TurnStatus};

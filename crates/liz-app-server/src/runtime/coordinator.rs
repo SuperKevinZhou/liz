@@ -309,9 +309,9 @@ impl RuntimeCoordinator {
             reason: decision.reason.clone(),
             sandbox_context: Some(format!(
                 "mode={} writable_roots={} network={}",
-                decision.sandbox_context.filesystem_mode,
+                decision.sandbox_context.filesystem_mode.as_str(),
                 decision.sandbox_context.writable_roots.join(","),
-                decision.sandbox_context.network_access
+                decision.sandbox_context.network_access.as_str()
             )),
             status: ApprovalStatus::Pending,
         };
