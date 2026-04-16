@@ -205,6 +205,14 @@ fn special_providers_expose_explicit_auth_strategies() {
     assert_eq!(openai_codex.auth_strategies.len(), 1);
     assert_eq!(openai_codex.auth_strategies[0].label, "chatgpt-oauth");
 
+    let opencode = registry.provider("opencode").expect("opencode spec");
+    assert_eq!(opencode.family, ModelProviderFamily::OpenAiResponses);
+    assert_eq!(opencode.default_base_url, Some("https://opencode.ai/zen/v1"));
+
+    let opencode_go = registry.provider("opencode-go").expect("opencode-go spec");
+    assert_eq!(opencode_go.family, ModelProviderFamily::OpenAiCompatible);
+    assert_eq!(opencode_go.default_base_url, Some("https://opencode.ai/zen/go/v1"));
+
     let sap_ai_core = registry.provider("sap-ai-core").expect("sap-ai-core spec");
     assert_eq!(
         sap_ai_core.auth_kind,

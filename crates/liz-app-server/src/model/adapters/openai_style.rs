@@ -90,7 +90,12 @@ impl OpenAiStyleAdapter {
                             .base_url
                             .clone()
                             .unwrap_or_else(|| "https://api.openai.com".to_owned()),
-                        "/v1/responses".to_owned(),
+                        openai_responses_path(
+                            provider
+                                .base_url
+                                .as_deref()
+                                .unwrap_or("https://api.openai.com"),
+                        ),
                     )
                 };
                 InvocationTransport::HttpJson {
@@ -658,6 +663,18 @@ fn openai_compatible_chat_path(base_url: &str) -> String {
         "/v1/chat/completions".to_owned()
     } else {
         "/chat/completions".to_owned()
+    }
+}
+
+fn openai_responses_path(base_url: &str) -> String {
+    let path = reqwest::Url::parse(base_url)
+        .ok()
+        .map(|url| url.path().trim_end_matches('/').to_owned())
+        .unwrap_or_default();
+    if path.is_empty() {
+        "/v1/responses".to_owned()
+    } else {
+        "/responses".to_owned()
     }
 }
 

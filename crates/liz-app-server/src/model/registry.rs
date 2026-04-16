@@ -342,8 +342,55 @@ fn builtin_specs() -> Vec<ProviderSpec> {
         openai_compatible_spec("ollama", "Ollama", "llama3.1:8b"),
         openai_compatible_spec("vllm", "vLLM", "meta-llama/Llama-3.1-70B-Instruct"),
         openai_compatible_spec("sglang", "SGLang", "meta-llama/Llama-3.1-70B-Instruct"),
-        openai_compatible_spec("opencode", "OpenCode Zen", "claude-opus-4-6"),
-        openai_compatible_spec("opencode-go", "OpenCode Go", "kimi-k2.5"),
+        spec(
+            "opencode",
+            "OpenCode Zen",
+            ModelProviderFamily::OpenAiResponses,
+            ProviderAuthKind::ApiKey,
+            Some("https://opencode.ai/zen/v1"),
+            "gpt-5.4",
+            &["OPENCODE_API_KEY"],
+            &[],
+            &[],
+            ModelCapabilities::openai_streaming().with_prompt_caching(true),
+            &[
+                "Uses the OpenCode Zen GPT-family Responses endpoint.",
+                "Routes default GPT models through https://opencode.ai/zen/v1/responses.",
+            ],
+        )
+        .with_auth_strategies(vec![auth_strategy(
+            ProviderAuthKind::ApiKey,
+            "api-key",
+            &["OPENCODE_API_KEY"],
+            &["provider.opencode.baseUrl"],
+            &["Sends the OpenCode Zen API key as a bearer token."],
+        )]),
+        spec(
+            "opencode-go",
+            "OpenCode Go",
+            ModelProviderFamily::OpenAiCompatible,
+            ProviderAuthKind::ApiKey,
+            Some("https://opencode.ai/zen/go/v1"),
+            "kimi-k2.5",
+            &["OPENCODE_API_KEY"],
+            &[],
+            &[],
+            ModelCapabilities::openai_compatible()
+                .with_tool_call_streaming(true)
+                .with_image_input(true)
+                .with_max_context_window(200_000),
+            &[
+                "Uses the OpenCode Go OpenAI-compatible chat completions endpoint.",
+                "Routes the default Go model lane through https://opencode.ai/zen/go/v1/chat/completions.",
+            ],
+        )
+        .with_auth_strategies(vec![auth_strategy(
+            ProviderAuthKind::ApiKey,
+            "api-key",
+            &["OPENCODE_API_KEY"],
+            &["provider.opencode-go.baseUrl"],
+            &["Sends the OpenCode Go API key as a bearer token."],
+        )]),
         spec(
             "qwen",
             "Qwen",
@@ -898,7 +945,6 @@ fn openai_compatible_spec(
     let api_key_envs = match id {
         "openrouter" => &["OPENROUTER_API_KEY"][..],
         "ollama" | "llama.cpp" | "lmstudio" | "vllm" | "sglang" => &[][..],
-        "opencode" | "opencode-go" => &["OPENCODE_API_KEY"][..],
         "github-copilot" => &["GITHUB_COPILOT_TOKEN"][..],
         "gitlab" => &["GITLAB_TOKEN"][..],
         "cloudflare-workers-ai" => &["CLOUDFLARE_API_KEY"][..],
