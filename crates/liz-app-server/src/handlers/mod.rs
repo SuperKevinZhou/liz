@@ -30,6 +30,16 @@ pub fn handle_request(
     let ClientRequestEnvelope { request_id, request } = envelope;
 
     let response = match request {
+        ClientRequest::OpenAiCodexOAuthStart(request) => {
+            runtime.start_openai_codex_oauth_login(request).map(|response| {
+                (ResponsePayload::OpenAiCodexOAuthStart(response), Vec::new())
+            })
+        }
+        ClientRequest::OpenAiCodexOAuthComplete(request) => {
+            runtime.complete_openai_codex_oauth_login(request).map(|response| {
+                (ResponsePayload::OpenAiCodexOAuthComplete(response), Vec::new())
+            })
+        }
         ClientRequest::GitLabOAuthStart(request) => {
             runtime.start_gitlab_oauth_login(request).map(|response| {
                 (ResponsePayload::GitLabOAuthStart(response), Vec::new())

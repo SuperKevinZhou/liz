@@ -3,7 +3,8 @@
 use crate::approval::ApprovalRequest;
 use crate::auth::{
     GitHubCopilotDeviceCode, GitHubCopilotDevicePollStatus, GitLabOAuthStart,
-    MiniMaxOAuthDeviceCode, MiniMaxOAuthPollStatus, ProviderAuthProfile,
+    MiniMaxOAuthDeviceCode, MiniMaxOAuthPollStatus, OpenAiCodexOAuthStart,
+    ProviderAuthProfile,
 };
 use crate::checkpoint::{Checkpoint, CheckpointScope};
 use crate::ids::{RequestId, ThreadId};
@@ -60,6 +61,12 @@ pub struct ResponseError {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "method", content = "data")]
 pub enum ResponsePayload {
+    /// Acknowledges `provider_auth/openai_codex_oauth_start`.
+    #[serde(rename = "provider_auth/openai_codex_oauth_start")]
+    OpenAiCodexOAuthStart(OpenAiCodexOAuthStartResponse),
+    /// Acknowledges `provider_auth/openai_codex_oauth_complete`.
+    #[serde(rename = "provider_auth/openai_codex_oauth_complete")]
+    OpenAiCodexOAuthComplete(OpenAiCodexOAuthCompleteResponse),
     /// Acknowledges `provider_auth/gitlab_oauth_start`.
     #[serde(rename = "provider_auth/gitlab_oauth_start")]
     GitLabOAuthStart(GitLabOAuthStartResponse),
@@ -114,6 +121,20 @@ pub enum ResponsePayload {
     /// Acknowledges `memory/compile_now`.
     #[serde(rename = "memory/compile_now")]
     MemoryCompileNow(MemoryCompileNowResponse),
+}
+
+/// The response payload for `provider_auth/openai_codex_oauth_start`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpenAiCodexOAuthStartResponse {
+    /// The OAuth bootstrap data that the client should open and preserve.
+    pub oauth: OpenAiCodexOAuthStart,
+}
+
+/// The response payload for `provider_auth/openai_codex_oauth_complete`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpenAiCodexOAuthCompleteResponse {
+    /// The persisted provider auth profile.
+    pub profile: ProviderAuthProfile,
 }
 
 /// The response payload for `provider_auth/gitlab_oauth_start`.

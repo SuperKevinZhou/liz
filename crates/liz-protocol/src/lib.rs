@@ -16,7 +16,8 @@ pub mod turn;
 pub use approval::{ApprovalDecision, ApprovalRequest, ApprovalStatus};
 pub use auth::{
     GitHubCopilotDeviceCode, GitHubCopilotDevicePollStatus, GitLabOAuthStart,
-    MiniMaxOAuthDeviceCode, MiniMaxOAuthPollStatus, ProviderAuthProfile,
+    MiniMaxOAuthDeviceCode, MiniMaxOAuthPollStatus, OpenAiCodexOAuthStart,
+    ProviderAuthProfile,
     ProviderCredential,
 };
 pub use artifact::{ArtifactKind, ArtifactRef};
@@ -40,17 +41,19 @@ pub use primitives::{ProtocolVersion, RiskLevel, Timestamp};
 pub use requests::{
     ApprovalRespondRequest, ClientRequest, ClientRequestEnvelope, GitHubCopilotDevicePollRequest,
     GitHubCopilotDeviceStartRequest, GitLabOAuthCompleteRequest, GitLabOAuthStartRequest,
-    GitLabPatSaveRequest, ProviderAuthDeleteRequest, ProviderAuthListRequest,
-    ProviderAuthUpsertRequest, ThreadForkRequest, ThreadResumeRequest, ThreadRollbackRequest,
-    ThreadStartRequest, TurnCancelRequest, TurnInputKind, TurnStartRequest,
+    GitLabPatSaveRequest, OpenAiCodexOAuthCompleteRequest, OpenAiCodexOAuthStartRequest,
+    ProviderAuthDeleteRequest, ProviderAuthListRequest, ProviderAuthUpsertRequest,
+    ThreadForkRequest, ThreadResumeRequest, ThreadRollbackRequest, ThreadStartRequest,
+    TurnCancelRequest, TurnInputKind, TurnStartRequest,
 };
 pub use responses::{
     ApprovalRespondResponse, ErrorResponseEnvelope, GitHubCopilotDevicePollResponse,
     GitHubCopilotDeviceStartResponse, GitLabOAuthCompleteResponse, GitLabOAuthStartResponse,
-    GitLabPatSaveResponse, MemoryCompileNowResponse, ProviderAuthDeleteResponse,
-    ProviderAuthListResponse, ProviderAuthUpsertResponse, ResponseError, ResponsePayload,
-    ServerResponseEnvelope, SuccessResponseEnvelope, ThreadForkResponse, ThreadResumeResponse,
-    ThreadRollbackResponse, ThreadStartResponse, TurnCancelResponse, TurnStartResponse,
+    GitLabPatSaveResponse, MemoryCompileNowResponse, OpenAiCodexOAuthCompleteResponse,
+    OpenAiCodexOAuthStartResponse, ProviderAuthDeleteResponse, ProviderAuthListResponse,
+    ProviderAuthUpsertResponse, ResponseError, ResponsePayload, ServerResponseEnvelope,
+    SuccessResponseEnvelope, ThreadForkResponse, ThreadResumeResponse, ThreadRollbackResponse,
+    ThreadStartResponse, TurnCancelResponse, TurnStartResponse,
 };
 pub use thread::{Thread, ThreadStatus};
 pub use turn::{Turn, TurnKind, TurnStatus};

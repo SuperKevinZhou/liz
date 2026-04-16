@@ -8,6 +8,7 @@ use crate::runtime::stores::RuntimeStores;
 use crate::runtime::thread_manager::ThreadManager;
 use crate::runtime::turn_manager::TurnManager;
 use crate::model::{
+    build_openai_codex_authorize_url, exchange_openai_codex_authorization_code,
     poll_github_copilot_device_authorization, start_github_copilot_device_authorization,
     start_gitlab_oauth_authorization, exchange_gitlab_oauth_code,
     poll_minimax_oauth_authorization, start_minimax_oauth_authorization,
@@ -17,7 +18,8 @@ use liz_protocol::memory::ResumeSummary;
 use liz_protocol::requests::{
     ApprovalRespondRequest, GitHubCopilotDevicePollRequest, GitHubCopilotDeviceStartRequest,
     GitLabOAuthCompleteRequest, GitLabOAuthStartRequest, GitLabPatSaveRequest,
-    MiniMaxOAuthPollRequest, MiniMaxOAuthStartRequest,
+    MiniMaxOAuthPollRequest, MiniMaxOAuthStartRequest, OpenAiCodexOAuthCompleteRequest,
+    OpenAiCodexOAuthStartRequest,
     ProviderAuthDeleteRequest, ProviderAuthListRequest, ProviderAuthUpsertRequest,
     ThreadForkRequest, ThreadResumeRequest, ThreadStartRequest, TurnCancelRequest,
     TurnStartRequest,
@@ -26,14 +28,15 @@ use liz_protocol::responses::{
     ApprovalRespondResponse, GitHubCopilotDevicePollResponse,
     GitHubCopilotDeviceStartResponse, GitLabOAuthCompleteResponse, GitLabOAuthStartResponse,
     GitLabPatSaveResponse, MiniMaxOAuthPollResponse, MiniMaxOAuthStartResponse,
-    ProviderAuthDeleteResponse, ProviderAuthListResponse,
-    ProviderAuthUpsertResponse, ThreadForkResponse, ThreadResumeResponse, ThreadStartResponse,
-    TurnCancelResponse, TurnStartResponse,
+    OpenAiCodexOAuthCompleteResponse, OpenAiCodexOAuthStartResponse,
+    ProviderAuthDeleteResponse, ProviderAuthListResponse, ProviderAuthUpsertResponse,
+    ThreadForkResponse, ThreadResumeResponse, ThreadStartResponse, TurnCancelResponse,
+    TurnStartResponse,
 };
 use liz_protocol::{
     ApprovalDecision, ApprovalRequest, ApprovalStatus, Checkpoint, CheckpointScope,
     GitHubCopilotDeviceCode, GitHubCopilotDevicePollStatus, GitLabOAuthStart,
-    MiniMaxOAuthDeviceCode, MiniMaxOAuthPollStatus,
+    MiniMaxOAuthDeviceCode, MiniMaxOAuthPollStatus, OpenAiCodexOAuthStart,
     ProviderAuthProfile, ProviderCredential, Thread, ThreadId, Turn,
 };
 use std::collections::HashMap;
@@ -142,6 +145,83 @@ impl RuntimeCoordinator {
         self.stores.write_auth_profiles(&snapshot)?;
         Ok(ProviderAuthDeleteResponse {
             profile_id: request.profile_id,
+        })
+    }
+
+    /// Starts an OpenAI Codex OAuth login flow.
+    pub fn start_openai_codex_oauth_login(
+        &self,
+        request: OpenAiCodexOAuthStartRequest,
+    ) -> RuntimeResult<OpenAiCodexOAuthStartResponse> {
+        let code_verifier = generate_codex_code_verifier();
+        let code_challenge = pkce_sha256_challenge(&code_verifier);
+        let state = generate_codex_state();
+        let authorize_url = build_openai_codex_authorize_url(
+            &request.redirect_uri,
+            &code_challenge,
+            &state,
+            request.originator.as_deref().unwrap_or("liz"),
+        )
+        .map_err(|error| RuntimeError::invalid_state("openai_codex_oauth_start_failed", error.to_string()))?;
+
+        Ok(OpenAiCodexOAuthStartResponse {
+            oauth: OpenAiCodexOAuthStart {
+                authorize_url,
+                state,
+                code_verifier,
+            },
+        })
+    }
+
+    /// Completes an OpenAI Codex OAuth login flow and persists the resulting profile.
+    pub fn complete_openai_codex_oauth_login(
+        &mut self,
+        request: OpenAiCodexOAuthCompleteRequest,
+    ) -> RuntimeResult<OpenAiCodexOAuthCompleteResponse> {
+        let callback = parse_codex_callback(&request.code_or_redirect_url)
+            .map_err(|error| RuntimeError::invalid_state("openai_codex_oauth_complete_failed", error))?;
+        if let Some(expected_state) = request.expected_state.as_deref() {
+            if callback.state.as_deref() != Some(expected_state) {
+                return Err(RuntimeError::invalid_state(
+                    "openai_codex_oauth_state_mismatch",
+                    "OpenAI Codex OAuth callback state did not match the expected value",
+                ));
+            }
+        }
+
+        let token_url_override = std::env::var("OPENAI_CODEX_TOKEN_URL")
+            .ok()
+            .or_else(|| std::env::var("LIZ_OPENAI_CODEX_TOKEN_URL").ok());
+        let oauth = exchange_openai_codex_authorization_code(
+            &callback.code,
+            &request.redirect_uri,
+            &request.code_verifier,
+            token_url_override.as_deref(),
+        )
+        .map_err(|error| RuntimeError::invalid_state("openai_codex_oauth_complete_failed", error.to_string()))?;
+
+        let profile = ProviderAuthProfile {
+            profile_id: request
+                .profile_id
+                .unwrap_or_else(|| "openai-codex:default".to_owned()),
+            provider_id: "openai-codex".to_owned(),
+            display_name: oauth
+                .email
+                .clone()
+                .or(Some("OpenAI Codex".to_owned())),
+            credential: ProviderCredential::OAuth {
+                access_token: oauth.access_token,
+                refresh_token: Some(oauth.refresh_token),
+                expires_at_ms: Some(oauth.expires_at_ms),
+                account_id: oauth.account_id,
+                email: oauth.email,
+            },
+        };
+        let response = self.upsert_provider_auth_profile(ProviderAuthUpsertRequest {
+            profile,
+        })?;
+        Ok(OpenAiCodexOAuthCompleteResponse {
+            profile: response.profile,
         })
     }
 
@@ -636,4 +716,67 @@ fn validate_provider_auth_profile(profile: &ProviderAuthProfile) -> RuntimeResul
         ));
     }
     Ok(())
+}
+
+#[derive(Debug)]
+struct ParsedCodexCallback {
+    code: String,
+    state: Option<String>,
+}
+
+fn parse_codex_callback(input: &str) -> Result<ParsedCodexCallback, String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err("OpenAI Codex OAuth callback must not be empty".to_owned());
+    }
+
+    if let Ok(url) = reqwest::Url::parse(trimmed) {
+        let code = url
+            .query_pairs()
+            .find(|(key, _)| key == "code")
+            .map(|(_, value)| value.into_owned())
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| "OpenAI Codex OAuth redirect URL did not include a code parameter".to_owned())?;
+        let state = url
+            .query_pairs()
+            .find(|(key, _)| key == "state")
+            .map(|(_, value)| value.into_owned())
+            .filter(|value| !value.trim().is_empty());
+        return Ok(ParsedCodexCallback { code, state });
+    }
+
+    Ok(ParsedCodexCallback {
+        code: trimmed.to_owned(),
+        state: None,
+    })
+}
+
+fn generate_codex_state() -> String {
+    generate_oauth_random_string(32)
+}
+
+fn generate_codex_code_verifier() -> String {
+    generate_oauth_random_string(64)
+}
+
+fn pkce_sha256_challenge(verifier: &str) -> String {
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::Engine;
+    use sha2::{Digest, Sha256};
+
+    let digest = Sha256::digest(verifier.as_bytes());
+    URL_SAFE_NO_PAD.encode(digest)
+}
+
+fn generate_oauth_random_string(length: usize) -> String {
+    use rand::RngCore;
+
+    const ALPHABET: &[u8] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+    let mut bytes = vec![0_u8; length];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    bytes
+        .into_iter()
+        .map(|value| ALPHABET[usize::from(value) % ALPHABET.len()] as char)
+        .collect()
 }
