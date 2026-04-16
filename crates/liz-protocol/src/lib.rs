@@ -48,7 +48,9 @@ pub use responses::{
 };
 pub use thread::{Thread, ThreadStatus};
 pub use tool::{
-    ShellExecRequest, ShellExecResult, ToolCallRequest, ToolCallResponse, ToolInvocation, ToolName,
+    ShellExecRequest, ShellExecResult, ShellReadOutputRequest, ShellReadOutputResult,
+    ShellSpawnRequest, ShellSpawnResult, ShellTerminateRequest, ShellTerminateResult,
+    ShellWaitRequest, ShellWaitResult, ToolCallRequest, ToolCallResponse, ToolInvocation, ToolName,
     ToolResult, WorkspaceApplyPatchRequest, WorkspaceApplyPatchResult, WorkspaceListEntry,
     WorkspaceListRequest, WorkspaceListResult, WorkspaceReadRequest, WorkspaceReadResult,
     WorkspaceSearchMatch, WorkspaceSearchRequest, WorkspaceSearchResult, WorkspaceWriteTextRequest,

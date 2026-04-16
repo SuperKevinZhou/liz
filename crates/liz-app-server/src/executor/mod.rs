@@ -8,6 +8,7 @@ use liz_protocol::{
     ArtifactKind, ExecutorStream, ToolCallRequest, ToolInvocation, ToolName, ToolResult,
 };
 use serde::Serialize;
+use shell::LocalShellExecutor;
 
 /// A persisted artifact payload produced while executing one tool.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,7 +47,9 @@ pub struct ExecutorOutput {
 
 /// Dispatches typed tool invocations to the local runtime implementation.
 #[derive(Debug, Clone, Default)]
-pub struct ExecutorGateway;
+pub struct ExecutorGateway {
+    shell: std::sync::Arc<LocalShellExecutor>,
+}
 
 impl ExecutorGateway {
     /// Executes one typed tool invocation against the local workspace runtime.
@@ -135,7 +138,7 @@ impl ExecutorGateway {
                 ))
             }
             ToolInvocation::ShellExec(input) => {
-                let execution = shell::exec(input)?;
+                let execution = self.shell.exec(input)?;
                 let summary = format!(
                     "Command exited with code {}: {}",
                     execution.result.exit_code, execution.result.command
@@ -151,6 +154,61 @@ impl ExecutorGateway {
                         .into_iter()
                         .map(|chunk| ExecutorOutput { stream: chunk.stream, chunk: chunk.chunk })
                         .collect(),
+                ))
+            }
+            ToolInvocation::ShellSpawn(input) => {
+                let spawned = self.shell.spawn(input)?;
+                let summary = format!("Spawned background shell task {}", spawned.task_id);
+                Ok(executed_tool(
+                    ToolName::ShellSpawn,
+                    summary,
+                    ToolResult::ShellSpawn(spawned),
+                    &request.invocation,
+                    None,
+                    Vec::new(),
+                ))
+            }
+            ToolInvocation::ShellReadOutput(input) => {
+                let read = self.shell.read_output(input)?;
+                let summary = format!("Read background shell output for {}", read.result.task_id);
+                Ok(executed_tool(
+                    ToolName::ShellReadOutput,
+                    summary,
+                    ToolResult::ShellReadOutput(read.result),
+                    &request.invocation,
+                    None,
+                    read.output_chunks
+                        .into_iter()
+                        .map(|chunk| ExecutorOutput { stream: chunk.stream, chunk: chunk.chunk })
+                        .collect(),
+                ))
+            }
+            ToolInvocation::ShellWait(input) => {
+                let waited = self.shell.wait(input)?;
+                let summary = format!("Waited for background shell task {}", waited.result.task_id);
+                Ok(executed_tool(
+                    ToolName::ShellWait,
+                    summary,
+                    ToolResult::ShellWait(waited.result.clone()),
+                    &request.invocation,
+                    Some(command_output_artifact_from_wait(&waited.result)),
+                    waited
+                        .output_chunks
+                        .into_iter()
+                        .map(|chunk| ExecutorOutput { stream: chunk.stream, chunk: chunk.chunk })
+                        .collect(),
+                ))
+            }
+            ToolInvocation::ShellTerminate(input) => {
+                let terminated = self.shell.terminate(input)?;
+                let summary = format!("Terminated background shell task {}", terminated.task_id);
+                Ok(executed_tool(
+                    ToolName::ShellTerminate,
+                    summary,
+                    ToolResult::ShellTerminate(terminated),
+                    &request.invocation,
+                    None,
+                    Vec::new(),
                 ))
             }
         }
@@ -172,6 +230,10 @@ fn executed_tool(
         ToolResult::WorkspaceWriteText(output) => serialize_snapshot(output),
         ToolResult::WorkspaceApplyPatch(output) => serialize_snapshot(output),
         ToolResult::ShellExec(output) => serialize_snapshot(output),
+        ToolResult::ShellSpawn(output) => serialize_snapshot(output),
+        ToolResult::ShellWait(output) => serialize_snapshot(output),
+        ToolResult::ShellReadOutput(output) => serialize_snapshot(output),
+        ToolResult::ShellTerminate(output) => serialize_snapshot(output),
     };
     let trace_body = serde_json::to_string_pretty(&ToolTraceArtifact {
         tool_name: tool_name.as_str().to_owned(),
@@ -242,6 +304,14 @@ fn command_output_artifact(result: &liz_protocol::ShellExecResult) -> PendingArt
     PendingArtifact {
         kind: ArtifactKind::CommandOutput,
         summary: format!("Command output for {}", result.command),
+        body: serde_json::to_string_pretty(result).expect("command output should serialize"),
+    }
+}
+
+fn command_output_artifact_from_wait(result: &liz_protocol::ShellWaitResult) -> PendingArtifact {
+    PendingArtifact {
+        kind: ArtifactKind::CommandOutput,
+        summary: format!("Command output for {}", result.task_id),
         body: serde_json::to_string_pretty(result).expect("command output should serialize"),
     }
 }

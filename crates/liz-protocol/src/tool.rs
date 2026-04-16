@@ -1,7 +1,7 @@
 //! Tool-surface request and result payloads.
 
 use crate::artifact::ArtifactRef;
-use crate::ids::{ThreadId, TurnId};
+use crate::ids::{ExecutorTaskId, ThreadId, TurnId};
 use serde::{Deserialize, Serialize};
 
 /// The stable tool names exposed by the runtime.
@@ -20,6 +20,14 @@ pub enum ToolName {
     WorkspaceApplyPatch,
     /// Runs one foreground shell command and waits for it to finish.
     ShellExec,
+    /// Starts a background shell command.
+    ShellSpawn,
+    /// Waits for a background shell command to finish.
+    ShellWait,
+    /// Reads newly captured output from a background shell command.
+    ShellReadOutput,
+    /// Terminates a background shell command.
+    ShellTerminate,
 }
 
 impl ToolName {
@@ -32,6 +40,10 @@ impl ToolName {
             Self::WorkspaceWriteText => "workspace.write_text",
             Self::WorkspaceApplyPatch => "workspace.apply_patch",
             Self::ShellExec => "shell.exec",
+            Self::ShellSpawn => "shell.spawn",
+            Self::ShellWait => "shell.wait",
+            Self::ShellReadOutput => "shell.read_output",
+            Self::ShellTerminate => "shell.terminate",
         }
     }
 }
@@ -58,6 +70,18 @@ pub enum ToolInvocation {
     /// Invokes `shell.exec`.
     #[serde(rename = "shell.exec")]
     ShellExec(ShellExecRequest),
+    /// Invokes `shell.spawn`.
+    #[serde(rename = "shell.spawn")]
+    ShellSpawn(ShellSpawnRequest),
+    /// Invokes `shell.wait`.
+    #[serde(rename = "shell.wait")]
+    ShellWait(ShellWaitRequest),
+    /// Invokes `shell.read_output`.
+    #[serde(rename = "shell.read_output")]
+    ShellReadOutput(ShellReadOutputRequest),
+    /// Invokes `shell.terminate`.
+    #[serde(rename = "shell.terminate")]
+    ShellTerminate(ShellTerminateRequest),
 }
 
 impl ToolInvocation {
@@ -70,6 +94,10 @@ impl ToolInvocation {
             Self::WorkspaceWriteText(_) => ToolName::WorkspaceWriteText,
             Self::WorkspaceApplyPatch(_) => ToolName::WorkspaceApplyPatch,
             Self::ShellExec(_) => ToolName::ShellExec,
+            Self::ShellSpawn(_) => ToolName::ShellSpawn,
+            Self::ShellWait(_) => ToolName::ShellWait,
+            Self::ShellReadOutput(_) => ToolName::ShellReadOutput,
+            Self::ShellTerminate(_) => ToolName::ShellTerminate,
         }
     }
 }
@@ -96,6 +124,18 @@ pub enum ToolResult {
     /// Result payload for `shell.exec`.
     #[serde(rename = "shell.exec")]
     ShellExec(ShellExecResult),
+    /// Result payload for `shell.spawn`.
+    #[serde(rename = "shell.spawn")]
+    ShellSpawn(ShellSpawnResult),
+    /// Result payload for `shell.wait`.
+    #[serde(rename = "shell.wait")]
+    ShellWait(ShellWaitResult),
+    /// Result payload for `shell.read_output`.
+    #[serde(rename = "shell.read_output")]
+    ShellReadOutput(ShellReadOutputResult),
+    /// Result payload for `shell.terminate`.
+    #[serde(rename = "shell.terminate")]
+    ShellTerminate(ShellTerminateResult),
 }
 
 impl ToolResult {
@@ -108,6 +148,10 @@ impl ToolResult {
             Self::WorkspaceWriteText(_) => ToolName::WorkspaceWriteText,
             Self::WorkspaceApplyPatch(_) => ToolName::WorkspaceApplyPatch,
             Self::ShellExec(_) => ToolName::ShellExec,
+            Self::ShellSpawn(_) => ToolName::ShellSpawn,
+            Self::ShellWait(_) => ToolName::ShellWait,
+            Self::ShellReadOutput(_) => ToolName::ShellReadOutput,
+            Self::ShellTerminate(_) => ToolName::ShellTerminate,
         }
     }
 }
@@ -288,6 +332,88 @@ pub struct ShellExecResult {
     pub stdout: String,
     /// Captured standard error.
     pub stderr: String,
+}
+
+/// Input for `shell.spawn`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShellSpawnRequest {
+    /// The shell command to run in the background.
+    pub command: String,
+    /// The working directory for the command, if different from the process cwd.
+    pub working_dir: Option<String>,
+}
+
+/// Output for `shell.spawn`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShellSpawnResult {
+    /// The background executor task identifier.
+    pub task_id: ExecutorTaskId,
+    /// The command that was spawned.
+    pub command: String,
+    /// The working directory used for the command, if any.
+    pub working_dir: Option<String>,
+}
+
+/// Input for `shell.wait`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShellWaitRequest {
+    /// The background task to wait for.
+    pub task_id: ExecutorTaskId,
+}
+
+/// Output for `shell.wait`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShellWaitResult {
+    /// The background task that was waited on.
+    pub task_id: ExecutorTaskId,
+    /// Whether the command is still running after the wait.
+    pub running: bool,
+    /// The final exit code when available.
+    pub exit_code: Option<i32>,
+    /// The full accumulated standard output.
+    pub stdout: String,
+    /// The full accumulated standard error.
+    pub stderr: String,
+}
+
+/// Input for `shell.read_output`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShellReadOutputRequest {
+    /// The background task whose output should be read.
+    pub task_id: ExecutorTaskId,
+}
+
+/// Output for `shell.read_output`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShellReadOutputResult {
+    /// The background task whose output was read.
+    pub task_id: ExecutorTaskId,
+    /// Whether the command is still running.
+    pub running: bool,
+    /// The final exit code when available.
+    pub exit_code: Option<i32>,
+    /// Newly captured standard output since the last read.
+    pub stdout_delta: String,
+    /// Newly captured standard error since the last read.
+    pub stderr_delta: String,
+}
+
+/// Input for `shell.terminate`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShellTerminateRequest {
+    /// The background task to terminate.
+    pub task_id: ExecutorTaskId,
+}
+
+/// Output for `shell.terminate`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShellTerminateResult {
+    /// The background task that was terminated.
+    pub task_id: ExecutorTaskId,
+    /// Whether the terminate request sent a kill signal.
+    pub terminated: bool,
+    /// The observed exit code when available.
+    pub exit_code: Option<i32>,
 }
 
 /// Response payload for one tool execution.

@@ -5,6 +5,7 @@ use liz_app_server::storage::StoragePaths;
 use liz_protocol::requests::{ClientRequest, ClientRequestEnvelope, ThreadStartRequest};
 use liz_protocol::{
     RequestId, ResponsePayload, ServerEventPayload, ServerResponseEnvelope, ShellExecRequest,
+    ShellReadOutputRequest, ShellSpawnRequest, ShellTerminateRequest, ShellWaitRequest,
     ToolCallRequest, ToolInvocation, ToolResult, WorkspaceApplyPatchRequest, WorkspaceListRequest,
     WorkspaceReadRequest, WorkspaceSearchRequest, WorkspaceWriteTextRequest,
 };
@@ -263,6 +264,155 @@ fn shell_exec_returns_output_and_emits_executor_chunks() {
     assert!(shell_events
         .iter()
         .any(|event| matches!(event.payload, ServerEventPayload::ExecutorOutputChunk(_))));
+}
+
+#[test]
+fn background_shell_can_spawn_read_and_wait() {
+    let temp_dir = TempDir::new().expect("temp dir should be created");
+    let workspace_root = temp_dir.path().join("workspace");
+    fs::create_dir_all(&workspace_root).expect("workspace root should exist");
+
+    let server = AppServer::new(StoragePaths::new(temp_dir.path().join(".liz")));
+    let client = spawn_loopback_websocket(server);
+
+    client
+        .send_request(envelope(
+            "request_31",
+            ClientRequest::ThreadStart(ThreadStartRequest {
+                title: Some("Background shell".to_owned()),
+                initial_goal: Some("Track a background process".to_owned()),
+                workspace_ref: Some(workspace_root.to_string_lossy().to_string()),
+            }),
+        ))
+        .expect("thread request should be sent");
+    let response = client.recv_response().expect("thread response should arrive");
+    let thread = match response {
+        ServerResponseEnvelope::Success(success) => match success.response {
+            ResponsePayload::ThreadStart(response) => response.thread,
+            other => panic!("unexpected response payload: {other:?}"),
+        },
+        other => panic!("unexpected response envelope: {other:?}"),
+    };
+    client.recv_event_timeout(Duration::from_secs(1)).expect("thread_started event should arrive");
+
+    let spawn_response = send_tool(
+        &client,
+        "request_32",
+        ToolInvocation::ShellSpawn(ShellSpawnRequest {
+            command: "[Console]::Out.WriteLine('bg-out'); [Console]::Error.WriteLine('bg-err'); Start-Sleep -Milliseconds 600".to_owned(),
+            working_dir: Some(workspace_root.to_string_lossy().to_string()),
+        }),
+        &thread.id,
+    );
+    let task_id = match spawn_response.result {
+        ToolResult::ShellSpawn(result) => result.task_id,
+        other => panic!("unexpected shell spawn result: {other:?}"),
+    };
+    let spawn_events = collect_tool_events(&client, 3);
+    assert!(spawn_events
+        .iter()
+        .any(|event| matches!(event.payload, ServerEventPayload::ToolCompleted(_))));
+
+    let wait_response = send_tool(
+        &client,
+        "request_34",
+        ToolInvocation::ShellWait(ShellWaitRequest { task_id: task_id.clone() }),
+        &thread.id,
+    );
+    match wait_response.result {
+        ToolResult::ShellWait(result) => {
+            assert_eq!(result.exit_code, Some(0));
+            assert!(result.stdout.contains("bg-out"));
+            assert!(result.stderr.contains("bg-err"));
+        }
+        other => panic!("unexpected shell wait result: {other:?}"),
+    }
+    let wait_events = collect_tool_events(&client, 4);
+    assert!(wait_events
+        .iter()
+        .any(|event| matches!(event.payload, ServerEventPayload::ExecutorOutputChunk(_))));
+
+    let read_response = send_tool(
+        &client,
+        "request_35",
+        ToolInvocation::ShellReadOutput(ShellReadOutputRequest { task_id: task_id.clone() }),
+        &thread.id,
+    );
+    match read_response.result {
+        ToolResult::ShellReadOutput(result) => {
+            assert!(result.stdout_delta.contains("bg-out"));
+            assert!(result.stderr_delta.contains("bg-err"));
+            assert_eq!(result.task_id, task_id);
+            assert_eq!(result.exit_code, Some(0));
+        }
+        other => panic!("unexpected shell read_output result: {other:?}"),
+    }
+    let read_events = collect_tool_events(&client, 5);
+    assert!(read_events
+        .iter()
+        .any(|event| matches!(event.payload, ServerEventPayload::ExecutorOutputChunk(_))));
+}
+
+#[test]
+fn background_shell_can_terminate() {
+    let temp_dir = TempDir::new().expect("temp dir should be created");
+    let workspace_root = temp_dir.path().join("workspace");
+    fs::create_dir_all(&workspace_root).expect("workspace root should exist");
+
+    let server = AppServer::new(StoragePaths::new(temp_dir.path().join(".liz")));
+    let client = spawn_loopback_websocket(server);
+
+    client
+        .send_request(envelope(
+            "request_41",
+            ClientRequest::ThreadStart(ThreadStartRequest {
+                title: Some("Background shell terminate".to_owned()),
+                initial_goal: Some("Terminate a background process".to_owned()),
+                workspace_ref: Some(workspace_root.to_string_lossy().to_string()),
+            }),
+        ))
+        .expect("thread request should be sent");
+    let response = client.recv_response().expect("thread response should arrive");
+    let thread = match response {
+        ServerResponseEnvelope::Success(success) => match success.response {
+            ResponsePayload::ThreadStart(response) => response.thread,
+            other => panic!("unexpected response payload: {other:?}"),
+        },
+        other => panic!("unexpected response envelope: {other:?}"),
+    };
+    client.recv_event_timeout(Duration::from_secs(1)).expect("thread_started event should arrive");
+
+    let spawn_response = send_tool(
+        &client,
+        "request_42",
+        ToolInvocation::ShellSpawn(ShellSpawnRequest {
+            command: "Start-Sleep -Seconds 5".to_owned(),
+            working_dir: Some(workspace_root.to_string_lossy().to_string()),
+        }),
+        &thread.id,
+    );
+    let task_id = match spawn_response.result {
+        ToolResult::ShellSpawn(result) => result.task_id,
+        other => panic!("unexpected shell spawn result: {other:?}"),
+    };
+    let _spawn_events = collect_tool_events(&client, 3);
+
+    let terminate_response = send_tool(
+        &client,
+        "request_43",
+        ToolInvocation::ShellTerminate(ShellTerminateRequest { task_id }),
+        &thread.id,
+    );
+    match terminate_response.result {
+        ToolResult::ShellTerminate(result) => {
+            assert!(result.terminated);
+        }
+        other => panic!("unexpected shell terminate result: {other:?}"),
+    }
+    let terminate_events = collect_tool_events(&client, 3);
+    assert!(terminate_events
+        .iter()
+        .any(|event| matches!(event.payload, ServerEventPayload::ToolCompleted(_))));
 }
 
 fn send_tool(

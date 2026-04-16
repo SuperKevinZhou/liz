@@ -125,11 +125,7 @@ pub fn handle_request(
             })
         }
         ClientRequest::ToolCall(request) => executor.execute_tool(&request).and_then(|executed| {
-            let executor_task_id = ExecutorTaskId::new(format!(
-                "executor_{}_{}",
-                request.thread_id,
-                executed.tool_name.as_str().replace('.', "_")
-            ));
+            let executor_task_id = executor_task_id_for_tool(&request.thread_id, &executed.result);
             let output_chunks = executed.output_chunks.clone();
             let artifacts = executed
                 .artifacts
@@ -228,5 +224,22 @@ fn error_envelope(request_id: RequestId, error: RuntimeError) -> ErrorResponseEn
             message: error.to_string(),
             retryable: error.retryable(),
         },
+    }
+}
+
+fn executor_task_id_for_tool(
+    thread_id: &liz_protocol::ThreadId,
+    result: &liz_protocol::ToolResult,
+) -> ExecutorTaskId {
+    match result {
+        liz_protocol::ToolResult::ShellSpawn(result) => result.task_id.clone(),
+        liz_protocol::ToolResult::ShellWait(result) => result.task_id.clone(),
+        liz_protocol::ToolResult::ShellReadOutput(result) => result.task_id.clone(),
+        liz_protocol::ToolResult::ShellTerminate(result) => result.task_id.clone(),
+        _ => ExecutorTaskId::new(format!(
+            "executor_{}_{}",
+            thread_id,
+            result.tool_name().as_str().replace('.', "_")
+        )),
     }
 }
