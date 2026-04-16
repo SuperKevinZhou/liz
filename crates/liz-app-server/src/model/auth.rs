@@ -163,6 +163,15 @@ pub struct OpenAiCodexRuntimeAuthRequest<'a> {
     pub token_url_override: Option<&'a str>,
 }
 
+/// A detected Z.AI endpoint and preferred bootstrap model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ZaiDetectedEndpoint {
+    /// Stable endpoint identifier.
+    pub endpoint: String,
+    /// Preferred model id proven to work for this endpoint.
+    pub model_id: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct OpenAiCodexRawTokenResponse {
     access_token: String,
@@ -311,6 +320,32 @@ fn default_google_adc_path() -> Option<PathBuf> {
                 .join("application_default_credentials.json")
         })
     }
+}
+
+/// Detects the best Z.AI endpoint for the provided API key.
+pub fn detect_zai_endpoint(
+    api_key: &str,
+    preferred_endpoint: Option<&str>,
+) -> Result<Option<ZaiDetectedEndpoint>, ModelError> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|error| {
+            ModelError::ProviderFailure(format!(
+                "failed to build Z.AI detection client: {error}"
+            ))
+        })?;
+
+    for candidate in zai_endpoint_candidates(preferred_endpoint) {
+        if probe_zai_endpoint(&client, api_key, candidate.base_url, &candidate.model_id)? {
+            return Ok(Some(ZaiDetectedEndpoint {
+                endpoint: candidate.endpoint.to_owned(),
+                model_id: candidate.model_id.to_owned(),
+            }));
+        }
+    }
+
+    Ok(None)
 }
 
 /// Resolves a Bedrock Mantle bearer token from either an explicit API key or the AWS credential chain.
@@ -635,6 +670,152 @@ fn store_cached_bedrock_mantle_token(region: &str, token: String, expires_at_ms:
 fn first_env(keys: &[&str]) -> Option<String> {
     keys.iter()
         .find_map(|key| env::var(key).ok().filter(|value| !value.trim().is_empty()))
+}
+
+#[derive(Clone, Copy)]
+struct ZaiEndpointCandidate {
+    endpoint: &'static str,
+    base_url: &'static str,
+    model_id: &'static str,
+}
+
+fn zai_endpoint_candidates(preferred_endpoint: Option<&str>) -> Vec<ZaiEndpointCandidate> {
+    match preferred_endpoint.map(normalize_zai_endpoint_id).as_deref() {
+        Some("coding-global") => vec![
+            ZaiEndpointCandidate {
+                endpoint: "coding-global",
+                base_url: zai_detection_base_url("coding-global"),
+                model_id: "glm-5.1",
+            },
+            ZaiEndpointCandidate {
+                endpoint: "coding-global",
+                base_url: zai_detection_base_url("coding-global"),
+                model_id: "glm-4.7",
+            },
+        ],
+        Some("coding-cn") => vec![
+            ZaiEndpointCandidate {
+                endpoint: "coding-cn",
+                base_url: zai_detection_base_url("coding-cn"),
+                model_id: "glm-5.1",
+            },
+            ZaiEndpointCandidate {
+                endpoint: "coding-cn",
+                base_url: zai_detection_base_url("coding-cn"),
+                model_id: "glm-4.7",
+            },
+        ],
+        Some("cn") => vec![ZaiEndpointCandidate {
+            endpoint: "cn",
+            base_url: zai_detection_base_url("cn"),
+            model_id: "glm-5.1",
+        }],
+        Some("global") => vec![ZaiEndpointCandidate {
+            endpoint: "global",
+            base_url: zai_detection_base_url("global"),
+            model_id: "glm-5.1",
+        }],
+        _ => vec![
+            ZaiEndpointCandidate {
+                endpoint: "global",
+                base_url: zai_detection_base_url("global"),
+                model_id: "glm-5.1",
+            },
+            ZaiEndpointCandidate {
+                endpoint: "cn",
+                base_url: zai_detection_base_url("cn"),
+                model_id: "glm-5.1",
+            },
+            ZaiEndpointCandidate {
+                endpoint: "coding-global",
+                base_url: zai_detection_base_url("coding-global"),
+                model_id: "glm-5.1",
+            },
+            ZaiEndpointCandidate {
+                endpoint: "coding-global",
+                base_url: zai_detection_base_url("coding-global"),
+                model_id: "glm-4.7",
+            },
+            ZaiEndpointCandidate {
+                endpoint: "coding-cn",
+                base_url: zai_detection_base_url("coding-cn"),
+                model_id: "glm-5.1",
+            },
+            ZaiEndpointCandidate {
+                endpoint: "coding-cn",
+                base_url: zai_detection_base_url("coding-cn"),
+                model_id: "glm-4.7",
+            },
+        ],
+    }
+}
+
+fn normalize_zai_endpoint_id(value: &str) -> String {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "coding_global" | "coding-global" => "coding-global".to_owned(),
+        "coding_cn" | "coding-cn" => "coding-cn".to_owned(),
+        "cn" => "cn".to_owned(),
+        "global" => "global".to_owned(),
+        other => other.to_owned(),
+    }
+}
+
+fn zai_detection_base_url(endpoint: &str) -> &'static str {
+    match endpoint {
+        "coding-global" => env_or_static(
+            "LIZ_ZAI_DETECT_CODING_GLOBAL_BASE_URL",
+            "https://api.z.ai/api/coding/paas/v4",
+        ),
+        "coding-cn" => env_or_static(
+            "LIZ_ZAI_DETECT_CODING_CN_BASE_URL",
+            "https://open.bigmodel.cn/api/coding/paas/v4",
+        ),
+        "cn" => env_or_static("LIZ_ZAI_DETECT_CN_BASE_URL", "https://open.bigmodel.cn/api/paas/v4"),
+        _ => env_or_static("LIZ_ZAI_DETECT_GLOBAL_BASE_URL", "https://api.z.ai/api/paas/v4"),
+    }
+}
+
+fn env_or_static(key: &str, fallback: &'static str) -> &'static str {
+    static CACHE: OnceLock<Mutex<BTreeMap<String, &'static str>>> = OnceLock::new();
+    if let Ok(value) = env::var(key) {
+        if !value.trim().is_empty() {
+            let cache = CACHE.get_or_init(|| Mutex::new(BTreeMap::new()));
+            if let Ok(mut cache) = cache.lock() {
+                if let Some(existing) = cache.get(&value) {
+                    return existing;
+                }
+                let leaked = Box::leak(value.clone().into_boxed_str());
+                cache.insert(value, leaked);
+                return leaked;
+            }
+        }
+    }
+    fallback
+}
+
+fn probe_zai_endpoint(
+    client: &reqwest::blocking::Client,
+    api_key: &str,
+    base_url: &str,
+    model_id: &str,
+) -> Result<bool, ModelError> {
+    let response = client
+        .post(format!("{}/chat/completions", base_url.trim_end_matches('/')))
+        .header("Authorization", format!("Bearer {api_key}"))
+        .json(&serde_json::json!({
+            "model": model_id,
+            "messages": [{"role": "user", "content": "ping"}],
+            "stream": false,
+            "max_tokens": 1,
+        }))
+        .send()
+        .map_err(|error| {
+            ModelError::ProviderFailure(format!(
+                "Z.AI endpoint probe failed for {base_url}: {error}"
+            ))
+        })?;
+
+    Ok(response.status().is_success())
 }
 
 #[derive(Debug, Deserialize)]
@@ -1358,9 +1539,12 @@ fn base64url_decode(input: &str) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_openai_codex_authorize_url, normalize_openai_codex_authorize_url,
+        build_openai_codex_authorize_url, detect_zai_endpoint, normalize_openai_codex_authorize_url,
         resolve_openai_codex_runtime_auth, OpenAiCodexRuntimeAuthRequest,
     };
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
 
     #[test]
     fn normalize_openai_codex_authorize_url_adds_required_scopes() {
@@ -1407,5 +1591,42 @@ mod tests {
         assert_eq!(auth.refresh_token, "refresh-token");
         assert_eq!(auth.account_id.as_deref(), Some("acct-1"));
         assert_eq!(auth.email.as_deref(), Some("user@example.com"));
+    }
+
+    #[test]
+    fn detect_zai_endpoint_falls_back_to_coding_plan_model() {
+        let server = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let address = server.local_addr().expect("addr");
+        let base_url = format!("http://{}", address);
+
+        std::env::set_var("LIZ_ZAI_DETECT_CODING_GLOBAL_BASE_URL", &base_url);
+
+        thread::spawn(move || {
+            for _ in 0..2 {
+                let (mut stream, _) = server.accept().expect("accept");
+                let mut buffer = vec![0_u8; 8192];
+                let bytes = stream.read(&mut buffer).expect("read");
+                let request = String::from_utf8_lossy(&buffer[..bytes]);
+                let body = request.split("\r\n\r\n").nth(1).unwrap_or_default();
+                let status_line = if body.contains(r#""model":"glm-5.1""#) {
+                    "HTTP/1.1 404 Not Found"
+                } else {
+                    "HTTP/1.1 200 OK"
+                };
+                let response = format!(
+                    "{status_line}\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}"
+                );
+                stream.write_all(response.as_bytes()).expect("write");
+            }
+        });
+
+        let detected = detect_zai_endpoint("sk-test", Some("coding-global"))
+            .expect("detect should succeed")
+            .expect("endpoint should be detected");
+
+        assert_eq!(detected.endpoint, "coding-global");
+        assert_eq!(detected.model_id, "glm-4.7");
+
+        std::env::remove_var("LIZ_ZAI_DETECT_CODING_GLOBAL_BASE_URL");
     }
 }

@@ -1,5 +1,6 @@
 //! Provider-resolution config and environment seams.
 
+use crate::model::auth::detect_zai_endpoint;
 use crate::model::provider_spec::{ProviderAuthKind, ProviderSpec};
 use std::collections::BTreeMap;
 use std::env;
@@ -98,7 +99,7 @@ impl ResolvedProvider {
                 let keys = spec.credential_env_keys();
                 first_env(&keys)
             });
-        let model_id = override_config
+        let mut model_id = override_config
             .and_then(|config| config.model_id.clone())
             .unwrap_or_else(|| spec.default_model.to_owned());
         let mut headers = spec.default_headers();
@@ -271,6 +272,53 @@ impl ResolvedProvider {
                         .or_insert("credential-chain-or-bearer-token".to_owned());
                 }
             }
+            "qwen" => {
+                if override_config.and_then(|config| config.api_key.as_ref()).is_none() {
+                    api_key = first_env(&["QWEN_API_KEY", "MODELSTUDIO_API_KEY", "DASHSCOPE_API_KEY"]);
+                }
+                let endpoint = override_config
+                    .and_then(|config| config.metadata.get("qwen.endpoint"))
+                    .cloned()
+                    .or_else(|| first_env(&["QWEN_ENDPOINT", "MODELSTUDIO_ENDPOINT", "DASHSCOPE_ENDPOINT"]));
+                if let Some(endpoint) = endpoint {
+                    metadata
+                        .entry("qwen.endpoint".to_owned())
+                        .or_insert(endpoint.clone());
+                    if override_config.and_then(|config| config.base_url.as_ref()).is_none() {
+                        base_url = Some(resolve_qwen_base_url(&endpoint));
+                    }
+                }
+            }
+            "zai" => {
+                if override_config.and_then(|config| config.api_key.as_ref()).is_none() {
+                    api_key = first_env(&["ZAI_API_KEY", "Z_AI_API_KEY"]);
+                }
+
+                let endpoint = override_config
+                    .and_then(|config| config.metadata.get("zai.endpoint"))
+                    .cloned()
+                    .or_else(|| first_env(&["ZAI_ENDPOINT"]));
+                if let Some(endpoint) = endpoint {
+                    metadata
+                        .entry("zai.endpoint".to_owned())
+                        .or_insert(endpoint.clone());
+                    if override_config.and_then(|config| config.base_url.as_ref()).is_none() {
+                        base_url = Some(resolve_zai_base_url(&endpoint));
+                    }
+                } else if override_config.and_then(|config| config.base_url.as_ref()).is_none() {
+                    if let Some(api_key) = api_key.as_deref() {
+                        if let Ok(Some(detected)) = detect_zai_endpoint(api_key, None) {
+                            metadata
+                                .entry("zai.endpoint".to_owned())
+                                .or_insert(detected.endpoint.clone());
+                            base_url = Some(resolve_zai_base_url(&detected.endpoint));
+                            if model_id == spec.default_model {
+                                model_id = detected.model_id;
+                            }
+                        }
+                    }
+                }
+            }
             _ => {}
         }
 
@@ -288,4 +336,26 @@ impl ResolvedProvider {
 fn first_env(keys: &[&str]) -> Option<String> {
     keys.iter()
         .find_map(|key| env::var(key).ok().filter(|value| !value.trim().is_empty()))
+}
+
+fn resolve_qwen_base_url(endpoint: &str) -> String {
+    match endpoint.trim().to_ascii_lowercase().as_str() {
+        "coding-cn" | "cn-coding" => "https://coding.dashscope.aliyuncs.com/v1".to_owned(),
+        "standard-cn" | "cn-standard" | "cn" => {
+            "https://dashscope.aliyuncs.com/compatible-mode/v1".to_owned()
+        }
+        "standard-global" | "global-standard" | "standard" => {
+            "https://dashscope-intl.aliyuncs.com/compatible-mode/v1".to_owned()
+        }
+        _ => "https://coding-intl.dashscope.aliyuncs.com/v1".to_owned(),
+    }
+}
+
+fn resolve_zai_base_url(endpoint: &str) -> String {
+    match endpoint.trim().to_ascii_lowercase().as_str() {
+        "coding-cn" => "https://open.bigmodel.cn/api/coding/paas/v4".to_owned(),
+        "cn" => "https://open.bigmodel.cn/api/paas/v4".to_owned(),
+        "coding-global" => "https://api.z.ai/api/coding/paas/v4".to_owned(),
+        _ => "https://api.z.ai/api/paas/v4".to_owned(),
+    }
 }

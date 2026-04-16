@@ -344,8 +344,103 @@ fn builtin_specs() -> Vec<ProviderSpec> {
         openai_compatible_spec("sglang", "SGLang", "meta-llama/Llama-3.1-70B-Instruct"),
         openai_compatible_spec("opencode", "OpenCode Zen", "claude-opus-4-6"),
         openai_compatible_spec("opencode-go", "OpenCode Go", "kimi-k2.5"),
-        openai_compatible_spec("qwen", "Qwen", "qwen-max"),
-        openai_compatible_spec("zai", "Z.AI", "glm-5"),
+        spec(
+            "qwen",
+            "Qwen",
+            ModelProviderFamily::OpenAiCompatible,
+            ProviderAuthKind::ApiKey,
+            Some("https://coding-intl.dashscope.aliyuncs.com/v1"),
+            "qwen3.5-plus",
+            &["QWEN_API_KEY", "MODELSTUDIO_API_KEY", "DASHSCOPE_API_KEY"],
+            &[],
+            &[],
+            ModelCapabilities::openai_compatible()
+                .with_tool_call_streaming(true)
+                .with_image_input(true)
+                .with_max_context_window(1_000_000),
+            &[
+                "Supports Qwen Cloud Coding Plan and Standard DashScope endpoints.",
+                "Coding Plan endpoints omit models that are only available on Standard endpoints.",
+            ],
+        )
+        .with_auth_strategies(vec![
+            auth_strategy(
+                ProviderAuthKind::ApiKey,
+                "coding-plan-global",
+                &["QWEN_API_KEY", "MODELSTUDIO_API_KEY", "DASHSCOPE_API_KEY"],
+                &["QWEN_ENDPOINT=coding-global", "provider.qwen.endpoint=coding-global"],
+                &["Uses https://coding-intl.dashscope.aliyuncs.com/v1."],
+            ),
+            auth_strategy(
+                ProviderAuthKind::ApiKey,
+                "coding-plan-cn",
+                &["QWEN_API_KEY", "MODELSTUDIO_API_KEY", "DASHSCOPE_API_KEY"],
+                &["QWEN_ENDPOINT=coding-cn", "provider.qwen.endpoint=coding-cn"],
+                &["Uses https://coding.dashscope.aliyuncs.com/v1."],
+            ),
+            auth_strategy(
+                ProviderAuthKind::ApiKey,
+                "standard-global",
+                &["QWEN_API_KEY", "MODELSTUDIO_API_KEY", "DASHSCOPE_API_KEY"],
+                &["QWEN_ENDPOINT=standard-global", "provider.qwen.endpoint=standard-global"],
+                &["Uses https://dashscope-intl.aliyuncs.com/compatible-mode/v1."],
+            ),
+            auth_strategy(
+                ProviderAuthKind::ApiKey,
+                "standard-cn",
+                &["QWEN_API_KEY", "MODELSTUDIO_API_KEY", "DASHSCOPE_API_KEY"],
+                &["QWEN_ENDPOINT=standard-cn", "provider.qwen.endpoint=standard-cn"],
+                &["Uses https://dashscope.aliyuncs.com/compatible-mode/v1."],
+            ),
+        ]),
+        spec(
+            "zai",
+            "Z.AI",
+            ModelProviderFamily::OpenAiCompatible,
+            ProviderAuthKind::ApiKey,
+            Some("https://api.z.ai/api/paas/v4"),
+            "glm-5.1",
+            &["ZAI_API_KEY", "Z_AI_API_KEY"],
+            &[],
+            &[],
+            ModelCapabilities::openai_compatible()
+                .with_tool_call_streaming(true)
+                .with_max_context_window(202_800),
+            &[
+                "Supports Z.AI general and Coding Plan endpoints.",
+                "Coding Plan endpoints can be forced explicitly or detected from live probes.",
+            ],
+        )
+        .with_auth_strategies(vec![
+            auth_strategy(
+                ProviderAuthKind::ApiKey,
+                "coding-plan-global",
+                &["ZAI_API_KEY", "Z_AI_API_KEY"],
+                &["ZAI_ENDPOINT=coding-global", "provider.zai.endpoint=coding-global"],
+                &["Uses https://api.z.ai/api/coding/paas/v4."],
+            ),
+            auth_strategy(
+                ProviderAuthKind::ApiKey,
+                "coding-plan-cn",
+                &["ZAI_API_KEY", "Z_AI_API_KEY"],
+                &["ZAI_ENDPOINT=coding-cn", "provider.zai.endpoint=coding-cn"],
+                &["Uses https://open.bigmodel.cn/api/coding/paas/v4."],
+            ),
+            auth_strategy(
+                ProviderAuthKind::ApiKey,
+                "global",
+                &["ZAI_API_KEY", "Z_AI_API_KEY"],
+                &["ZAI_ENDPOINT=global", "provider.zai.endpoint=global"],
+                &["Uses https://api.z.ai/api/paas/v4."],
+            ),
+            auth_strategy(
+                ProviderAuthKind::ApiKey,
+                "cn",
+                &["ZAI_API_KEY", "Z_AI_API_KEY"],
+                &["ZAI_ENDPOINT=cn", "provider.zai.endpoint=cn"],
+                &["Uses https://open.bigmodel.cn/api/paas/v4."],
+            ),
+        ]),
         openai_compatible_spec(
             "vercel-ai-gateway",
             "Vercel AI Gateway",

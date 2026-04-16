@@ -204,6 +204,36 @@ fn special_providers_expose_explicit_auth_strategies() {
     assert_eq!(openai_codex.auth_kind, liz_app_server::model::ProviderAuthKind::OAuth);
     assert_eq!(openai_codex.auth_strategies.len(), 1);
     assert_eq!(openai_codex.auth_strategies[0].label, "chatgpt-oauth");
+
+    let qwen = registry.provider("qwen").expect("qwen spec");
+    assert_eq!(qwen.auth_kind, liz_app_server::model::ProviderAuthKind::ApiKey);
+    assert!(
+        qwen
+            .auth_strategies
+            .iter()
+            .any(|strategy| strategy.label == "coding-plan-global")
+    );
+    assert!(
+        qwen
+            .auth_strategies
+            .iter()
+            .any(|strategy| strategy.label == "standard-global")
+    );
+
+    let zai = registry.provider("zai").expect("zai spec");
+    assert_eq!(zai.auth_kind, liz_app_server::model::ProviderAuthKind::ApiKey);
+    assert!(
+        zai
+            .auth_strategies
+            .iter()
+            .any(|strategy| strategy.label == "coding-plan-global")
+    );
+    assert!(
+        zai
+            .auth_strategies
+            .iter()
+            .any(|strategy| strategy.label == "cn")
+    );
 }
 
 #[test]
@@ -313,6 +343,73 @@ fn mantle_env_resolution_derives_region_scoped_endpoint() {
     );
 
     std::env::remove_var("AWS_REGION");
+}
+
+#[test]
+fn qwen_env_resolution_supports_standard_and_coding_plan_hosts() {
+    let _guard = env_lock().lock().expect("env lock");
+    std::env::set_var("QWEN_ENDPOINT", "standard-global");
+    std::env::set_var("QWEN_API_KEY", "qwen-key");
+
+    let standard = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "qwen".to_owned(),
+        overrides: BTreeMap::new(),
+    })
+    .resolved_primary_provider()
+    .expect("qwen provider should resolve");
+
+    assert_eq!(
+        standard.base_url.as_deref(),
+        Some("https://dashscope-intl.aliyuncs.com/compatible-mode/v1")
+    );
+    assert_eq!(standard.model_id, "qwen3.5-plus");
+
+    std::env::set_var("QWEN_ENDPOINT", "coding-cn");
+    let coding = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "qwen".to_owned(),
+        overrides: BTreeMap::new(),
+    })
+    .resolved_primary_provider()
+    .expect("qwen coding provider should resolve");
+
+    assert_eq!(
+        coding.base_url.as_deref(),
+        Some("https://coding.dashscope.aliyuncs.com/v1")
+    );
+    assert_eq!(
+        coding.metadata.get("qwen.endpoint").map(String::as_str),
+        Some("coding-cn")
+    );
+
+    std::env::remove_var("QWEN_ENDPOINT");
+    std::env::remove_var("QWEN_API_KEY");
+}
+
+#[test]
+fn zai_env_resolution_supports_forced_coding_plan_endpoint() {
+    let _guard = env_lock().lock().expect("env lock");
+    std::env::set_var("ZAI_API_KEY", "zai-key");
+    std::env::set_var("ZAI_ENDPOINT", "coding-cn");
+
+    let provider = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "zai".to_owned(),
+        overrides: BTreeMap::new(),
+    })
+    .resolved_primary_provider()
+    .expect("zai provider should resolve");
+
+    assert_eq!(
+        provider.base_url.as_deref(),
+        Some("https://open.bigmodel.cn/api/coding/paas/v4")
+    );
+    assert_eq!(provider.model_id, "glm-5.1");
+    assert_eq!(
+        provider.metadata.get("zai.endpoint").map(String::as_str),
+        Some("coding-cn")
+    );
+
+    std::env::remove_var("ZAI_API_KEY");
+    std::env::remove_var("ZAI_ENDPOINT");
 }
 
 #[test]
