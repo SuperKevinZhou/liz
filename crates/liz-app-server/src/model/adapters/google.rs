@@ -23,11 +23,7 @@ impl GoogleAdapter {
     ) -> Result<ModelRunSummary, ModelError> {
         let transport = match provider.spec.family {
             ModelProviderFamily::GoogleGenerativeAi => InvocationTransport::ProviderOperation {
-                operation: if provider.spec.id == "google-gemini-cli" {
-                    "google-gemini-cli.session"
-                } else {
-                    "google.generate_content"
-                },
+                operation: "google.generate_content",
                 base_url: provider.base_url.clone(),
             },
             ModelProviderFamily::GoogleVertex => InvocationTransport::ProviderOperation {
