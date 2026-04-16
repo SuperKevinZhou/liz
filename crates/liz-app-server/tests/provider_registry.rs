@@ -133,13 +133,9 @@ fn special_providers_expose_explicit_auth_strategies() {
     let registry = ProviderRegistry::default();
 
     let openai = registry.provider("openai").expect("openai spec");
-    assert_eq!(openai.auth_strategies.len(), 2);
-    assert!(
-        openai
-            .auth_strategies
-            .iter()
-            .any(|strategy| strategy.label == "chatgpt-oauth")
-    );
+    assert_eq!(openai.auth_kind, liz_app_server::model::ProviderAuthKind::ApiKey);
+    assert_eq!(openai.auth_strategies.len(), 1);
+    assert_eq!(openai.auth_strategies[0].label, "api-key");
     assert!(
         openai
             .auth_strategies
