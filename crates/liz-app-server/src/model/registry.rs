@@ -403,7 +403,6 @@ fn builtin_specs() -> Vec<ProviderSpec> {
         openai_compatible_spec("ollama-cloud", "Ollama Cloud", "gpt-oss:20b-cloud"),
         openai_compatible_spec("ovhcloud-ai-endpoints", "OVHcloud AI Endpoints", "gpt-oss-120b"),
         openai_compatible_spec("ovhcloud", "OVHcloud AI Endpoints", "gpt-oss-120b"),
-        openai_compatible_spec("perplexity", "Perplexity", "sonar"),
         openai_compatible_spec("poe", "Poe", "anthropic/claude-sonnet-4-6"),
         openai_compatible_spec("scaleway", "Scaleway", "devstral-2-123b-instruct-2512"),
         openai_compatible_spec("stackit", "STACKIT", "Llama-3.3-70B-Instruct"),
