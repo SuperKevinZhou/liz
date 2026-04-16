@@ -217,6 +217,20 @@ fn special_providers_expose_explicit_auth_strategies() {
             .any(|strategy| strategy.label == "service-key")
     );
 
+    let cloudflare_gateway = registry
+        .provider("cloudflare-ai-gateway")
+        .expect("cloudflare-ai-gateway spec");
+    assert_eq!(
+        cloudflare_gateway.auth_kind,
+        liz_app_server::model::ProviderAuthKind::ApiKey
+    );
+    assert!(
+        cloudflare_gateway
+            .auth_strategies
+            .iter()
+            .any(|strategy| strategy.env_keys.contains(&"CLOUDFLARE_AI_GATEWAY_API_KEY"))
+    );
+
     let qwen = registry.provider("qwen").expect("qwen spec");
     assert_eq!(qwen.auth_kind, liz_app_server::model::ProviderAuthKind::ApiKey);
     assert!(
@@ -626,6 +640,28 @@ fn azure_env_resolution_uses_v1_base_urls_and_deployment_names() {
     std::env::remove_var("AZURE_OPENAI_DEPLOYMENT");
     std::env::remove_var("AZURE_COGNITIVE_SERVICES_RESOURCE_NAME");
     std::env::remove_var("AZURE_COGNITIVE_SERVICES_DEPLOYMENT");
+}
+
+#[test]
+fn cloudflare_ai_gateway_env_resolution_uses_compat_base_url() {
+    let _guard = env_lock().lock().expect("env lock");
+    std::env::set_var("CLOUDFLARE_ACCOUNT_ID", "acct-123");
+    std::env::set_var("CLOUDFLARE_GATEWAY_ID", "gateway-prod");
+
+    let provider = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "cloudflare-ai-gateway".to_owned(),
+        overrides: BTreeMap::new(),
+    })
+    .resolved_primary_provider()
+    .expect("cloudflare ai gateway provider should resolve");
+
+    assert_eq!(
+        provider.base_url.as_deref(),
+        Some("https://gateway.ai.cloudflare.com/v1/acct-123/gateway-prod/compat")
+    );
+
+    std::env::remove_var("CLOUDFLARE_ACCOUNT_ID");
+    std::env::remove_var("CLOUDFLARE_GATEWAY_ID");
 }
 
 #[test]

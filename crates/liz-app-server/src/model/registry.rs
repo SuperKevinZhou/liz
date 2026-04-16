@@ -446,11 +446,39 @@ fn builtin_specs() -> Vec<ProviderSpec> {
             "Vercel AI Gateway",
             "anthropic/claude-opus-4.6",
         ),
-        openai_compatible_spec(
+        spec(
             "cloudflare-ai-gateway",
             "Cloudflare AI Gateway",
-            "anthropic/claude-sonnet-4-6",
-        ),
+            ModelProviderFamily::OpenAiCompatible,
+            ProviderAuthKind::ApiKey,
+            None,
+            "openai/gpt-5-mini",
+            &["CLOUDFLARE_AI_GATEWAY_API_KEY"],
+            &["CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_GATEWAY_ID"],
+            &[],
+            ModelCapabilities::openai_compatible()
+                .with_tool_call_streaming(true)
+                .with_image_input(true)
+                .with_max_context_window(200_000),
+            &[
+                "Uses the Cloudflare AI Gateway OpenAI-compatible /compat/chat/completions endpoint.",
+                "Sends the upstream provider credential as the standard bearer token for compatibility mode.",
+            ],
+        )
+        .with_auth_strategies(vec![auth_strategy(
+            ProviderAuthKind::ApiKey,
+            "api-key",
+            &["CLOUDFLARE_AI_GATEWAY_API_KEY"],
+            &[
+                "CLOUDFLARE_ACCOUNT_ID",
+                "CLOUDFLARE_GATEWAY_ID",
+                "provider.cloudflare-ai-gateway.baseUrl",
+            ],
+            &[
+                "Builds https://gateway.ai.cloudflare.com/v1/{account}/{gateway}/compat when no explicit base URL override is present.",
+                "Gateway id defaults to default when only the account id is configured.",
+            ],
+        )]),
         openai_compatible_spec("cloudflare-workers-ai", "Cloudflare Workers AI", "@cf/meta/llama-3.1-70b-instruct"),
         spec(
             "sap-ai-core",
@@ -841,7 +869,6 @@ fn openai_compatible_spec(
         "opencode" | "opencode-go" => &["OPENCODE_API_KEY"][..],
         "github-copilot" => &["GITHUB_COPILOT_TOKEN"][..],
         "gitlab" => &["GITLAB_TOKEN"][..],
-        "cloudflare-ai-gateway" => &["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_AI_GATEWAY_API_KEY"][..],
         "cloudflare-workers-ai" => &["CLOUDFLARE_API_KEY"][..],
         "xai" => &["XAI_API_KEY"][..],
         "mistral" => &["MISTRAL_API_KEY"][..],
@@ -875,7 +902,6 @@ fn openai_compatible_spec(
     };
 
     let required_envs = match id {
-        "cloudflare-ai-gateway" => &["CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_GATEWAY_ID"][..],
         "cloudflare-workers-ai" => &["CLOUDFLARE_ACCOUNT_ID"][..],
         _ => &[],
     };

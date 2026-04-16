@@ -151,10 +151,9 @@ impl ResolvedProvider {
             }
             "cloudflare-ai-gateway" => {
                 if base_url.is_none() {
-                    if let (Ok(account_id), Ok(gateway_id)) = (
-                        env::var("CLOUDFLARE_ACCOUNT_ID"),
-                        env::var("CLOUDFLARE_GATEWAY_ID"),
-                    ) {
+                    if let Ok(account_id) = env::var("CLOUDFLARE_ACCOUNT_ID") {
+                        let gateway_id =
+                            env::var("CLOUDFLARE_GATEWAY_ID").unwrap_or_else(|_| "default".to_owned());
                         metadata
                             .entry("cloudflare.account_id".to_owned())
                             .or_insert(account_id.clone());
@@ -162,7 +161,7 @@ impl ResolvedProvider {
                             .entry("cloudflare.gateway_id".to_owned())
                             .or_insert(gateway_id.clone());
                         base_url = Some(format!(
-                            "https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}"
+                            "https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/compat"
                         ));
                     }
                 }
