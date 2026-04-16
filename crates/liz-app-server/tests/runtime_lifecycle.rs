@@ -129,3 +129,60 @@ fn forked_thread_inherits_parent_state_without_reusing_latest_turn() {
             .contains(&"Fork created for: Try a different lifecycle projection".to_owned())
     );
 }
+
+#[test]
+fn turn_log_sequence_continues_after_runtime_restart() {
+    let temp_dir = TempDir::new().expect("temp dir should be created");
+    let storage_paths = StoragePaths::new(temp_dir.path().join(".liz"));
+    let turn_log = FsTurnLog::new(storage_paths.clone());
+
+    let thread_id = {
+        let mut runtime = RuntimeCoordinator::from_storage_paths(storage_paths.clone());
+        let thread = runtime
+            .start_thread(ThreadStartRequest {
+                title: Some("Restartable thread".to_owned()),
+                initial_goal: Some("Keep turn-log order stable".to_owned()),
+                workspace_ref: None,
+            })
+            .expect("thread start should succeed")
+            .thread;
+        let turn = runtime
+            .start_turn(TurnStartRequest {
+                thread_id: thread.id.clone(),
+                input: "Prepare the first lifecycle step".to_owned(),
+                input_kind: TurnInputKind::UserMessage,
+            })
+            .expect("turn start should succeed")
+            .turn;
+        runtime
+            .cancel_turn(TurnCancelRequest {
+                thread_id: thread.id.clone(),
+                turn_id: turn.id,
+            })
+            .expect("turn cancel should succeed");
+        thread.id
+    };
+
+    let mut restarted_runtime = RuntimeCoordinator::from_storage_paths(storage_paths);
+    let resumed_turn = restarted_runtime
+        .start_turn(TurnStartRequest {
+            thread_id: thread_id.clone(),
+            input: "Resume after restart".to_owned(),
+            input_kind: TurnInputKind::ResumeCommand,
+        })
+        .expect("turn should restart cleanly")
+        .turn;
+    restarted_runtime
+        .cancel_turn(TurnCancelRequest {
+            thread_id: thread_id.clone(),
+            turn_id: resumed_turn.id,
+        })
+        .expect("restart turn cancel should succeed");
+
+    let entries = turn_log
+        .read_entries(&thread_id)
+        .expect("turn log entries should be readable");
+    let sequences: Vec<u64> = entries.iter().map(|entry| entry.sequence).collect();
+
+    assert_eq!(sequences, vec![1, 2, 3, 4]);
+}

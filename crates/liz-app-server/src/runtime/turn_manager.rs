@@ -58,7 +58,7 @@ impl TurnManager {
 
         stores.append_turn_log(&TurnLogEntry {
             thread_id: thread.id.clone(),
-            sequence: self.next_sequence_for(&thread.id),
+            sequence: self.next_sequence_for(stores, &thread.id)?,
             turn_id: Some(turn.id.clone()),
             recorded_at: now.clone(),
             event: "turn_started".to_owned(),
@@ -115,7 +115,7 @@ impl TurnManager {
 
         stores.append_turn_log(&TurnLogEntry {
             thread_id: thread.id.clone(),
-            sequence: self.next_sequence_for(&thread.id),
+            sequence: self.next_sequence_for(stores, &thread.id)?,
             turn_id: Some(turn.id.clone()),
             recorded_at: ended_at,
             event: "turn_cancelled".to_owned(),
@@ -158,7 +158,7 @@ impl TurnManager {
         thread.updated_at = recorded_at.clone();
         thread.active_summary = Some(format!("Waiting approval: {reason}"));
         thread.latest_turn_id = Some(turn_id.clone());
-        let sequence = self.next_sequence_for(&thread.id);
+        let sequence = self.next_sequence_for(stores, &thread.id)?;
 
         stores.append_turn_log(&TurnLogEntry {
             thread_id: thread.id.clone(),
@@ -202,7 +202,7 @@ impl TurnManager {
                 .unwrap_or_else(|| "Currently working on the requested turn".to_owned()),
         );
         thread.latest_turn_id = Some(turn_id.clone());
-        let sequence = self.next_sequence_for(&thread.id);
+        let sequence = self.next_sequence_for(stores, &thread.id)?;
 
         stores.append_turn_log(&TurnLogEntry {
             thread_id: thread.id.clone(),
@@ -246,7 +246,7 @@ impl TurnManager {
 
         stores.append_turn_log(&TurnLogEntry {
             thread_id: thread.id.clone(),
-            sequence: self.next_sequence_for(&thread.id),
+            sequence: self.next_sequence_for(stores, &thread.id)?,
             turn_id: Some(turn.id.clone()),
             recorded_at: ended_at,
             event: "turn_completed".to_owned(),
@@ -285,7 +285,7 @@ impl TurnManager {
 
         stores.append_turn_log(&TurnLogEntry {
             thread_id: thread.id.clone(),
-            sequence: self.next_sequence_for(&thread.id),
+            sequence: self.next_sequence_for(stores, &thread.id)?,
             turn_id: Some(turn.id.clone()),
             recorded_at: ended_at,
             event: "turn_failed".to_owned(),
@@ -295,10 +295,30 @@ impl TurnManager {
         Ok(turn)
     }
 
-    fn next_sequence_for(&mut self, thread_id: &liz_protocol::ThreadId) -> u64 {
-        let sequence = self.next_sequence.entry(thread_id.clone()).or_insert(0);
+    fn next_sequence_for(
+        &mut self,
+        stores: &RuntimeStores,
+        thread_id: &liz_protocol::ThreadId,
+    ) -> RuntimeResult<u64> {
+        let recovered = self.recover_sequence(stores, thread_id)?;
+        let sequence = self
+            .next_sequence
+            .entry(thread_id.clone())
+            .or_insert(recovered);
         *sequence += 1;
-        *sequence
+        Ok(*sequence)
+    }
+
+    fn recover_sequence(
+        &self,
+        stores: &RuntimeStores,
+        thread_id: &liz_protocol::ThreadId,
+    ) -> RuntimeResult<u64> {
+        Ok(stores
+            .read_turn_log(thread_id)?
+            .last()
+            .map(|entry| entry.sequence)
+            .unwrap_or(0))
     }
 
     fn thread_has_running_turn(&self, thread_id: &liz_protocol::ThreadId) -> bool {
