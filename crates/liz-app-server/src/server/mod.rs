@@ -3,6 +3,7 @@
 mod websocket;
 
 use crate::events::EventBus;
+use crate::executor::ExecutorGateway;
 use crate::handlers;
 use crate::model::{ModelGateway, ModelTurnRequest, NormalizedTurnEvent};
 use crate::runtime::RuntimeCoordinator;
@@ -34,6 +35,7 @@ impl Default for ServerConfig {
 #[derive(Debug)]
 pub struct AppServer {
     runtime: RuntimeCoordinator,
+    executor: ExecutorGateway,
     event_bus: EventBus,
     model_gateway: ModelGateway,
 }
@@ -43,6 +45,7 @@ impl AppServer {
     pub fn new(paths: StoragePaths) -> Self {
         Self {
             runtime: RuntimeCoordinator::new(crate::runtime::RuntimeStores::new(paths)),
+            executor: ExecutorGateway::default(),
             event_bus: EventBus::new(),
             model_gateway: ModelGateway::default(),
         }
@@ -52,6 +55,7 @@ impl AppServer {
     pub fn from_default_layout() -> Self {
         Self {
             runtime: RuntimeCoordinator::default(),
+            executor: ExecutorGateway::default(),
             event_bus: EventBus::new(),
             model_gateway: ModelGateway::default(),
         }
@@ -60,7 +64,7 @@ impl AppServer {
     /// Handles a single protocol request and returns the matching response envelope.
     pub fn handle_request(&mut self, envelope: ClientRequestEnvelope) -> ServerResponseEnvelope {
         let request = envelope.request.clone();
-        let handled = handlers::handle_request(&mut self.runtime, envelope);
+        let handled = handlers::handle_request(&mut self.runtime, &self.executor, envelope);
         self.event_bus.publish_all(handled.events);
         match request {
             liz_protocol::ClientRequest::TurnStart(request) => {
@@ -116,7 +120,9 @@ impl AppServer {
                     self.event_bus.publish(crate::events::PendingEvent::new(
                         thread.id.clone(),
                         Some(turn.id.clone()),
-                        ServerEventPayload::CheckpointCreated(CheckpointCreatedEvent { checkpoint }),
+                        ServerEventPayload::CheckpointCreated(CheckpointCreatedEvent {
+                            checkpoint,
+                        }),
                     ));
                 }
                 self.event_bus.publish(crate::events::PendingEvent::new(
@@ -138,7 +144,9 @@ impl AppServer {
     ) {
         let approval = match response {
             ServerResponseEnvelope::Success(success) => match &success.response {
-                liz_protocol::ResponsePayload::ApprovalRespond(response) => response.approval.clone(),
+                liz_protocol::ResponsePayload::ApprovalRespond(response) => {
+                    response.approval.clone()
+                }
                 _ => return,
             },
             ServerResponseEnvelope::Error(_) => return,
@@ -146,17 +154,13 @@ impl AppServer {
 
         match decision {
             ApprovalDecision::ApproveOnce | ApprovalDecision::ApproveAndPersist => {
-                let Ok(turn) = self
-                    .runtime
-                    .resume_approved_turn(&approval.thread_id, &approval.turn_id)
+                let Ok(turn) =
+                    self.runtime.resume_approved_turn(&approval.thread_id, &approval.turn_id)
                 else {
                     return;
                 };
-                let Some(thread) = self
-                    .runtime
-                    .read_thread(&approval.thread_id)
-                    .ok()
-                    .and_then(|thread| thread)
+                let Some(thread) =
+                    self.runtime.read_thread(&approval.thread_id).ok().and_then(|thread| thread)
                 else {
                     return;
                 };
@@ -183,9 +187,9 @@ impl AppServer {
                         self.event_bus.publish(crate::events::PendingEvent::new(
                             thread.id.clone(),
                             Some(turn.id.clone()),
-                            ServerEventPayload::ThreadInterrupted(liz_protocol::ThreadInterruptedEvent {
-                                thread,
-                            }),
+                            ServerEventPayload::ThreadInterrupted(
+                                liz_protocol::ThreadInterruptedEvent { thread },
+                            ),
                         ));
                     }
                 }
@@ -193,14 +197,19 @@ impl AppServer {
         }
     }
 
-    fn stream_model_turn(&mut self, thread: liz_protocol::Thread, turn: liz_protocol::Turn, prompt: String) {
+    fn stream_model_turn(
+        &mut self,
+        thread: liz_protocol::Thread,
+        turn: liz_protocol::Turn,
+        prompt: String,
+    ) {
         let thread_id = thread.id.clone();
         let turn_id = turn.id.clone();
 
-        let run_result = self.model_gateway.run_turn(
-            ModelTurnRequest { thread, turn, prompt },
-            |event| self.publish_model_event(&thread_id, &turn_id, event),
-        );
+        let run_result =
+            self.model_gateway.run_turn(ModelTurnRequest { thread, turn, prompt }, |event| {
+                self.publish_model_event(&thread_id, &turn_id, event)
+            });
 
         match run_result {
             Ok(summary) => {
@@ -229,7 +238,12 @@ impl AppServer {
         }
     }
 
-    fn publish_model_event(&self, thread_id: &ThreadId, turn_id: &TurnId, event: NormalizedTurnEvent) {
+    fn publish_model_event(
+        &self,
+        thread_id: &ThreadId,
+        turn_id: &TurnId,
+        event: NormalizedTurnEvent,
+    ) {
         let payload = match event {
             NormalizedTurnEvent::AssistantDelta { chunk } => {
                 ServerEventPayload::AssistantChunk(AssistantChunkEvent {
@@ -264,7 +278,9 @@ impl AppServer {
                     risk_hint: None,
                 })
             }
-            NormalizedTurnEvent::UsageDelta(_) | NormalizedTurnEvent::ProviderRawEvent { .. } => return,
+            NormalizedTurnEvent::UsageDelta(_) | NormalizedTurnEvent::ProviderRawEvent { .. } => {
+                return
+            }
         };
 
         self.event_bus.publish(crate::events::PendingEvent::new(

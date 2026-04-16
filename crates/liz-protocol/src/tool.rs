@@ -1,0 +1,204 @@
+//! Tool-surface request and result payloads.
+
+use crate::artifact::ArtifactRef;
+use crate::ids::{ThreadId, TurnId};
+use serde::{Deserialize, Serialize};
+
+/// The stable tool names exposed by the runtime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolName {
+    /// Lists files and directories within a workspace root.
+    WorkspaceList,
+    /// Searches text inside workspace files.
+    WorkspaceSearch,
+    /// Reads a text file from the workspace.
+    WorkspaceRead,
+}
+
+impl ToolName {
+    /// Returns the canonical wire name for the tool.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::WorkspaceList => "workspace.list",
+            Self::WorkspaceSearch => "workspace.search",
+            Self::WorkspaceRead => "workspace.read",
+        }
+    }
+}
+
+/// A typed tool invocation request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "tool_name", content = "input")]
+pub enum ToolInvocation {
+    /// Invokes `workspace.list`.
+    #[serde(rename = "workspace.list")]
+    WorkspaceList(WorkspaceListRequest),
+    /// Invokes `workspace.search`.
+    #[serde(rename = "workspace.search")]
+    WorkspaceSearch(WorkspaceSearchRequest),
+    /// Invokes `workspace.read`.
+    #[serde(rename = "workspace.read")]
+    WorkspaceRead(WorkspaceReadRequest),
+}
+
+impl ToolInvocation {
+    /// Returns the stable tool name for this invocation.
+    pub const fn tool_name(&self) -> ToolName {
+        match self {
+            Self::WorkspaceList(_) => ToolName::WorkspaceList,
+            Self::WorkspaceSearch(_) => ToolName::WorkspaceSearch,
+            Self::WorkspaceRead(_) => ToolName::WorkspaceRead,
+        }
+    }
+}
+
+/// A typed tool execution result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "tool_name", content = "output")]
+pub enum ToolResult {
+    /// Result payload for `workspace.list`.
+    #[serde(rename = "workspace.list")]
+    WorkspaceList(WorkspaceListResult),
+    /// Result payload for `workspace.search`.
+    #[serde(rename = "workspace.search")]
+    WorkspaceSearch(WorkspaceSearchResult),
+    /// Result payload for `workspace.read`.
+    #[serde(rename = "workspace.read")]
+    WorkspaceRead(WorkspaceReadResult),
+}
+
+impl ToolResult {
+    /// Returns the stable tool name for this result.
+    pub const fn tool_name(&self) -> ToolName {
+        match self {
+            Self::WorkspaceList(_) => ToolName::WorkspaceList,
+            Self::WorkspaceSearch(_) => ToolName::WorkspaceSearch,
+            Self::WorkspaceRead(_) => ToolName::WorkspaceRead,
+        }
+    }
+}
+
+/// Executes a typed tool invocation inside one thread context.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolCallRequest {
+    /// The owning thread for tool traces and artifacts.
+    pub thread_id: ThreadId,
+    /// The turn this execution belongs to, if the call originated from a real turn.
+    pub turn_id: Option<TurnId>,
+    /// The typed tool invocation.
+    #[serde(flatten)]
+    pub invocation: ToolInvocation,
+}
+
+/// One file-system entry returned by `workspace.list`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceListEntry {
+    /// The workspace-relative path for the entry.
+    pub path: String,
+    /// Whether the entry is a directory.
+    pub is_dir: bool,
+}
+
+/// Input for `workspace.list`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceListRequest {
+    /// The root directory to enumerate.
+    pub root: String,
+    /// Whether child directories should be traversed recursively.
+    pub recursive: bool,
+    /// Whether dot-prefixed or hidden entries should be included.
+    pub include_hidden: bool,
+    /// The maximum number of entries to return.
+    pub max_entries: Option<usize>,
+}
+
+/// Output for `workspace.list`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceListResult {
+    /// The root directory that was enumerated.
+    pub root: String,
+    /// Returned directory and file entries.
+    pub entries: Vec<WorkspaceListEntry>,
+    /// Whether the result was truncated by `max_entries`.
+    pub truncated: bool,
+}
+
+/// Input for `workspace.search`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceSearchRequest {
+    /// The directory to search below.
+    pub root: String,
+    /// The plain-text pattern to search for.
+    pub pattern: String,
+    /// Whether comparisons must match case exactly.
+    pub case_sensitive: bool,
+    /// Whether dot-prefixed or hidden entries should be included.
+    pub include_hidden: bool,
+    /// The maximum number of matches to return.
+    pub max_results: Option<usize>,
+}
+
+/// One textual search hit returned by `workspace.search`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceSearchMatch {
+    /// The workspace-relative file path containing the hit.
+    pub path: String,
+    /// The 1-based line number containing the hit.
+    pub line_number: usize,
+    /// The full matching line.
+    pub line: String,
+}
+
+/// Output for `workspace.search`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceSearchResult {
+    /// The root directory that was searched.
+    pub root: String,
+    /// The plain-text pattern that was searched.
+    pub pattern: String,
+    /// The matched lines.
+    pub matches: Vec<WorkspaceSearchMatch>,
+    /// Whether the result was truncated by `max_results`.
+    pub truncated: bool,
+}
+
+/// Input for `workspace.read`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceReadRequest {
+    /// The file path to read.
+    pub path: String,
+    /// The first 1-based line to include.
+    pub start_line: Option<usize>,
+    /// The last 1-based line to include.
+    pub end_line: Option<usize>,
+}
+
+/// Output for `workspace.read`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceReadResult {
+    /// The file path that was read.
+    pub path: String,
+    /// The extracted text content.
+    pub content: String,
+    /// The first line included in `content`.
+    pub start_line: usize,
+    /// The last line included in `content`.
+    pub end_line: usize,
+    /// The total number of lines in the file.
+    pub total_lines: usize,
+}
+
+/// Response payload for one tool execution.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolCallResponse {
+    /// The turn associated with this execution, synthesized when needed.
+    pub execution_turn_id: TurnId,
+    /// A short summary of what the tool returned.
+    pub summary: String,
+    /// The typed tool result.
+    #[serde(flatten)]
+    pub result: ToolResult,
+    /// Artifacts created while executing the tool.
+    pub artifact_refs: Vec<ArtifactRef>,
+}

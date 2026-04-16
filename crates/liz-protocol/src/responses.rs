@@ -6,6 +6,7 @@ use crate::checkpoint::{Checkpoint, CheckpointScope};
 use crate::ids::{RequestId, ThreadId};
 use crate::memory::{MemoryCompilationSummary, ResumeSummary};
 use crate::thread::Thread;
+use crate::tool::ToolCallResponse;
 use crate::turn::Turn;
 use serde::{Deserialize, Serialize};
 
@@ -84,6 +85,9 @@ pub enum ResponsePayload {
     /// Acknowledges `approval/respond`.
     #[serde(rename = "approval/respond")]
     ApprovalRespond(ApprovalRespondResponse),
+    /// Acknowledges `tool/call`.
+    #[serde(rename = "tool/call")]
+    ToolCall(ToolCallResponse),
     /// Acknowledges `thread/rollback`.
     #[serde(rename = "thread/rollback")]
     ThreadRollback(ThreadRollbackResponse),

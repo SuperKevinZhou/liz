@@ -1,8 +1,8 @@
 //! Shared request, response, resource, and event types for liz clients and servers.
 
 pub mod approval;
-pub mod auth;
 pub mod artifact;
+pub mod auth;
 pub mod checkpoint;
 pub mod events;
 pub mod ids;
@@ -11,11 +11,12 @@ pub mod primitives;
 pub mod requests;
 pub mod responses;
 pub mod thread;
+pub mod tool;
 pub mod turn;
 
 pub use approval::{ApprovalDecision, ApprovalRequest, ApprovalStatus};
-pub use auth::{ProviderAuthProfile, ProviderCredential};
 pub use artifact::{ArtifactKind, ArtifactRef};
+pub use auth::{ProviderAuthProfile, ProviderCredential};
 pub use checkpoint::{Checkpoint, CheckpointScope};
 pub use events::{
     ApprovalRequestedEvent, ApprovalResolvedEvent, ArtifactCreatedEvent, AssistantChunkEvent,
@@ -46,4 +47,9 @@ pub use responses::{
     TurnCancelResponse, TurnStartResponse,
 };
 pub use thread::{Thread, ThreadStatus};
+pub use tool::{
+    ToolCallRequest, ToolCallResponse, ToolInvocation, ToolName, ToolResult, WorkspaceListEntry,
+    WorkspaceListRequest, WorkspaceListResult, WorkspaceReadRequest, WorkspaceReadResult,
+    WorkspaceSearchMatch, WorkspaceSearchRequest, WorkspaceSearchResult,
+};
 pub use turn::{Turn, TurnKind, TurnStatus};
