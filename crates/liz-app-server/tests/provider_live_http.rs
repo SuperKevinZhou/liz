@@ -655,6 +655,266 @@ fn minimax_portal_live_request_refreshes_oauth_and_uses_resource_url() {
 }
 
 #[test]
+fn qwen_live_request_uses_versioned_base_url_without_duplicate_v1() {
+    let _guard = env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");
+
+    let capture = Arc::new(Mutex::new(String::new()));
+    let base_url = format!("{}/compatible-mode/v1", spawn_json_server(
+        capture.clone(),
+        r#"{"choices":[{"message":{"content":"hello from qwen"}}]}"#,
+    ));
+
+    let mut overrides = BTreeMap::new();
+    overrides.insert(
+        "qwen".to_owned(),
+        ProviderOverride {
+            base_url: Some(base_url),
+            api_key: Some("qwen-key".to_owned()),
+            model_id: Some("qwen3.5-plus".to_owned()),
+            headers: BTreeMap::new(),
+            metadata: BTreeMap::new(),
+        },
+    );
+
+    let gateway = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "qwen".to_owned(),
+        overrides,
+    });
+    let summary = gateway
+        .run_turn(demo_request(), |_| {})
+        .expect("qwen request should succeed");
+
+    let request = capture
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    assert!(request.contains("POST /compatible-mode/v1/chat/completions HTTP/1.1"));
+    assert_eq!(summary.assistant_message.as_deref(), Some("hello from qwen"));
+
+    std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
+}
+
+#[test]
+fn zai_live_request_uses_versioned_base_url_without_duplicate_v1() {
+    let _guard = env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");
+
+    let capture = Arc::new(Mutex::new(String::new()));
+    let base_url = format!("{}/api/coding/paas/v4", spawn_json_server(
+        capture.clone(),
+        r#"{"choices":[{"message":{"content":"hello from zai"}}]}"#,
+    ));
+
+    let mut overrides = BTreeMap::new();
+    overrides.insert(
+        "zai".to_owned(),
+        ProviderOverride {
+            base_url: Some(base_url),
+            api_key: Some("zai-key".to_owned()),
+            model_id: Some("glm-5.1".to_owned()),
+            headers: BTreeMap::new(),
+            metadata: BTreeMap::new(),
+        },
+    );
+
+    let gateway = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "zai".to_owned(),
+        overrides,
+    });
+    let summary = gateway
+        .run_turn(demo_request(), |_| {})
+        .expect("zai request should succeed");
+
+    let request = capture
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    assert!(request.contains("POST /api/coding/paas/v4/chat/completions HTTP/1.1"));
+    assert_eq!(summary.assistant_message.as_deref(), Some("hello from zai"));
+
+    std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
+}
+
+#[test]
+fn stepfun_plan_live_request_uses_step_plan_chat_completions_path() {
+    let _guard = env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");
+
+    let capture = Arc::new(Mutex::new(String::new()));
+    let base_url = format!("{}/step_plan/v1", spawn_json_server(
+        capture.clone(),
+        r#"{"choices":[{"message":{"content":"hello from stepfun plan"}}]}"#,
+    ));
+
+    let mut overrides = BTreeMap::new();
+    overrides.insert(
+        "stepfun-plan".to_owned(),
+        ProviderOverride {
+            base_url: Some(base_url),
+            api_key: Some("stepfun-key".to_owned()),
+            model_id: Some("step-3.5-flash".to_owned()),
+            headers: BTreeMap::new(),
+            metadata: BTreeMap::new(),
+        },
+    );
+
+    let gateway = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "stepfun-plan".to_owned(),
+        overrides,
+    });
+    let summary = gateway
+        .run_turn(demo_request(), |_| {})
+        .expect("stepfun plan request should succeed");
+
+    let request = capture
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    assert!(request.contains("POST /step_plan/v1/chat/completions HTTP/1.1"));
+    assert_eq!(
+        summary.assistant_message.as_deref(),
+        Some("hello from stepfun plan")
+    );
+
+    std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
+}
+
+#[test]
+fn byteplus_and_volcengine_plan_live_requests_use_coding_paths() {
+    let _guard = env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");
+
+    let byteplus_capture = Arc::new(Mutex::new(String::new()));
+    let byteplus_base_url = format!("{}/api/coding/v3", spawn_json_server(
+        byteplus_capture.clone(),
+        r#"{"choices":[{"message":{"content":"hello from byteplus plan"}}]}"#,
+    ));
+    let volc_capture = Arc::new(Mutex::new(String::new()));
+    let volc_base_url = format!("{}/api/coding/v3", spawn_json_server(
+        volc_capture.clone(),
+        r#"{"choices":[{"message":{"content":"hello from volcengine plan"}}]}"#,
+    ));
+
+    let mut overrides = BTreeMap::new();
+    overrides.insert(
+        "byteplus-plan".to_owned(),
+        ProviderOverride {
+            base_url: Some(byteplus_base_url),
+            api_key: Some("byteplus-key".to_owned()),
+            model_id: Some("ark-code-latest".to_owned()),
+            headers: BTreeMap::new(),
+            metadata: BTreeMap::new(),
+        },
+    );
+    overrides.insert(
+        "volcengine-plan".to_owned(),
+        ProviderOverride {
+            base_url: Some(volc_base_url),
+            api_key: Some("volc-key".to_owned()),
+            model_id: Some("ark-code-latest".to_owned()),
+            headers: BTreeMap::new(),
+            metadata: BTreeMap::new(),
+        },
+    );
+
+    let byteplus = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "byteplus-plan".to_owned(),
+        overrides: overrides.clone(),
+    });
+    let volc = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "volcengine-plan".to_owned(),
+        overrides,
+    });
+
+    assert_eq!(
+        byteplus
+            .run_turn(demo_request(), |_| {})
+            .expect("byteplus plan request should succeed")
+            .assistant_message
+            .as_deref(),
+        Some("hello from byteplus plan")
+    );
+    assert_eq!(
+        volc
+            .run_turn(demo_request(), |_| {})
+            .expect("volcengine plan request should succeed")
+            .assistant_message
+            .as_deref(),
+        Some("hello from volcengine plan")
+    );
+
+    let byteplus_request = byteplus_capture
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    let volc_request = volc_capture
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    assert!(byteplus_request.contains("POST /api/coding/v3/chat/completions HTTP/1.1"));
+    assert!(volc_request.contains("POST /api/coding/v3/chat/completions HTTP/1.1"));
+
+    std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
+}
+
+#[test]
+fn kimi_live_request_uses_anthropic_messages_with_claude_code_user_agent() {
+    let _guard = env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");
+
+    let capture = Arc::new(Mutex::new(String::new()));
+    let base_url = format!("{}/coding", spawn_json_server(
+        capture.clone(),
+        r#"{"content":[{"text":"hello from kimi code"}]}"#,
+    ));
+
+    let mut overrides = BTreeMap::new();
+    overrides.insert(
+        "kimi".to_owned(),
+        ProviderOverride {
+            base_url: Some(base_url),
+            api_key: Some("kimi-key".to_owned()),
+            model_id: Some("kimi-code".to_owned()),
+            headers: BTreeMap::new(),
+            metadata: BTreeMap::new(),
+        },
+    );
+
+    let gateway = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "kimi".to_owned(),
+        overrides,
+    });
+    let summary = gateway
+        .run_turn(demo_request(), |_| {})
+        .expect("kimi request should succeed");
+
+    let request = capture
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    assert!(request.contains("POST /coding/v1/messages HTTP/1.1"));
+    assert!(
+        request
+            .to_ascii_lowercase()
+            .contains("user-agent: claude-code/0.1.0")
+    );
+    assert_eq!(summary.assistant_message.as_deref(), Some("hello from kimi code"));
+
+    std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
+}
+
+#[test]
 fn bedrock_live_request_uses_sigv4_when_credential_chain_is_available() {
     let _guard = env_lock()
         .lock()

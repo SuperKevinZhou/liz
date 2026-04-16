@@ -101,8 +101,8 @@ impl OpenAiStyleAdapter {
             ModelProviderFamily::OpenAiCompatible => match provider.base_url.clone() {
                 Some(base_url) => InvocationTransport::HttpJson {
                     method: "POST",
+                    path: openai_compatible_chat_path(&base_url),
                     base_url,
-                    path: "/v1/chat/completions".to_owned(),
                 },
                 None => InvocationTransport::ProviderOperation {
                     operation: "openai-compatible.chat-completions",
@@ -602,6 +602,18 @@ fn gitlab_chat_endpoint(base_url: &str) -> String {
         format!("{trimmed}/chat/completions")
     } else {
         format!("{trimmed}/api/v4/chat/completions")
+    }
+}
+
+fn openai_compatible_chat_path(base_url: &str) -> String {
+    let path = reqwest::Url::parse(base_url)
+        .ok()
+        .map(|url| url.path().trim_end_matches('/').to_owned())
+        .unwrap_or_default();
+    if path.is_empty() {
+        "/v1/chat/completions".to_owned()
+    } else {
+        "/chat/completions".to_owned()
     }
 }
 

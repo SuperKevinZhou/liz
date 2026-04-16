@@ -499,7 +499,24 @@ fn builtin_specs() -> Vec<ProviderSpec> {
         openai_compatible_spec("qianfan", "Qianfan", "ernie-4.5-8k"),
         openai_compatible_spec("synthetic", "Synthetic", "Synthetic-1"),
         openai_compatible_spec("xiaomi", "Xiaomi", "mimo-v2-flash"),
-        openai_compatible_spec("kimi", "Kimi", "kimi-k2.5"),
+        spec(
+            "kimi",
+            "Kimi Code",
+            ModelProviderFamily::AnthropicMessages,
+            ProviderAuthKind::ApiKey,
+            Some("https://api.kimi.com/coding"),
+            "kimi-code",
+            &["KIMI_API_KEY", "KIMICODE_API_KEY"],
+            &[],
+            &[("User-Agent", "claude-code/0.1.0")],
+            ModelCapabilities::anthropic_messages()
+                .with_image_input(true)
+                .with_max_context_window(262_144),
+            &[
+                "Uses the dedicated Kimi coding endpoint.",
+                "Accepts the Kimi Code subscription API key.",
+            ],
+        ),
         openai_compatible_spec("azure", "Azure OpenAI", "gpt-4.1"),
         openai_compatible_spec("azure-cognitive-services", "Azure Cognitive Services", "gpt-4.1"),
         openai_compatible_spec("copilot-proxy", "Copilot Proxy", "gpt-5-mini"),
@@ -507,8 +524,37 @@ fn builtin_specs() -> Vec<ProviderSpec> {
         openai_compatible_spec("302ai", "302.AI", "gpt-4.1-mini"),
         openai_compatible_spec("arcee", "Arcee", "arcee-ai/coder-large"),
         openai_compatible_spec("baseten", "Baseten", "deepseek-ai/DeepSeek-R1"),
-        openai_compatible_spec("byteplus", "BytePlus", "doubao-1.5-pro"),
-        openai_compatible_spec("byteplus-plan", "BytePlus Plan", "doubao-1.5-thinking-pro"),
+        spec(
+            "byteplus",
+            "BytePlus",
+            ModelProviderFamily::OpenAiCompatible,
+            ProviderAuthKind::ApiKey,
+            Some("https://ark.ap-southeast.bytepluses.com/api/v3"),
+            "seed-1-8-251228",
+            &["BYTEPLUS_API_KEY"],
+            &[],
+            &[],
+            ModelCapabilities::openai_compatible()
+                .with_tool_call_streaming(true)
+                .with_image_input(true)
+                .with_max_context_window(256_000),
+            &["Uses the BytePlus standard OpenAI-compatible API surface."],
+        ),
+        spec(
+            "byteplus-plan",
+            "BytePlus Plan",
+            ModelProviderFamily::OpenAiCompatible,
+            ProviderAuthKind::ApiKey,
+            Some("https://ark.ap-southeast.bytepluses.com/api/coding/v3"),
+            "ark-code-latest",
+            &["BYTEPLUS_API_KEY"],
+            &[],
+            &[],
+            ModelCapabilities::openai_compatible()
+                .with_tool_call_streaming(true)
+                .with_max_context_window(256_000),
+            &["Uses the BytePlus coding-plan OpenAI-compatible API surface."],
+        ),
         openai_compatible_spec("cerebras", "Cerebras", "llama-4-scout"),
         openai_compatible_spec("chutes", "Chutes", "deepseek-ai/DeepSeek-V3"),
         openai_compatible_spec("cohere", "Cohere", "command-a"),
@@ -567,10 +613,67 @@ fn builtin_specs() -> Vec<ProviderSpec> {
         openai_compatible_spec("poe", "Poe", "anthropic/claude-sonnet-4-6"),
         openai_compatible_spec("scaleway", "Scaleway", "devstral-2-123b-instruct-2512"),
         openai_compatible_spec("stackit", "STACKIT", "Llama-3.3-70B-Instruct"),
-        openai_compatible_spec("stepfun", "StepFun", "step-2"),
-        openai_compatible_spec("stepfun-plan", "StepFun Plan", "step-2-thinking"),
-        openai_compatible_spec("volcengine", "Volcengine", "doubao-1.5-pro"),
-        openai_compatible_spec("volcengine-plan", "Volcengine Plan", "doubao-1.5-thinking-pro"),
+        spec(
+            "stepfun",
+            "StepFun",
+            ModelProviderFamily::OpenAiCompatible,
+            ProviderAuthKind::ApiKey,
+            Some("https://api.stepfun.ai/v1"),
+            "step-3.5-flash",
+            &["STEPFUN_API_KEY"],
+            &["STEPFUN_REGION"],
+            &[],
+            ModelCapabilities::openai_compatible()
+                .with_tool_call_streaming(true)
+                .with_max_context_window(262_144),
+            &["Uses the StepFun standard OpenAI-compatible API surface."],
+        ),
+        spec(
+            "stepfun-plan",
+            "StepFun Plan",
+            ModelProviderFamily::OpenAiCompatible,
+            ProviderAuthKind::ApiKey,
+            Some("https://api.stepfun.ai/step_plan/v1"),
+            "step-3.5-flash",
+            &["STEPFUN_API_KEY"],
+            &["STEPFUN_REGION"],
+            &[],
+            ModelCapabilities::openai_compatible()
+                .with_tool_call_streaming(true)
+                .with_max_context_window(262_144),
+            &["Uses the StepFun Step Plan OpenAI-compatible API surface."],
+        ),
+        spec(
+            "volcengine",
+            "Volcengine",
+            ModelProviderFamily::OpenAiCompatible,
+            ProviderAuthKind::ApiKey,
+            Some("https://ark.cn-beijing.volces.com/api/v3"),
+            "doubao-seed-1-8-251228",
+            &["VOLCANO_ENGINE_API_KEY"],
+            &[],
+            &[],
+            ModelCapabilities::openai_compatible()
+                .with_tool_call_streaming(true)
+                .with_image_input(true)
+                .with_max_context_window(256_000),
+            &["Uses the Volcengine standard OpenAI-compatible API surface."],
+        ),
+        spec(
+            "volcengine-plan",
+            "Volcengine Plan",
+            ModelProviderFamily::OpenAiCompatible,
+            ProviderAuthKind::ApiKey,
+            Some("https://ark.cn-beijing.volces.com/api/coding/v3"),
+            "ark-code-latest",
+            &["VOLCANO_ENGINE_API_KEY"],
+            &[],
+            &[],
+            ModelCapabilities::openai_compatible()
+                .with_tool_call_streaming(true)
+                .with_max_context_window(256_000),
+            &["Uses the Volcengine coding-plan OpenAI-compatible API surface."],
+        ),
         openai_compatible_spec("vercel", "Vercel AI Gateway", "anthropic/claude-sonnet-4"),
         openai_compatible_spec("zenmux", "ZenMux", "anthropic/claude-sonnet-4-6"),
     ]

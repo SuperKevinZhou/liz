@@ -260,6 +260,34 @@ fn special_providers_expose_explicit_auth_strategies() {
             .iter()
             .any(|strategy| strategy.label == "oauth-global")
     );
+
+    let kimi = registry.provider("kimi").expect("kimi spec");
+    assert_eq!(kimi.family, ModelProviderFamily::AnthropicMessages);
+    assert_eq!(kimi.default_base_url, Some("https://api.kimi.com/coding"));
+
+    let byteplus_plan = registry
+        .provider("byteplus-plan")
+        .expect("byteplus-plan spec");
+    assert_eq!(
+        byteplus_plan.default_base_url,
+        Some("https://ark.ap-southeast.bytepluses.com/api/coding/v3")
+    );
+
+    let volcengine_plan = registry
+        .provider("volcengine-plan")
+        .expect("volcengine-plan spec");
+    assert_eq!(
+        volcengine_plan.default_base_url,
+        Some("https://ark.cn-beijing.volces.com/api/coding/v3")
+    );
+
+    let stepfun_plan = registry
+        .provider("stepfun-plan")
+        .expect("stepfun-plan spec");
+    assert_eq!(
+        stepfun_plan.default_base_url,
+        Some("https://api.stepfun.ai/step_plan/v1")
+    );
 }
 
 #[test]
@@ -480,6 +508,32 @@ fn minimax_env_resolution_supports_global_and_cn_routes() {
     std::env::remove_var("MINIMAX_API_KEY");
     std::env::remove_var("MINIMAX_OAUTH_TOKEN");
     std::env::remove_var("MINIMAX_REGION");
+}
+
+#[test]
+fn stepfun_env_resolution_supports_plan_region_selection() {
+    let _guard = env_lock().lock().expect("env lock");
+    std::env::set_var("STEPFUN_API_KEY", "stepfun-key");
+    std::env::set_var("STEPFUN_REGION", "cn");
+
+    let provider = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "stepfun-plan".to_owned(),
+        overrides: BTreeMap::new(),
+    })
+    .resolved_primary_provider()
+    .expect("stepfun-plan provider should resolve");
+
+    assert_eq!(
+        provider.base_url.as_deref(),
+        Some("https://api.stepfun.com/step_plan/v1")
+    );
+    assert_eq!(
+        provider.metadata.get("stepfun.region").map(String::as_str),
+        Some("cn")
+    );
+
+    std::env::remove_var("STEPFUN_API_KEY");
+    std::env::remove_var("STEPFUN_REGION");
 }
 
 #[test]

@@ -289,6 +289,11 @@ impl ResolvedProvider {
                     }
                 }
             }
+            "kimi" => {
+                if override_config.and_then(|config| config.api_key.as_ref()).is_none() {
+                    api_key = first_env(&["KIMI_API_KEY", "KIMICODE_API_KEY"]);
+                }
+            }
             "zai" => {
                 if override_config.and_then(|config| config.api_key.as_ref()).is_none() {
                     api_key = first_env(&["ZAI_API_KEY", "Z_AI_API_KEY"]);
@@ -317,6 +322,18 @@ impl ResolvedProvider {
                             }
                         }
                     }
+                }
+            }
+            "stepfun" | "stepfun-plan" => {
+                if override_config.and_then(|config| config.api_key.as_ref()).is_none() {
+                    api_key = first_env(&["STEPFUN_API_KEY"]);
+                }
+                let region = first_env(&["STEPFUN_REGION"]).unwrap_or_else(|| "intl".to_owned());
+                metadata
+                    .entry("stepfun.region".to_owned())
+                    .or_insert(region.clone());
+                if override_config.and_then(|config| config.base_url.as_ref()).is_none() {
+                    base_url = Some(resolve_stepfun_base_url(spec.id, &region));
                 }
             }
             "minimax" => {
@@ -428,5 +445,14 @@ fn resolve_minimax_base_url(region: &str, host_override: Option<&str>) -> String
         "https://api.minimaxi.com/anthropic".to_owned()
     } else {
         "https://api.minimax.io/anthropic".to_owned()
+    }
+}
+
+fn resolve_stepfun_base_url(provider_id: &str, region: &str) -> String {
+    match (provider_id, region.to_ascii_lowercase().as_str()) {
+        ("stepfun-plan", "cn") => "https://api.stepfun.com/step_plan/v1".to_owned(),
+        ("stepfun-plan", _) => "https://api.stepfun.ai/step_plan/v1".to_owned(),
+        ("stepfun", "cn") => "https://api.stepfun.com/v1".to_owned(),
+        _ => "https://api.stepfun.ai/v1".to_owned(),
     }
 }
