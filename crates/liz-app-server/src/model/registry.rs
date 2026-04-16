@@ -647,7 +647,39 @@ fn builtin_specs() -> Vec<ProviderSpec> {
             ],
         )]),
         openai_compatible_spec("copilot-proxy", "Copilot Proxy", "gpt-5-mini"),
-        openai_compatible_spec("microsoft-foundry", "Microsoft Foundry", "gpt-4.1"),
+        spec(
+            "microsoft-foundry",
+            "Microsoft Foundry",
+            ModelProviderFamily::OpenAiCompatible,
+            ProviderAuthKind::ApiKey,
+            None,
+            "gpt-4.1",
+            &["MICROSOFT_FOUNDRY_API_KEY", "AZURE_API_KEY"],
+            &["MICROSOFT_FOUNDRY_RESOURCE_NAME", "MICROSOFT_FOUNDRY_DEPLOYMENT"],
+            &[],
+            ModelCapabilities::openai_compatible()
+                .with_tool_call_streaming(true)
+                .with_image_input(true)
+                .with_max_context_window(200_000),
+            &[
+                "Uses the Microsoft Foundry OpenAI-compatible v1 endpoint on services.ai.azure.com.",
+                "The model field should resolve to the Foundry deployment or route name.",
+            ],
+        )
+        .with_auth_strategies(vec![auth_strategy(
+            ProviderAuthKind::ApiKey,
+            "api-key",
+            &["MICROSOFT_FOUNDRY_API_KEY", "AZURE_API_KEY"],
+            &[
+                "MICROSOFT_FOUNDRY_RESOURCE_NAME",
+                "MICROSOFT_FOUNDRY_DEPLOYMENT",
+                "provider.microsoft-foundry.baseUrl",
+            ],
+            &[
+                "Builds https://{resource}.services.ai.azure.com/openai/v1 when no explicit base URL override is present.",
+                "Sends API keys with the api-key header instead of Authorization.",
+            ],
+        )]),
         openai_compatible_spec("302ai", "302.AI", "gpt-4.1-mini"),
         openai_compatible_spec("arcee", "Arcee", "arcee-ai/coder-large"),
         openai_compatible_spec("baseten", "Baseten", "deepseek-ai/DeepSeek-R1"),

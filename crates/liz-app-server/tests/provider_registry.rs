@@ -665,6 +665,29 @@ fn cloudflare_ai_gateway_env_resolution_uses_compat_base_url() {
 }
 
 #[test]
+fn microsoft_foundry_env_resolution_uses_services_v1_base_url() {
+    let _guard = env_lock().lock().expect("env lock");
+    std::env::set_var("MICROSOFT_FOUNDRY_RESOURCE_NAME", "foundry-resource");
+    std::env::set_var("MICROSOFT_FOUNDRY_DEPLOYMENT", "gpt-4.1-foundry");
+
+    let provider = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "microsoft-foundry".to_owned(),
+        overrides: BTreeMap::new(),
+    })
+    .resolved_primary_provider()
+    .expect("microsoft foundry provider should resolve");
+
+    assert_eq!(
+        provider.base_url.as_deref(),
+        Some("https://foundry-resource.services.ai.azure.com/openai/v1")
+    );
+    assert_eq!(provider.model_id, "gpt-4.1-foundry");
+
+    std::env::remove_var("MICROSOFT_FOUNDRY_RESOURCE_NAME");
+    std::env::remove_var("MICROSOFT_FOUNDRY_DEPLOYMENT");
+}
+
+#[test]
 fn openai_compatible_provider_without_builtin_base_url_still_runs() {
     let gateway = ModelGateway::from_config(ModelGatewayConfig {
         primary_provider: "copilot-proxy".to_owned(),

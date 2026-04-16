@@ -149,6 +149,26 @@ impl ResolvedProvider {
                     }
                 }
             }
+            "microsoft-foundry" => {
+                if base_url.is_none() {
+                    if let Ok(resource_name) = env::var("MICROSOFT_FOUNDRY_RESOURCE_NAME") {
+                        metadata
+                            .entry("microsoft_foundry.resource_name".to_owned())
+                            .or_insert(resource_name.clone());
+                        base_url = Some(format!(
+                            "https://{resource_name}.services.ai.azure.com/openai/v1"
+                        ));
+                    }
+                }
+                if let Some(deployment) = first_env(&["MICROSOFT_FOUNDRY_DEPLOYMENT"]) {
+                    metadata
+                        .entry("microsoft_foundry.deployment".to_owned())
+                        .or_insert(deployment.clone());
+                    if model_id == spec.default_model {
+                        model_id = deployment;
+                    }
+                }
+            }
             "cloudflare-ai-gateway" => {
                 if base_url.is_none() {
                     if let Ok(account_id) = env::var("CLOUDFLARE_ACCOUNT_ID") {

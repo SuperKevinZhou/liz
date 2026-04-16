@@ -538,10 +538,13 @@ fn default_openai_style_headers(
         return Ok(headers);
     }
 
-    if matches!(provider.spec.id, "azure" | "azure-cognitive-services") {
+    if matches!(
+        provider.spec.id,
+        "azure" | "azure-cognitive-services" | "microsoft-foundry"
+    ) {
         let api_key = provider.api_key.as_ref().ok_or_else(|| {
             ModelError::ProviderFailure(format!(
-                "{} requires an Azure API key for live mode",
+                "{} requires an API key for live mode",
                 provider.spec.id
             ))
         })?;
