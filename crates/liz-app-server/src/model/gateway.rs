@@ -96,15 +96,31 @@ impl ModelGateway {
         self
     }
 
-    /// Adds or replaces a provider override.
+    /// Adds or merges a provider override.
     pub fn with_provider_override(
         mut self,
         provider_id: impl Into<String>,
         override_config: ProviderOverride,
     ) -> Self {
-        self.config
-            .overrides
-            .insert(provider_id.into(), override_config);
+        let provider_id = provider_id.into();
+        match self.config.overrides.get_mut(&provider_id) {
+            Some(existing) => {
+                if override_config.base_url.is_some() {
+                    existing.base_url = override_config.base_url;
+                }
+                if override_config.api_key.is_some() {
+                    existing.api_key = override_config.api_key;
+                }
+                if override_config.model_id.is_some() {
+                    existing.model_id = override_config.model_id;
+                }
+                existing.headers.extend(override_config.headers);
+                existing.metadata.extend(override_config.metadata);
+            }
+            None => {
+                self.config.overrides.insert(provider_id, override_config);
+            }
+        }
         self
     }
 

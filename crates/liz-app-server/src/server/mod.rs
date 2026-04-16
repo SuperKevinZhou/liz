@@ -4,14 +4,14 @@ mod websocket;
 
 use crate::events::EventBus;
 use crate::handlers;
-use crate::model::{ModelGateway, ModelTurnRequest, NormalizedTurnEvent};
+use crate::model::{ModelGateway, ModelTurnRequest, NormalizedTurnEvent, ProviderOverride};
 use crate::runtime::RuntimeCoordinator;
 use crate::storage::StoragePaths;
 use liz_protocol::{
     ApprovalDecision, ApprovalRequestedEvent, AssistantChunkEvent, AssistantCompletedEvent,
     CheckpointCreatedEvent, ClientRequestEnvelope, ServerEvent, ServerEventPayload,
-    ServerResponseEnvelope, ThreadId, TurnCancelRequest, TurnCompletedEvent, TurnFailedEvent,
-    TurnId,
+    ProviderAuthProfile, ProviderCredential, ServerResponseEnvelope, ThreadId, TurnCancelRequest,
+    TurnCompletedEvent, TurnFailedEvent, TurnId,
 };
 use std::sync::mpsc::Receiver;
 
@@ -196,8 +196,9 @@ impl AppServer {
     fn stream_model_turn(&mut self, thread: liz_protocol::Thread, turn: liz_protocol::Turn, prompt: String) {
         let thread_id = thread.id.clone();
         let turn_id = turn.id.clone();
+        let model_gateway = self.gateway_with_provider_auth_profiles();
 
-        let run_result = self.model_gateway.run_turn(
+        let run_result = model_gateway.run_turn(
             ModelTurnRequest { thread, turn, prompt },
             |event| self.publish_model_event(&thread_id, &turn_id, event),
         );
@@ -272,5 +273,179 @@ impl AppServer {
             Some(turn_id.clone()),
             payload,
         ));
+    }
+
+    fn gateway_with_provider_auth_profiles(&self) -> ModelGateway {
+        let mut gateway = self.model_gateway.clone();
+        let Ok(profiles) = self.runtime.read_provider_auth_profiles() else {
+            return gateway;
+        };
+
+        for profile in select_default_auth_profiles(profiles) {
+            gateway = gateway.with_provider_override(
+                profile.provider_id.clone(),
+                provider_override_from_auth_profile(&profile),
+            );
+        }
+
+        gateway
+    }
+}
+
+fn select_default_auth_profiles(profiles: Vec<ProviderAuthProfile>) -> Vec<ProviderAuthProfile> {
+    use std::collections::BTreeMap;
+
+    let mut grouped = BTreeMap::<String, Vec<ProviderAuthProfile>>::new();
+    for profile in profiles {
+        grouped
+            .entry(profile.provider_id.clone())
+            .or_default()
+            .push(profile);
+    }
+
+    grouped
+        .into_iter()
+        .filter_map(|(provider_id, mut profiles)| {
+            profiles.sort_by(|left, right| left.profile_id.cmp(&right.profile_id));
+            profiles
+                .iter()
+                .find(|profile| profile.profile_id == format!("{provider_id}:default"))
+                .cloned()
+                .or_else(|| profiles.into_iter().next())
+        })
+        .collect()
+}
+
+fn provider_override_from_auth_profile(profile: &ProviderAuthProfile) -> ProviderOverride {
+    let mut override_config = ProviderOverride::default();
+    match &profile.credential {
+        ProviderCredential::ApiKey { api_key } => {
+            override_config.api_key = Some(api_key.clone());
+        }
+        ProviderCredential::OAuth {
+            access_token,
+            refresh_token,
+            expires_at_ms,
+            account_id,
+            email,
+        } => {
+            override_config.api_key = Some(access_token.clone());
+            if let Some(refresh_token) = refresh_token {
+                match profile.provider_id.as_str() {
+                    "openai-codex" => {
+                        override_config
+                            .metadata
+                            .insert("openai_codex.refresh_token".to_owned(), refresh_token.clone());
+                        if let Some(expires_at_ms) = expires_at_ms {
+                            override_config.metadata.insert(
+                                "openai_codex.expires_at_ms".to_owned(),
+                                expires_at_ms.to_string(),
+                            );
+                        }
+                        if let Some(account_id) = account_id {
+                            override_config.metadata.insert(
+                                "openai_codex.account_id".to_owned(),
+                                account_id.clone(),
+                            );
+                        }
+                        if let Some(email) = email {
+                            override_config
+                                .metadata
+                                .insert("openai_codex.email".to_owned(), email.clone());
+                        }
+                    }
+                    _ => {
+                        override_config
+                            .metadata
+                            .insert("oauth.refresh_token".to_owned(), refresh_token.clone());
+                    }
+                }
+            }
+        }
+        ProviderCredential::Token {
+            token,
+            expires_at_ms,
+            metadata,
+        } => {
+            override_config.api_key = Some(token.clone());
+            override_config.metadata.extend(metadata.clone());
+            if let Some(expires_at_ms) = expires_at_ms {
+                override_config.metadata.insert(
+                    "auth.expires_at_ms".to_owned(),
+                    expires_at_ms.to_string(),
+                );
+            }
+        }
+    }
+    override_config
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{provider_override_from_auth_profile, select_default_auth_profiles};
+    use liz_protocol::{ProviderAuthProfile, ProviderCredential};
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn select_default_auth_profiles_prefers_provider_default_ids() {
+        let profiles = vec![
+            ProviderAuthProfile {
+                profile_id: "github-copilot:work".to_owned(),
+                provider_id: "github-copilot".to_owned(),
+                display_name: Some("Work".to_owned()),
+                credential: ProviderCredential::Token {
+                    token: "token-work".to_owned(),
+                    expires_at_ms: None,
+                    metadata: BTreeMap::new(),
+                },
+            },
+            ProviderAuthProfile {
+                profile_id: "github-copilot:default".to_owned(),
+                provider_id: "github-copilot".to_owned(),
+                display_name: Some("Default".to_owned()),
+                credential: ProviderCredential::Token {
+                    token: "token-default".to_owned(),
+                    expires_at_ms: None,
+                    metadata: BTreeMap::new(),
+                },
+            },
+        ];
+
+        let selected = select_default_auth_profiles(profiles);
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].profile_id, "github-copilot:default");
+    }
+
+    #[test]
+    fn provider_override_from_oauth_profile_preserves_codex_refresh_metadata() {
+        let profile = ProviderAuthProfile {
+            profile_id: "openai-codex:default".to_owned(),
+            provider_id: "openai-codex".to_owned(),
+            display_name: Some("Codex".to_owned()),
+            credential: ProviderCredential::OAuth {
+                access_token: "access".to_owned(),
+                refresh_token: Some("refresh".to_owned()),
+                expires_at_ms: Some(42),
+                account_id: Some("acct".to_owned()),
+                email: Some("user@example.com".to_owned()),
+            },
+        };
+
+        let override_config = provider_override_from_auth_profile(&profile);
+        assert_eq!(override_config.api_key.as_deref(), Some("access"));
+        assert_eq!(
+            override_config
+                .metadata
+                .get("openai_codex.refresh_token")
+                .map(String::as_str),
+            Some("refresh")
+        );
+        assert_eq!(
+            override_config
+                .metadata
+                .get("openai_codex.account_id")
+                .map(String::as_str),
+            Some("acct")
+        );
     }
 }

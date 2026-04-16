@@ -219,6 +219,11 @@ impl RuntimeCoordinator {
         Ok(self.stores.get_thread(thread_id)?)
     }
 
+    /// Returns all persisted provider auth profiles.
+    pub fn read_provider_auth_profiles(&self) -> RuntimeResult<Vec<ProviderAuthProfile>> {
+        Ok(self.stores.read_auth_profiles()?.profiles)
+    }
+
     /// Returns the active in-memory turn projection when it exists.
     pub fn read_turn(&self, turn_id: &liz_protocol::TurnId) -> Option<Turn> {
         self.turn_manager.read_turn(turn_id)
