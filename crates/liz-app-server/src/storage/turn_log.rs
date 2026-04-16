@@ -2,7 +2,7 @@
 
 use crate::storage::error::StorageResult;
 use crate::storage::paths::StoragePaths;
-use liz_protocol::{ThreadId, Timestamp, TurnId};
+use liz_protocol::{ArtifactId, ThreadId, Timestamp, TurnId};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, ErrorKind, Write};
@@ -22,6 +22,9 @@ pub struct TurnLogEntry {
     pub event: String,
     /// A short summary of what happened.
     pub summary: String,
+    /// Related artifact identifiers created by the event.
+    #[serde(default)]
+    pub artifact_ids: Vec<ArtifactId>,
 }
 
 /// Minimal interface for append-only turn logs.

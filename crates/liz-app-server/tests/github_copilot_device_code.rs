@@ -4,7 +4,7 @@ use liz_app_server::server::AppServer;
 use liz_app_server::storage::StoragePaths;
 use liz_protocol::{
     ClientRequest, ClientRequestEnvelope, GitHubCopilotDevicePollRequest,
-    GitHubCopilotDeviceStartRequest, GitHubCopilotDevicePollStatus, RequestId, ResponsePayload,
+    GitHubCopilotDevicePollStatus, GitHubCopilotDeviceStartRequest, RequestId, ResponsePayload,
     ServerResponseEnvelope,
 };
 use std::io::{Read, Write};
@@ -85,10 +85,7 @@ fn github_copilot_device_code_flow_starts_polls_and_persists_profile() {
     assert!(persisted.contains("github-device-token"));
     assert!(persisted.contains("copilot.api_base_url"));
 
-    let captures = capture
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clone();
+    let captures = capture.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
     assert!(captures[0].contains("POST /login/device/code HTTP/1.1"));
     assert!(captures[0].contains(r#""client_id":"Ov23li8tweQw6odWQebz""#));
     assert!(captures[1].contains("POST /login/oauth/access_token HTTP/1.1"));
@@ -109,19 +106,14 @@ fn spawn_json_server_sequence(
         for response_body in response_bodies {
             let (mut stream, _) = listener.accept().expect("server should accept");
             let request = read_http_request(&mut stream);
-            capture
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .push(request);
+            capture.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push(request);
 
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                 response_body.len(),
                 response_body
             );
-            stream
-                .write_all(response.as_bytes())
-                .expect("response should be writable");
+            stream.write_all(response.as_bytes()).expect("response should be writable");
             stream.flush().expect("response should flush");
         }
     });
@@ -161,10 +153,7 @@ fn read_http_request(stream: &mut std::net::TcpStream) -> String {
 }
 
 fn find_header_end(buffer: &[u8]) -> Option<usize> {
-    buffer
-        .windows(4)
-        .position(|window| window == b"\r\n\r\n")
-        .map(|index| index + 4)
+    buffer.windows(4).position(|window| window == b"\r\n\r\n").map(|index| index + 4)
 }
 
 fn parse_content_length(headers: &[u8]) -> usize {

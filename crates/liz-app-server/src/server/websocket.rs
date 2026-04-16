@@ -33,16 +33,12 @@ impl LoopbackWebSocketClient {
         &self,
         request: ClientRequestEnvelope,
     ) -> Result<(), WebSocketTransportError> {
-        self.request_tx
-            .send(request)
-            .map_err(|_| WebSocketTransportError::Disconnected)
+        self.request_tx.send(request).map_err(|_| WebSocketTransportError::Disconnected)
     }
 
     /// Blocks until the next response is available.
     pub fn recv_response(&self) -> Result<ServerResponseEnvelope, WebSocketTransportError> {
-        self.response_rx
-            .recv()
-            .map_err(|_| WebSocketTransportError::Disconnected)
+        self.response_rx.recv().map_err(|_| WebSocketTransportError::Disconnected)
     }
 
     /// Waits for the next server event for up to the provided duration.
@@ -165,27 +161,17 @@ where
     A: ToSocketAddrs,
 {
     let listener = TcpListener::bind(bind_addr).map_err(WebSocketTransportError::Io)?;
-    listener
-        .set_nonblocking(true)
-        .map_err(WebSocketTransportError::Io)?;
+    listener.set_nonblocking(true).map_err(WebSocketTransportError::Io)?;
     let local_addr = listener.local_addr().map_err(WebSocketTransportError::Io)?;
     let shared_server = Arc::new(Mutex::new(server));
     let (shutdown_tx, shutdown_rx) = mpsc::channel();
 
     let join_handle = thread::spawn(move || accept_loop(listener, shared_server, shutdown_rx));
 
-    Ok(WebSocketServerHandle {
-        local_addr,
-        shutdown_tx,
-        join_handle: Some(join_handle),
-    })
+    Ok(WebSocketServerHandle { local_addr, shutdown_tx, join_handle: Some(join_handle) })
 }
 
-fn accept_loop(
-    listener: TcpListener,
-    server: Arc<Mutex<AppServer>>,
-    shutdown_rx: Receiver<()>,
-) {
+fn accept_loop(listener: TcpListener, server: Arc<Mutex<AppServer>>, shutdown_rx: Receiver<()>) {
     loop {
         if shutdown_rx.try_recv().is_ok() {
             break;
@@ -210,14 +196,13 @@ fn serve_connection(
     server: Arc<Mutex<AppServer>>,
     stream: TcpStream,
 ) -> Result<(), WebSocketTransportError> {
-    stream
+    let mut websocket = accept(stream).map_err(map_handshake_error)?;
+    websocket
+        .get_mut()
         .set_read_timeout(Some(READ_POLL_INTERVAL))
         .map_err(WebSocketTransportError::Io)?;
-    let mut websocket = accept(stream).map_err(map_handshake_error)?;
     let event_rx = {
-        let server = server
-            .lock()
-            .expect("websocket server mutex should not be poisoned");
+        let server = server.lock().expect("websocket server mutex should not be poisoned");
         server.subscribe_events()
     };
     let (outbound_tx, outbound_rx) = mpsc::channel();
@@ -285,9 +270,8 @@ fn handle_incoming_message(
         Message::Text(text) => {
             let request = serde_json::from_str::<ClientTransportMessage>(&text)?.into_request();
             let response = {
-                let mut server = server
-                    .lock()
-                    .expect("websocket server mutex should not be poisoned");
+                let mut server =
+                    server.lock().expect("websocket server mutex should not be poisoned");
                 server.handle_request(request)
             };
             send_server_message(websocket, &ServerTransportMessage::response(response))?;
@@ -295,9 +279,7 @@ fn handle_incoming_message(
         }
         Message::Binary(_) => Ok(true),
         Message::Ping(payload) => {
-            websocket
-                .send(Message::Pong(payload))
-                .map_err(map_tungstenite_error)?;
+            websocket.send(Message::Pong(payload)).map_err(map_tungstenite_error)?;
             Ok(true)
         }
         Message::Pong(_) => Ok(true),
@@ -314,18 +296,16 @@ fn send_server_message(
     message: &ServerTransportMessage,
 ) -> Result<(), WebSocketTransportError> {
     let payload = serde_json::to_string(message)?;
-    websocket
-        .send(Message::Text(payload.into()))
-        .map_err(map_tungstenite_error)
+    websocket.send(Message::Text(payload.into())).map_err(map_tungstenite_error)
 }
 
 fn map_tungstenite_error(error: tungstenite::Error) -> WebSocketTransportError {
     match error {
         tungstenite::Error::ConnectionClosed
         | tungstenite::Error::AlreadyClosed
-        | tungstenite::Error::Protocol(tungstenite::error::ProtocolError::ResetWithoutClosingHandshake) => {
-            WebSocketTransportError::Disconnected
-        }
+        | tungstenite::Error::Protocol(
+            tungstenite::error::ProtocolError::ResetWithoutClosingHandshake,
+        ) => WebSocketTransportError::Disconnected,
         tungstenite::Error::Io(error)
             if matches!(error.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) =>
         {
@@ -337,10 +317,12 @@ fn map_tungstenite_error(error: tungstenite::Error) -> WebSocketTransportError {
 }
 
 fn map_handshake_error(
-    error: tungstenite::HandshakeError<tungstenite::handshake::server::ServerHandshake<
-        TcpStream,
-        tungstenite::handshake::server::NoCallback,
-    >>,
+    error: tungstenite::HandshakeError<
+        tungstenite::handshake::server::ServerHandshake<
+            TcpStream,
+            tungstenite::handshake::server::NoCallback,
+        >,
+    >,
 ) -> WebSocketTransportError {
     match error {
         tungstenite::HandshakeError::Failure(error) => map_tungstenite_error(error),

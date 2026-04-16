@@ -3,8 +3,7 @@
 use crate::model::auth::{
     resolve_bedrock_mantle_runtime_auth, resolve_copilot_runtime_auth,
     resolve_gitlab_oauth_runtime_auth, resolve_openai_codex_runtime_auth,
-    resolve_sap_ai_core_runtime_auth,
-    OpenAiCodexRuntimeAuthRequest,
+    resolve_sap_ai_core_runtime_auth, OpenAiCodexRuntimeAuthRequest,
 };
 use crate::model::config::ResolvedProvider;
 use crate::model::family::ModelProviderFamily;
@@ -91,18 +90,11 @@ impl OpenAiStyleAdapter {
                             .clone()
                             .unwrap_or_else(|| "https://api.openai.com".to_owned()),
                         openai_responses_path(
-                            provider
-                                .base_url
-                                .as_deref()
-                                .unwrap_or("https://api.openai.com"),
+                            provider.base_url.as_deref().unwrap_or("https://api.openai.com"),
                         ),
                     )
                 };
-                InvocationTransport::HttpJson {
-                    method: "POST",
-                    base_url,
-                    path,
-                }
+                InvocationTransport::HttpJson { method: "POST", base_url, path }
             }
             ModelProviderFamily::OpenAiCompatible => match provider.base_url.clone() {
                 Some(base_url) => InvocationTransport::HttpJson {
@@ -149,12 +141,7 @@ impl OpenAiStyleAdapter {
             transport,
             headers: provider.headers.clone(),
             payload_preview,
-            notes: provider
-                .spec
-                .notes
-                .iter()
-                .map(|note| (*note).to_owned())
-                .collect(),
+            notes: provider.spec.notes.iter().map(|note| (*note).to_owned()).collect(),
         })
     }
 }
@@ -166,9 +153,7 @@ fn execute_live_http(
     sink: &mut dyn FnMut(NormalizedTurnEvent),
 ) -> Result<ModelRunSummary, ModelError> {
     let (url, body, headers) = match &plan.transport {
-        InvocationTransport::HttpJson {
-            base_url, path, ..
-        } => {
+        InvocationTransport::HttpJson { base_url, path, .. } => {
             let body = match plan.family {
                 ModelProviderFamily::OpenAiResponses => json!({
                     "model": provider.model_id,
@@ -196,10 +181,7 @@ fn execute_live_http(
                 })?;
                 let runtime = resolve_copilot_runtime_auth(
                     github_token,
-                    provider
-                        .metadata
-                        .get("copilot.token_url")
-                        .map(String::as_str),
+                    provider.metadata.get("copilot.token_url").map(String::as_str),
                     provider
                         .metadata
                         .get("copilot.api_base_url")
@@ -219,9 +201,7 @@ fn execute_live_http(
                 headers
                     .entry("Openai-Intent".to_owned())
                     .or_insert_with(|| "conversation-edits".to_owned());
-                headers
-                    .entry("X-Initiator".to_owned())
-                    .or_insert_with(|| "user".to_owned());
+                headers.entry("X-Initiator".to_owned()).or_insert_with(|| "user".to_owned());
 
                 if copilot_uses_anthropic_messages_model(&provider.model_id) {
                     headers
@@ -252,10 +232,7 @@ fn execute_live_http(
                     )
                 } else {
                     (
-                        format!(
-                            "{}/v1/chat/completions",
-                            trim_trailing_slash(&runtime.base_url)
-                        ),
+                        format!("{}/v1/chat/completions", trim_trailing_slash(&runtime.base_url)),
                         json!({
                             "model": provider.model_id,
                             "messages": [{"role": "user", "content": request.prompt}],
@@ -277,48 +254,29 @@ fn execute_live_http(
                         "gitlab provider requires a token for live mode".to_owned(),
                     )
                 })?;
-                if provider
-                    .metadata
-                    .get("gitlab.auth_mode")
-                    .map(String::as_str)
-                    == Some("oauth")
-                {
+                if provider.metadata.get("gitlab.auth_mode").map(String::as_str) == Some("oauth") {
                     let expires_at_ms = provider
                         .metadata
                         .get("gitlab.oauth.expires_at_ms")
                         .and_then(|value| value.parse::<u64>().ok());
                     let runtime = resolve_gitlab_oauth_runtime_auth(
                         provider.api_key.as_deref(),
-                        provider
-                            .metadata
-                            .get("gitlab.oauth.refresh_token")
-                            .map(String::as_str),
+                        provider.metadata.get("gitlab.oauth.refresh_token").map(String::as_str),
                         expires_at_ms,
                         provider
                             .metadata
                             .get("gitlab.instance_url")
                             .map(String::as_str)
                             .unwrap_or(base_url),
-                        provider
-                            .metadata
-                            .get("gitlab.oauth_client_id")
-                            .map(String::as_str),
-                        provider
-                            .metadata
-                            .get("gitlab.oauth_client_secret")
-                            .map(String::as_str),
-                        provider
-                            .metadata
-                            .get("gitlab.oauth_token_url")
-                            .map(String::as_str),
+                        provider.metadata.get("gitlab.oauth_client_id").map(String::as_str),
+                        provider.metadata.get("gitlab.oauth_client_secret").map(String::as_str),
+                        provider.metadata.get("gitlab.oauth_token_url").map(String::as_str),
                     )?;
                     api_key = runtime.access_token;
                 }
                 let mut headers = provider.headers.clone();
                 if gitlab_uses_private_token(&api_key, provider) {
-                    headers
-                        .entry("PRIVATE-TOKEN".to_owned())
-                        .or_insert_with(|| api_key.clone());
+                    headers.entry("PRIVATE-TOKEN".to_owned()).or_insert_with(|| api_key.clone());
                 } else {
                     headers
                         .entry("Authorization".to_owned())
@@ -338,18 +296,13 @@ fn execute_live_http(
 
     let response = post_json(&build_client()?, &url, &headers, &body)?;
     let assistant_message = extract_openai_style_text(&response).unwrap_or_else(|| {
-        format!(
-            "{} response received for {}.",
-            plan.display_name, plan.model_id
-        )
+        format!("{} response received for {}.", plan.display_name, plan.model_id)
     });
 
     sink(NormalizedTurnEvent::AssistantDelta {
         chunk: format!("Live response from {}.", plan.display_name),
     });
-    sink(NormalizedTurnEvent::AssistantMessage {
-        message: assistant_message.clone(),
-    });
+    sink(NormalizedTurnEvent::AssistantMessage { message: assistant_message.clone() });
 
     Ok(ModelRunSummary {
         assistant_message: Some(assistant_message),
@@ -401,9 +354,10 @@ fn simulate_stream(
         sink(NormalizedTurnEvent::ToolCallCommitted {
             call_id: "call_01".to_owned(),
             tool_name,
-            arguments: format!(
-                "{{\"goal\":\"{}\",\"thread_id\":\"{}\",\"provider\":\"{}\"}}",
-                request.prompt, request.thread.id, plan.provider_id
+            arguments: synthesize_tool_arguments(
+                &request.prompt,
+                request.thread.id.as_str(),
+                &plan.provider_id,
             ),
         });
     }
@@ -415,11 +369,7 @@ fn simulate_stream(
     let usage = UsageDelta {
         input_tokens: estimate_tokens(&request.prompt),
         output_tokens: estimate_tokens(&request.prompt) + 12,
-        reasoning_tokens: if supports_reasoning_accounting(&plan.family) {
-            6
-        } else {
-            0
-        },
+        reasoning_tokens: if supports_reasoning_accounting(&plan.family) { 6 } else { 0 },
         cache_hit_tokens: 0,
         cache_write_tokens: 0,
     };
@@ -431,14 +381,9 @@ fn simulate_stream(
         plan.model_id,
         plan.family.transport_label()
     );
-    sink(NormalizedTurnEvent::AssistantMessage {
-        message: final_message.clone(),
-    });
+    sink(NormalizedTurnEvent::AssistantMessage { message: final_message.clone() });
 
-    Ok(ModelRunSummary {
-        assistant_message: Some(final_message),
-        usage,
-    })
+    Ok(ModelRunSummary { assistant_message: Some(final_message), usage })
 }
 
 fn provider_supports_patching(family: &ModelProviderFamily) -> bool {
@@ -457,11 +402,11 @@ fn should_attempt_live_http(provider: &ResolvedProvider, plan: &ProviderInvocati
     match plan.family {
         ModelProviderFamily::OpenAiResponses => {
             provider.api_key.is_some()
-                || provider
-                    .metadata
-                    .contains_key("openai_codex.refresh_token")
+                || provider.metadata.contains_key("openai_codex.refresh_token")
         }
-        ModelProviderFamily::OpenAiCompatible => provider.base_url.is_some() || provider.api_key.is_some(),
+        ModelProviderFamily::OpenAiCompatible => {
+            provider.base_url.is_some() || provider.api_key.is_some()
+        }
         ModelProviderFamily::GitHubCopilot => provider.api_key.is_some(),
         ModelProviderFamily::GitLabDuo => provider.api_key.is_some() && provider.base_url.is_some(),
         _ => false,
@@ -474,11 +419,7 @@ fn default_openai_style_headers(
 ) -> Result<std::collections::BTreeMap<String, String>, ModelError> {
     let mut headers = provider.headers.clone();
     if provider.spec.id == "amazon-bedrock-mantle" {
-        let region = provider
-            .metadata
-            .get("aws.region")
-            .map(String::as_str)
-            .unwrap_or("us-east-1");
+        let region = provider.metadata.get("aws.region").map(String::as_str).unwrap_or("us-east-1");
         let token = resolve_bedrock_mantle_runtime_auth(provider.api_key.as_deref(), region)?;
         headers.insert("Authorization".to_owned(), format!("Bearer {token}"));
         return Ok(headers);
@@ -491,24 +432,12 @@ fn default_openai_style_headers(
             .and_then(|value| value.parse::<u64>().ok());
         let runtime = resolve_openai_codex_runtime_auth(OpenAiCodexRuntimeAuthRequest {
             access_token: provider.api_key.as_deref(),
-            refresh_token: provider
-                .metadata
-                .get("openai_codex.refresh_token")
-                .map(String::as_str),
+            refresh_token: provider.metadata.get("openai_codex.refresh_token").map(String::as_str),
             expires_at_ms,
-            account_id: provider
-                .metadata
-                .get("openai_codex.account_id")
-                .map(String::as_str),
-            token_url_override: provider
-                .metadata
-                .get("openai_codex.token_url")
-                .map(String::as_str),
+            account_id: provider.metadata.get("openai_codex.account_id").map(String::as_str),
+            token_url_override: provider.metadata.get("openai_codex.token_url").map(String::as_str),
         })?;
-        headers.insert(
-            "Authorization".to_owned(),
-            format!("Bearer {}", runtime.access_token),
-        );
+        headers.insert("Authorization".to_owned(), format!("Bearer {}", runtime.access_token));
         if let Some(account_id) = runtime.account_id {
             headers.insert("ChatGPT-Account-Id".to_owned(), account_id);
         }
@@ -518,18 +447,9 @@ fn default_openai_style_headers(
     if provider.spec.id == "sap-ai-core" {
         let bearer = resolve_sap_ai_core_runtime_auth(
             provider.api_key.as_deref(),
-            provider
-                .metadata
-                .get("sap_ai_core.client_id")
-                .map(String::as_str),
-            provider
-                .metadata
-                .get("sap_ai_core.client_secret")
-                .map(String::as_str),
-            provider
-                .metadata
-                .get("sap_ai_core.oauth_base_url")
-                .map(String::as_str),
+            provider.metadata.get("sap_ai_core.client_id").map(String::as_str),
+            provider.metadata.get("sap_ai_core.client_secret").map(String::as_str),
+            provider.metadata.get("sap_ai_core.oauth_base_url").map(String::as_str),
         )?;
         headers.insert("Authorization".to_owned(), format!("Bearer {bearer}"));
         if let Some(resource_group) = provider
@@ -543,10 +463,7 @@ fn default_openai_style_headers(
         return Ok(headers);
     }
 
-    if matches!(
-        provider.spec.id,
-        "azure" | "azure-cognitive-services" | "microsoft-foundry"
-    ) {
+    if matches!(provider.spec.id, "azure" | "azure-cognitive-services" | "microsoft-foundry") {
         let api_key = provider.api_key.as_ref().ok_or_else(|| {
             ModelError::ProviderFailure(format!(
                 "{} requires an API key for live mode",
@@ -559,9 +476,7 @@ fn default_openai_style_headers(
     }
 
     if let Some(api_key) = provider.api_key.as_ref() {
-        headers
-            .entry("Authorization".to_owned())
-            .or_insert_with(|| format!("Bearer {api_key}"));
+        headers.entry("Authorization".to_owned()).or_insert_with(|| format!("Bearer {api_key}"));
     }
     if matches!(plan.family, ModelProviderFamily::GitLabDuo) {
         headers
@@ -577,16 +492,12 @@ fn extract_openai_style_text(response: &serde_json::Value) -> Option<String> {
         .and_then(|value| value.as_array())
         .and_then(|items| {
             items.iter().find_map(|item| {
-                item.get("content")
-                    .and_then(|value| value.as_array())
-                    .and_then(|parts| {
-                        parts.iter().find_map(|part| {
-                            part.get("text")
-                                .and_then(|value| value.as_str())
-                                .map(str::to_owned)
-                        })
+                item.get("content").and_then(|value| value.as_array()).and_then(|parts| {
+                    parts.iter().find_map(|part| {
+                        part.get("text").and_then(|value| value.as_str()).map(str::to_owned)
                     })
                 })
+            })
         })
         .or_else(|| {
             response
@@ -695,6 +606,34 @@ fn infer_tool_name(prompt: &str) -> String {
     } else {
         "workspace.read".to_owned()
     }
+}
+
+fn synthesize_tool_arguments(prompt: &str, thread_id: &str, provider_id: &str) -> String {
+    let tool_name = infer_tool_name(prompt);
+    if tool_name == "shell.exec" {
+        let command = extract_shell_command(prompt).unwrap_or_else(|| prompt.to_owned());
+        json!({
+            "command": command,
+            "working_dir": serde_json::Value::Null,
+            "thread_id": thread_id,
+            "provider": provider_id,
+        })
+        .to_string()
+    } else {
+        json!({
+            "goal": prompt,
+            "thread_id": thread_id,
+            "provider": provider_id,
+        })
+        .to_string()
+    }
+}
+
+fn extract_shell_command(prompt: &str) -> Option<String> {
+    let lower = prompt.to_ascii_lowercase();
+    lower.find("run command:").map(|index| {
+        prompt[index + "run command:".len()..].lines().next().unwrap_or_default().trim().to_owned()
+    })
 }
 
 fn truncate_preview(prompt: &str) -> String {

@@ -61,24 +61,15 @@ fn provider_families_match_expected_transport_groups() {
         ModelProviderFamily::GoogleGenerativeAi
     );
     assert_eq!(
-        registry
-            .provider("amazon-bedrock")
-            .expect("bedrock spec")
-            .family,
+        registry.provider("amazon-bedrock").expect("bedrock spec").family,
         ModelProviderFamily::AwsBedrockConverse
     );
     assert_eq!(
-        registry
-            .provider("amazon-bedrock-mantle")
-            .expect("bedrock mantle spec")
-            .family,
+        registry.provider("amazon-bedrock-mantle").expect("bedrock mantle spec").family,
         ModelProviderFamily::OpenAiCompatible
     );
     assert_eq!(
-        registry
-            .provider("github-copilot")
-            .expect("copilot spec")
-            .family,
+        registry.provider("github-copilot").expect("copilot spec").family,
         ModelProviderFamily::GitHubCopilot
     );
     assert_eq!(
@@ -136,71 +127,45 @@ fn special_providers_expose_explicit_auth_strategies() {
     assert_eq!(openai.auth_kind, liz_app_server::model::ProviderAuthKind::ApiKey);
     assert_eq!(openai.auth_strategies.len(), 1);
     assert_eq!(openai.auth_strategies[0].label, "api-key");
-    assert!(
-        openai
-            .auth_strategies
-            .iter()
-            .any(|strategy| strategy.env_keys.contains(&"OPENAI_API_KEY"))
-    );
+    assert!(openai
+        .auth_strategies
+        .iter()
+        .any(|strategy| strategy.env_keys.contains(&"OPENAI_API_KEY")));
 
     let anthropic = registry.provider("anthropic").expect("anthropic spec");
-    assert_eq!(
-        anthropic.auth_kind,
-        liz_app_server::model::ProviderAuthKind::ApiKey
-    );
+    assert_eq!(anthropic.auth_kind, liz_app_server::model::ProviderAuthKind::ApiKey);
     assert_eq!(anthropic.auth_strategies.len(), 1);
     assert_eq!(anthropic.auth_strategies[0].label, "api-key");
 
-    let bedrock = registry
-        .provider("amazon-bedrock")
-        .expect("bedrock spec");
-    assert!(
-        bedrock
-            .auth_strategies
-            .iter()
-            .any(|strategy| strategy.env_keys.contains(&"AWS_BEARER_TOKEN_BEDROCK"))
-    );
-    assert!(
-        bedrock
-            .auth_strategies
-            .iter()
-            .any(|strategy| strategy.env_keys.contains(&"AWS_PROFILE"))
-    );
+    let bedrock = registry.provider("amazon-bedrock").expect("bedrock spec");
+    assert!(bedrock
+        .auth_strategies
+        .iter()
+        .any(|strategy| strategy.env_keys.contains(&"AWS_BEARER_TOKEN_BEDROCK")));
+    assert!(bedrock
+        .auth_strategies
+        .iter()
+        .any(|strategy| strategy.env_keys.contains(&"AWS_PROFILE")));
 
-    let mantle = registry
-        .provider("amazon-bedrock-mantle")
-        .expect("bedrock mantle spec");
+    let mantle = registry.provider("amazon-bedrock-mantle").expect("bedrock mantle spec");
     assert_eq!(mantle.auth_kind, liz_app_server::model::ProviderAuthKind::AwsCredentialChain);
-    assert!(
-        mantle
-            .auth_strategies
-            .iter()
-            .any(|strategy| strategy.env_keys.contains(&"AWS_BEARER_TOKEN_BEDROCK"))
-    );
+    assert!(mantle
+        .auth_strategies
+        .iter()
+        .any(|strategy| strategy.env_keys.contains(&"AWS_BEARER_TOKEN_BEDROCK")));
 
-    let copilot = registry
-        .provider("github-copilot")
-        .expect("copilot spec");
+    let copilot = registry.provider("github-copilot").expect("copilot spec");
     assert_eq!(copilot.auth_strategies.len(), 1);
     assert_eq!(copilot.auth_strategies[0].label, "device-code");
 
     let gitlab = registry.provider("gitlab").expect("gitlab spec");
-    assert!(
-        gitlab
-            .auth_strategies
-            .iter()
-            .any(|strategy| strategy.label == "oauth")
-    );
-    assert!(
-        gitlab
-            .auth_strategies
-            .iter()
-            .any(|strategy| strategy.label == "personal-access-token")
-    );
+    assert!(gitlab.auth_strategies.iter().any(|strategy| strategy.label == "oauth"));
+    assert!(gitlab
+        .auth_strategies
+        .iter()
+        .any(|strategy| strategy.label == "personal-access-token"));
 
-    let openai_codex = registry
-        .provider("openai-codex")
-        .expect("openai-codex spec");
+    let openai_codex = registry.provider("openai-codex").expect("openai-codex spec");
     assert_eq!(openai_codex.auth_kind, liz_app_server::model::ProviderAuthKind::OAuth);
     assert_eq!(openai_codex.auth_strategies.len(), 1);
     assert_eq!(openai_codex.auth_strategies[0].label, "chatgpt-oauth");
@@ -213,135 +178,66 @@ fn special_providers_expose_explicit_auth_strategies() {
     assert_eq!(opencode_go.family, ModelProviderFamily::OpenAiCompatible);
     assert_eq!(opencode_go.default_base_url, Some("https://opencode.ai/zen/go/v1"));
 
-    let copilot_proxy = registry
-        .provider("copilot-proxy")
-        .expect("copilot-proxy spec");
-    assert_eq!(
-        copilot_proxy.auth_kind,
-        liz_app_server::model::ProviderAuthKind::Local
-    );
+    let copilot_proxy = registry.provider("copilot-proxy").expect("copilot-proxy spec");
+    assert_eq!(copilot_proxy.auth_kind, liz_app_server::model::ProviderAuthKind::Local);
     assert_eq!(copilot_proxy.default_base_url, Some("http://localhost:3000/v1"));
 
     for provider_id in ["groq", "cerebras", "poe", "zenmux"] {
         let provider = registry.provider(provider_id).expect("alias provider spec");
         assert!(
-            provider
-                .notes
-                .iter()
-                .any(|note| note.contains("Compatibility alias")),
+            provider.notes.iter().any(|note| note.contains("Compatibility alias")),
             "{provider_id} should be explicitly marked as a compatibility alias",
         );
     }
 
     let sap_ai_core = registry.provider("sap-ai-core").expect("sap-ai-core spec");
-    assert_eq!(
-        sap_ai_core.auth_kind,
-        liz_app_server::model::ProviderAuthKind::ServiceKey
-    );
-    assert!(
-        sap_ai_core
-            .auth_strategies
-            .iter()
-            .any(|strategy| strategy.label == "service-key")
-    );
+    assert_eq!(sap_ai_core.auth_kind, liz_app_server::model::ProviderAuthKind::ServiceKey);
+    assert!(sap_ai_core.auth_strategies.iter().any(|strategy| strategy.label == "service-key"));
 
-    let cloudflare_gateway = registry
-        .provider("cloudflare-ai-gateway")
-        .expect("cloudflare-ai-gateway spec");
-    assert_eq!(
-        cloudflare_gateway.auth_kind,
-        liz_app_server::model::ProviderAuthKind::ApiKey
-    );
-    assert!(
-        cloudflare_gateway
-            .auth_strategies
-            .iter()
-            .any(|strategy| strategy.env_keys.contains(&"CLOUDFLARE_AI_GATEWAY_API_KEY"))
-    );
+    let cloudflare_gateway =
+        registry.provider("cloudflare-ai-gateway").expect("cloudflare-ai-gateway spec");
+    assert_eq!(cloudflare_gateway.auth_kind, liz_app_server::model::ProviderAuthKind::ApiKey);
+    assert!(cloudflare_gateway
+        .auth_strategies
+        .iter()
+        .any(|strategy| strategy.env_keys.contains(&"CLOUDFLARE_AI_GATEWAY_API_KEY")));
 
     let qwen = registry.provider("qwen").expect("qwen spec");
     assert_eq!(qwen.auth_kind, liz_app_server::model::ProviderAuthKind::ApiKey);
-    assert!(
-        qwen
-            .auth_strategies
-            .iter()
-            .any(|strategy| strategy.label == "coding-plan-global")
-    );
-    assert!(
-        qwen
-            .auth_strategies
-            .iter()
-            .any(|strategy| strategy.label == "standard-global")
-    );
+    assert!(qwen.auth_strategies.iter().any(|strategy| strategy.label == "coding-plan-global"));
+    assert!(qwen.auth_strategies.iter().any(|strategy| strategy.label == "standard-global"));
 
     let zai = registry.provider("zai").expect("zai spec");
     assert_eq!(zai.auth_kind, liz_app_server::model::ProviderAuthKind::ApiKey);
-    assert!(
-        zai
-            .auth_strategies
-            .iter()
-            .any(|strategy| strategy.label == "coding-plan-global")
-    );
-    assert!(
-        zai
-            .auth_strategies
-            .iter()
-            .any(|strategy| strategy.label == "cn")
-    );
+    assert!(zai.auth_strategies.iter().any(|strategy| strategy.label == "coding-plan-global"));
+    assert!(zai.auth_strategies.iter().any(|strategy| strategy.label == "cn"));
 
     let minimax = registry.provider("minimax").expect("minimax spec");
-    assert_eq!(
-        minimax.auth_kind,
-        liz_app_server::model::ProviderAuthKind::ApiKey
-    );
-    assert!(
-        minimax
-            .auth_strategies
-            .iter()
-            .any(|strategy| strategy.label == "api-global")
-    );
+    assert_eq!(minimax.auth_kind, liz_app_server::model::ProviderAuthKind::ApiKey);
+    assert!(minimax.auth_strategies.iter().any(|strategy| strategy.label == "api-global"));
 
-    let minimax_portal = registry
-        .provider("minimax-portal")
-        .expect("minimax portal spec");
-    assert_eq!(
-        minimax_portal.auth_kind,
-        liz_app_server::model::ProviderAuthKind::OAuth
-    );
-    assert!(
-        minimax_portal
-            .auth_strategies
-            .iter()
-            .any(|strategy| strategy.label == "oauth-global")
-    );
+    let minimax_portal = registry.provider("minimax-portal").expect("minimax portal spec");
+    assert_eq!(minimax_portal.auth_kind, liz_app_server::model::ProviderAuthKind::OAuth);
+    assert!(minimax_portal.auth_strategies.iter().any(|strategy| strategy.label == "oauth-global"));
 
     let kimi = registry.provider("kimi").expect("kimi spec");
     assert_eq!(kimi.family, ModelProviderFamily::AnthropicMessages);
     assert_eq!(kimi.default_base_url, Some("https://api.kimi.com/coding"));
 
-    let byteplus_plan = registry
-        .provider("byteplus-plan")
-        .expect("byteplus-plan spec");
+    let byteplus_plan = registry.provider("byteplus-plan").expect("byteplus-plan spec");
     assert_eq!(
         byteplus_plan.default_base_url,
         Some("https://ark.ap-southeast.bytepluses.com/api/coding/v3")
     );
 
-    let volcengine_plan = registry
-        .provider("volcengine-plan")
-        .expect("volcengine-plan spec");
+    let volcengine_plan = registry.provider("volcengine-plan").expect("volcengine-plan spec");
     assert_eq!(
         volcengine_plan.default_base_url,
         Some("https://ark.cn-beijing.volces.com/api/coding/v3")
     );
 
-    let stepfun_plan = registry
-        .provider("stepfun-plan")
-        .expect("stepfun-plan spec");
-    assert_eq!(
-        stepfun_plan.default_base_url,
-        Some("https://api.stepfun.ai/step_plan/v1")
-    );
+    let stepfun_plan = registry.provider("stepfun-plan").expect("stepfun-plan spec");
+    assert_eq!(stepfun_plan.default_base_url, Some("https://api.stepfun.ai/step_plan/v1"));
 }
 
 #[test]
@@ -354,9 +250,7 @@ fn gitlab_env_resolution_prefers_ai_gateway_and_keeps_instance_metadata() {
         primary_provider: "gitlab".to_owned(),
         overrides: BTreeMap::new(),
     });
-    let provider = gateway
-        .resolved_primary_provider()
-        .expect("gitlab provider should resolve");
+    let provider = gateway.resolved_primary_provider().expect("gitlab provider should resolve");
 
     assert_eq!(provider.base_url.as_deref(), Some("https://ai-gateway.example.com"));
     assert_eq!(
@@ -409,10 +303,7 @@ fn explicit_metadata_override_beats_process_env_for_bedrock_and_vertex() {
     })
     .resolved_primary_provider()
     .expect("bedrock provider should resolve");
-    assert_eq!(
-        bedrock.metadata.get("aws.region").map(String::as_str),
-        Some("eu-west-1")
-    );
+    assert_eq!(bedrock.metadata.get("aws.region").map(String::as_str), Some("eu-west-1"));
 
     let vertex = ModelGateway::from_config(ModelGatewayConfig {
         primary_provider: "google-vertex".to_owned(),
@@ -420,10 +311,7 @@ fn explicit_metadata_override_beats_process_env_for_bedrock_and_vertex() {
     })
     .resolved_primary_provider()
     .expect("vertex provider should resolve");
-    assert_eq!(
-        vertex.metadata.get("google.location").map(String::as_str),
-        Some("europe-west4")
-    );
+    assert_eq!(vertex.metadata.get("google.location").map(String::as_str), Some("europe-west4"));
 
     std::env::remove_var("AWS_REGION");
     std::env::remove_var("GOOGLE_VERTEX_LOCATION");
@@ -441,14 +329,8 @@ fn mantle_env_resolution_derives_region_scoped_endpoint() {
     .resolved_primary_provider()
     .expect("bedrock mantle provider should resolve");
 
-    assert_eq!(
-        provider.base_url.as_deref(),
-        Some("https://bedrock-mantle.us-west-2.api.aws/v1")
-    );
-    assert_eq!(
-        provider.metadata.get("aws.region").map(String::as_str),
-        Some("us-west-2")
-    );
+    assert_eq!(provider.base_url.as_deref(), Some("https://bedrock-mantle.us-west-2.api.aws/v1"));
+    assert_eq!(provider.metadata.get("aws.region").map(String::as_str), Some("us-west-2"));
 
     std::env::remove_var("AWS_REGION");
 }
@@ -480,14 +362,8 @@ fn qwen_env_resolution_supports_standard_and_coding_plan_hosts() {
     .resolved_primary_provider()
     .expect("qwen coding provider should resolve");
 
-    assert_eq!(
-        coding.base_url.as_deref(),
-        Some("https://coding.dashscope.aliyuncs.com/v1")
-    );
-    assert_eq!(
-        coding.metadata.get("qwen.endpoint").map(String::as_str),
-        Some("coding-cn")
-    );
+    assert_eq!(coding.base_url.as_deref(), Some("https://coding.dashscope.aliyuncs.com/v1"));
+    assert_eq!(coding.metadata.get("qwen.endpoint").map(String::as_str), Some("coding-cn"));
 
     std::env::remove_var("QWEN_ENDPOINT");
     std::env::remove_var("QWEN_API_KEY");
@@ -506,15 +382,9 @@ fn zai_env_resolution_supports_forced_coding_plan_endpoint() {
     .resolved_primary_provider()
     .expect("zai provider should resolve");
 
-    assert_eq!(
-        provider.base_url.as_deref(),
-        Some("https://open.bigmodel.cn/api/coding/paas/v4")
-    );
+    assert_eq!(provider.base_url.as_deref(), Some("https://open.bigmodel.cn/api/coding/paas/v4"));
     assert_eq!(provider.model_id, "glm-5.1");
-    assert_eq!(
-        provider.metadata.get("zai.endpoint").map(String::as_str),
-        Some("coding-cn")
-    );
+    assert_eq!(provider.metadata.get("zai.endpoint").map(String::as_str), Some("coding-cn"));
 
     std::env::remove_var("ZAI_API_KEY");
     std::env::remove_var("ZAI_ENDPOINT");
@@ -533,14 +403,8 @@ fn minimax_env_resolution_supports_global_and_cn_routes() {
     .resolved_primary_provider()
     .expect("minimax provider should resolve");
 
-    assert_eq!(
-        minimax.base_url.as_deref(),
-        Some("https://api.minimaxi.com/anthropic")
-    );
-    assert_eq!(
-        minimax.metadata.get("minimax.region").map(String::as_str),
-        Some("cn")
-    );
+    assert_eq!(minimax.base_url.as_deref(), Some("https://api.minimaxi.com/anthropic"));
+    assert_eq!(minimax.metadata.get("minimax.region").map(String::as_str), Some("cn"));
 
     std::env::set_var("MINIMAX_OAUTH_TOKEN", "portal-token");
     let minimax_portal = ModelGateway::from_config(ModelGatewayConfig {
@@ -550,14 +414,8 @@ fn minimax_env_resolution_supports_global_and_cn_routes() {
     .resolved_primary_provider()
     .expect("minimax portal provider should resolve");
 
-    assert_eq!(
-        minimax_portal.base_url.as_deref(),
-        Some("https://api.minimaxi.com/anthropic")
-    );
-    assert_eq!(
-        minimax_portal.metadata.get("minimax.region").map(String::as_str),
-        Some("cn")
-    );
+    assert_eq!(minimax_portal.base_url.as_deref(), Some("https://api.minimaxi.com/anthropic"));
+    assert_eq!(minimax_portal.metadata.get("minimax.region").map(String::as_str), Some("cn"));
 
     std::env::remove_var("MINIMAX_API_KEY");
     std::env::remove_var("MINIMAX_OAUTH_TOKEN");
@@ -577,14 +435,8 @@ fn stepfun_env_resolution_supports_plan_region_selection() {
     .resolved_primary_provider()
     .expect("stepfun-plan provider should resolve");
 
-    assert_eq!(
-        provider.base_url.as_deref(),
-        Some("https://api.stepfun.com/step_plan/v1")
-    );
-    assert_eq!(
-        provider.metadata.get("stepfun.region").map(String::as_str),
-        Some("cn")
-    );
+    assert_eq!(provider.base_url.as_deref(), Some("https://api.stepfun.com/step_plan/v1"));
+    assert_eq!(provider.metadata.get("stepfun.region").map(String::as_str), Some("cn"));
 
     std::env::remove_var("STEPFUN_API_KEY");
     std::env::remove_var("STEPFUN_REGION");
@@ -613,17 +465,11 @@ fn sap_ai_core_env_resolution_parses_service_key_and_builds_deployment_route() {
     );
     assert_eq!(provider.model_id, "deployment-prod");
     assert_eq!(
-        provider
-            .metadata
-            .get("sap_ai_core.oauth_base_url")
-            .map(String::as_str),
+        provider.metadata.get("sap_ai_core.oauth_base_url").map(String::as_str),
         Some("https://sap.example.com")
     );
     assert_eq!(
-        provider
-            .metadata
-            .get("sap_ai_core.resource_group")
-            .map(String::as_str),
+        provider.metadata.get("sap_ai_core.resource_group").map(String::as_str),
         Some("rg-prod")
     );
 
@@ -728,10 +574,9 @@ fn local_openai_compatible_provider_with_builtin_base_url_still_runs() {
         .expect("provider should still produce a request plan");
 
     assert!(summary.assistant_message.is_some());
-    assert!(events.iter().any(|event| matches!(
-        event,
-        NormalizedTurnEvent::AssistantMessage { .. }
-    )));
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, NormalizedTurnEvent::AssistantMessage { .. })));
 }
 
 #[test]
@@ -742,14 +587,10 @@ fn gitlab_events_do_not_emit_patch_updates_when_capability_disables_patching() {
     });
     let request = demo_request();
     let mut events = Vec::new();
-    gateway
-        .run_turn(request, |event| events.push(event))
-        .expect("gitlab provider should run");
+    gateway.run_turn(request, |event| events.push(event)).expect("gitlab provider should run");
 
     assert!(
-        !events
-            .iter()
-            .any(|event| matches!(event, NormalizedTurnEvent::ToolCallDelta { .. })),
+        !events.iter().any(|event| matches!(event, NormalizedTurnEvent::ToolCallDelta { .. })),
         "gitlab should not emit patch deltas when patching is disabled",
     );
 }

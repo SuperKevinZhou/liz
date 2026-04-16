@@ -2,11 +2,11 @@
 
 use liz_app_server::server::AppServer;
 use liz_app_server::storage::StoragePaths;
+use liz_protocol::requests::{MiniMaxOAuthPollRequest, MiniMaxOAuthStartRequest};
 use liz_protocol::{
     ClientRequest, ClientRequestEnvelope, MiniMaxOAuthPollStatus, RequestId, ResponsePayload,
     ServerResponseEnvelope,
 };
-use liz_protocol::requests::{MiniMaxOAuthPollRequest, MiniMaxOAuthStartRequest};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -34,10 +34,7 @@ fn minimax_oauth_start_and_poll_persist_profile() {
         ServerResponseEnvelope::Success(success) => match success.response {
             ResponsePayload::MiniMaxOAuthStart(response) => {
                 assert_eq!(response.device.user_code, "MINI-CODE");
-                assert_eq!(
-                    response.device.verification_uri,
-                    "https://platform.minimax.io/oauth"
-                );
+                assert_eq!(response.device.verification_uri, "https://platform.minimax.io/oauth");
                 assert_eq!(response.device.region, "global");
                 assert_eq!(response.device.interval_ms, 2000);
                 assert!(!response.device.code_verifier.is_empty());
@@ -77,10 +74,7 @@ fn minimax_oauth_start_and_poll_persist_profile() {
     assert!(persisted.contains("portal-refresh"));
     assert!(persisted.contains("minimax.resource_url"));
 
-    let requests = capture
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clone();
+    let requests = capture.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
     assert_eq!(requests.len(), 2);
     assert!(requests[0].contains("POST /oauth/code HTTP/1.1"));
     assert!(requests[0].contains("client_id=78257093-7e40-4613-99e0-527b14b39113"));
@@ -101,10 +95,7 @@ fn spawn_minimax_oauth_server(capture: Arc<Mutex<Vec<String>>>) -> String {
         for index in 0..2 {
             let (mut stream, _) = listener.accept().expect("server should accept");
             let request = read_http_request(&mut stream);
-            capture
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .push(request.clone());
+            capture.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push(request.clone());
 
             let body = request.split("\r\n\r\n").nth(1).unwrap_or_default();
             let response_body = if index == 0 {
@@ -121,9 +112,7 @@ fn spawn_minimax_oauth_server(capture: Arc<Mutex<Vec<String>>>) -> String {
                 response_body.len(),
                 response_body
             );
-            stream
-                .write_all(response.as_bytes())
-                .expect("response should be writable");
+            stream.write_all(response.as_bytes()).expect("response should be writable");
             stream.flush().expect("response should flush");
         }
     });
@@ -163,10 +152,7 @@ fn read_http_request(stream: &mut std::net::TcpStream) -> String {
 }
 
 fn find_header_end(buffer: &[u8]) -> Option<usize> {
-    buffer
-        .windows(4)
-        .position(|window| window == b"\r\n\r\n")
-        .map(|index| index + 4)
+    buffer.windows(4).position(|window| window == b"\r\n\r\n").map(|index| index + 4)
 }
 
 fn parse_content_length(headers: &[u8]) -> usize {

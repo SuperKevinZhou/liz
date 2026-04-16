@@ -11,6 +11,7 @@ use liz_protocol::{ArtifactId, Checkpoint, CheckpointId, Thread, ThreadId};
 /// Bundles the concrete filesystem-backed stores used by the runtime.
 #[derive(Debug, Clone)]
 pub struct RuntimeStores {
+    paths: StoragePaths,
     thread_store: FsThreadStore,
     turn_log: FsTurnLog,
     checkpoint_store: FsCheckpointStore,
@@ -23,6 +24,7 @@ impl RuntimeStores {
     /// Creates a new runtime store bundle rooted at the provided storage paths.
     pub fn new(paths: StoragePaths) -> Self {
         Self {
+            paths: paths.clone(),
             thread_store: FsThreadStore::new(paths.clone()),
             turn_log: FsTurnLog::new(paths.clone()),
             checkpoint_store: FsCheckpointStore::new(paths.clone()),
@@ -35,6 +37,11 @@ impl RuntimeStores {
     /// Creates the runtime store bundle using the default `.liz` layout.
     pub fn from_default_layout() -> Self {
         Self::new(StoragePaths::from_default_layout())
+    }
+
+    /// Returns the storage root for artifact locator generation.
+    pub fn paths(&self) -> &StoragePaths {
+        &self.paths
     }
 
     /// Persists a thread projection.
@@ -63,7 +70,10 @@ impl RuntimeStores {
     }
 
     /// Reads a checkpoint when it exists.
-    pub fn get_checkpoint(&self, checkpoint_id: &CheckpointId) -> StorageResult<Option<Checkpoint>> {
+    pub fn get_checkpoint(
+        &self,
+        checkpoint_id: &CheckpointId,
+    ) -> StorageResult<Option<Checkpoint>> {
         self.checkpoint_store.get_checkpoint(checkpoint_id)
     }
 

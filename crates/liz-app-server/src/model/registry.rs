@@ -928,7 +928,13 @@ fn spec(
         display_name,
         family,
         auth_kind,
-        auth_strategies: vec![auth_strategy(auth_kind, auth_kind.label(), api_key_envs, required_envs, &[])],
+        auth_strategies: vec![auth_strategy(
+            auth_kind,
+            auth_kind.label(),
+            api_key_envs,
+            required_envs,
+            &[],
+        )],
         default_base_url,
         default_model,
         api_key_envs,
@@ -960,7 +966,9 @@ fn openai_compatible_spec(
         "io-net" => Some("https://api.intelligence.io.solutions/api/v1"),
         "moonshot" | "moonshotai" => Some("https://api.moonshot.ai/v1"),
         "nebius" | "nebius-token-factory" => Some("https://api.tokenfactory.nebius.com/v1"),
-        "ovhcloud" | "ovhcloud-ai-endpoints" => Some("https://oai.endpoints.kepler.ai.cloud.ovh.net/v1"),
+        "ovhcloud" | "ovhcloud-ai-endpoints" => {
+            Some("https://oai.endpoints.kepler.ai.cloud.ovh.net/v1")
+        }
         "scaleway" => Some("https://api.scaleway.ai/v1"),
         "stackit" => Some("https://api.openai-compat.model-serving.eu01.onstackit.cloud/v1"),
         "zai" => Some("https://api.z.ai/api/paas/v4"),
@@ -1062,11 +1070,5 @@ fn auth_strategy(
     config_keys: &'static [&'static str],
     notes: &'static [&'static str],
 ) -> ProviderAuthStrategy {
-    ProviderAuthStrategy {
-        kind,
-        label,
-        env_keys,
-        config_keys,
-        notes,
-    }
+    ProviderAuthStrategy { kind, label, env_keys, config_keys, notes }
 }

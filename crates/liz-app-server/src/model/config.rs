@@ -41,9 +41,7 @@ impl ModelGatewayConfig {
         primary_override.model_id = env::var("LIZ_PROVIDER_MODEL").ok();
 
         if let Ok(value) = env::var("LIZ_PROVIDER_REFERER") {
-            primary_override
-                .headers
-                .insert("HTTP-Referer".to_owned(), value);
+            primary_override.headers.insert("HTTP-Referer".to_owned(), value);
         }
         if let Ok(value) = env::var("LIZ_PROVIDER_TITLE") {
             primary_override.headers.insert("X-Title".to_owned(), value);
@@ -57,10 +55,7 @@ impl ModelGatewayConfig {
             overrides.insert(primary_provider.clone(), primary_override);
         }
 
-        Self {
-            primary_provider,
-            overrides,
-        }
+        Self { primary_provider, overrides }
     }
 }
 
@@ -93,12 +88,10 @@ impl ResolvedProvider {
         let mut base_url = override_config
             .and_then(|config| config.base_url.clone())
             .or_else(|| spec.default_base_url.map(str::to_owned));
-        let mut api_key = override_config
-            .and_then(|config| config.api_key.clone())
-            .or_else(|| {
-                let keys = spec.credential_env_keys();
-                first_env(&keys)
-            });
+        let mut api_key = override_config.and_then(|config| config.api_key.clone()).or_else(|| {
+            let keys = spec.credential_env_keys();
+            first_env(&keys)
+        });
         let mut model_id = override_config
             .and_then(|config| config.model_id.clone())
             .unwrap_or_else(|| spec.default_model.to_owned());
@@ -117,13 +110,12 @@ impl ResolvedProvider {
                         metadata
                             .entry("azure.resource_name".to_owned())
                             .or_insert(resource_name.clone());
-                        base_url = Some(format!("https://{resource_name}.openai.azure.com/openai/v1"));
+                        base_url =
+                            Some(format!("https://{resource_name}.openai.azure.com/openai/v1"));
                     }
                 }
                 if let Some(deployment) = first_env(&["AZURE_OPENAI_DEPLOYMENT"]) {
-                    metadata
-                        .entry("azure.deployment".to_owned())
-                        .or_insert(deployment.clone());
+                    metadata.entry("azure.deployment".to_owned()).or_insert(deployment.clone());
                     if model_id == spec.default_model {
                         model_id = deployment;
                     }
@@ -172,8 +164,8 @@ impl ResolvedProvider {
             "cloudflare-ai-gateway" => {
                 if base_url.is_none() {
                     if let Ok(account_id) = env::var("CLOUDFLARE_ACCOUNT_ID") {
-                        let gateway_id =
-                            env::var("CLOUDFLARE_GATEWAY_ID").unwrap_or_else(|_| "default".to_owned());
+                        let gateway_id = env::var("CLOUDFLARE_GATEWAY_ID")
+                            .unwrap_or_else(|_| "default".to_owned());
                         metadata
                             .entry("cloudflare.account_id".to_owned())
                             .or_insert(account_id.clone());
@@ -199,9 +191,8 @@ impl ResolvedProvider {
                 }
             }
             "sap-ai-core" => {
-                if let Some(raw_service_key) = api_key
-                    .clone()
-                    .or_else(|| first_env(&["AICORE_SERVICE_KEY"]))
+                if let Some(raw_service_key) =
+                    api_key.clone().or_else(|| first_env(&["AICORE_SERVICE_KEY"]))
                 {
                     if let Ok(service_key) = parse_sap_ai_core_service_key(&raw_service_key) {
                         api_key = None;
@@ -229,7 +220,8 @@ impl ResolvedProvider {
                             if model_id == spec.default_model {
                                 model_id = deployment_id.clone();
                             }
-                            if override_config.and_then(|config| config.base_url.as_ref()).is_none() {
+                            if override_config.and_then(|config| config.base_url.as_ref()).is_none()
+                            {
                                 base_url = Some(format!(
                                     "{}/v2/inference/deployments/{}",
                                     service_key.ai_api_url.trim_end_matches('/'),
@@ -267,9 +259,7 @@ impl ResolvedProvider {
                     }
                 }
                 if let Ok(client_id) = env::var("GITLAB_OAUTH_CLIENT_ID") {
-                    metadata
-                        .entry("gitlab.oauth_client_id".to_owned())
-                        .or_insert(client_id);
+                    metadata.entry("gitlab.oauth_client_id".to_owned()).or_insert(client_id);
                 }
             }
             "openai-codex" => {
@@ -282,32 +272,22 @@ impl ResolvedProvider {
                         .or_insert(refresh_token);
                 }
                 if let Some(expires_at) = first_env(&["OPENAI_CODEX_EXPIRES_AT_MS"]) {
-                    metadata
-                        .entry("openai_codex.expires_at_ms".to_owned())
-                        .or_insert(expires_at);
+                    metadata.entry("openai_codex.expires_at_ms".to_owned()).or_insert(expires_at);
                 }
                 if let Some(account_id) = first_env(&["OPENAI_CODEX_ACCOUNT_ID"]) {
-                    metadata
-                        .entry("openai_codex.account_id".to_owned())
-                        .or_insert(account_id);
+                    metadata.entry("openai_codex.account_id".to_owned()).or_insert(account_id);
                 }
                 if let Some(email) = first_env(&["OPENAI_CODEX_EMAIL"]) {
-                    metadata
-                        .entry("openai_codex.email".to_owned())
-                        .or_insert(email);
+                    metadata.entry("openai_codex.email".to_owned()).or_insert(email);
                 }
                 if let Some(token_url) = first_env(&["OPENAI_CODEX_TOKEN_URL"]) {
-                    metadata
-                        .entry("openai_codex.token_url".to_owned())
-                        .or_insert(token_url);
+                    metadata.entry("openai_codex.token_url".to_owned()).or_insert(token_url);
                 }
             }
             "google-vertex" | "google-vertex-anthropic" | "anthropic-vertex" => {
-                if let Some(project) = first_env(&[
-                    "GOOGLE_CLOUD_PROJECT",
-                    "GCP_PROJECT",
-                    "GCLOUD_PROJECT",
-                ]) {
+                if let Some(project) =
+                    first_env(&["GOOGLE_CLOUD_PROJECT", "GCP_PROJECT", "GCLOUD_PROJECT"])
+                {
                     metadata.entry("google.project".to_owned()).or_insert(project);
                 }
                 if let Some(location) = first_env(&[
@@ -342,16 +322,15 @@ impl ResolvedProvider {
                 }
                 let region = first_env(&["AWS_REGION", "AWS_DEFAULT_REGION"])
                     .unwrap_or_else(|| "us-east-1".to_owned());
-                metadata
-                    .entry("aws.region".to_owned())
-                    .or_insert(region.clone());
+                metadata.entry("aws.region".to_owned()).or_insert(region.clone());
                 if let Some(profile) = first_env(&["AWS_PROFILE"]) {
                     metadata.entry("aws.profile".to_owned()).or_insert(profile);
                 }
                 if base_url.is_none() {
                     base_url = Some(format!("https://bedrock-mantle.{region}.api.aws/v1"));
                 }
-                if matches!(spec.auth_kind, ProviderAuthKind::AwsCredentialChain) && api_key.is_none()
+                if matches!(spec.auth_kind, ProviderAuthKind::AwsCredentialChain)
+                    && api_key.is_none()
                 {
                     metadata
                         .entry("aws.auth".to_owned())
@@ -360,16 +339,17 @@ impl ResolvedProvider {
             }
             "qwen" => {
                 if override_config.and_then(|config| config.api_key.as_ref()).is_none() {
-                    api_key = first_env(&["QWEN_API_KEY", "MODELSTUDIO_API_KEY", "DASHSCOPE_API_KEY"]);
+                    api_key =
+                        first_env(&["QWEN_API_KEY", "MODELSTUDIO_API_KEY", "DASHSCOPE_API_KEY"]);
                 }
                 let endpoint = override_config
                     .and_then(|config| config.metadata.get("qwen.endpoint"))
                     .cloned()
-                    .or_else(|| first_env(&["QWEN_ENDPOINT", "MODELSTUDIO_ENDPOINT", "DASHSCOPE_ENDPOINT"]));
+                    .or_else(|| {
+                        first_env(&["QWEN_ENDPOINT", "MODELSTUDIO_ENDPOINT", "DASHSCOPE_ENDPOINT"])
+                    });
                 if let Some(endpoint) = endpoint {
-                    metadata
-                        .entry("qwen.endpoint".to_owned())
-                        .or_insert(endpoint.clone());
+                    metadata.entry("qwen.endpoint".to_owned()).or_insert(endpoint.clone());
                     if override_config.and_then(|config| config.base_url.as_ref()).is_none() {
                         base_url = Some(resolve_qwen_base_url(&endpoint));
                     }
@@ -390,9 +370,7 @@ impl ResolvedProvider {
                     .cloned()
                     .or_else(|| first_env(&["ZAI_ENDPOINT"]));
                 if let Some(endpoint) = endpoint {
-                    metadata
-                        .entry("zai.endpoint".to_owned())
-                        .or_insert(endpoint.clone());
+                    metadata.entry("zai.endpoint".to_owned()).or_insert(endpoint.clone());
                     if override_config.and_then(|config| config.base_url.as_ref()).is_none() {
                         base_url = Some(resolve_zai_base_url(&endpoint));
                     }
@@ -415,9 +393,7 @@ impl ResolvedProvider {
                     api_key = first_env(&["STEPFUN_API_KEY"]);
                 }
                 let region = first_env(&["STEPFUN_REGION"]).unwrap_or_else(|| "intl".to_owned());
-                metadata
-                    .entry("stepfun.region".to_owned())
-                    .or_insert(region.clone());
+                metadata.entry("stepfun.region".to_owned()).or_insert(region.clone());
                 if override_config.and_then(|config| config.base_url.as_ref()).is_none() {
                     base_url = Some(resolve_stepfun_base_url(spec.id, &region));
                 }
@@ -431,9 +407,7 @@ impl ResolvedProvider {
                     .cloned()
                     .or_else(|| first_env(&["MINIMAX_REGION"]))
                     .unwrap_or_else(|| "global".to_owned());
-                metadata
-                    .entry("minimax.region".to_owned())
-                    .or_insert(region.clone());
+                metadata.entry("minimax.region".to_owned()).or_insert(region.clone());
                 if override_config.and_then(|config| config.base_url.as_ref()).is_none() {
                     base_url = Some(resolve_minimax_base_url(
                         &region,
@@ -450,9 +424,7 @@ impl ResolvedProvider {
                     .cloned()
                     .or_else(|| first_env(&["MINIMAX_REGION"]))
                     .unwrap_or_else(|| "global".to_owned());
-                metadata
-                    .entry("minimax.region".to_owned())
-                    .or_insert(region.clone());
+                metadata.entry("minimax.region".to_owned()).or_insert(region.clone());
                 if let Some(refresh_token) = first_env(&["MINIMAX_OAUTH_REFRESH_TOKEN"]) {
                     metadata
                         .entry("minimax.oauth.refresh_token".to_owned())
@@ -464,9 +436,7 @@ impl ResolvedProvider {
                         .or_insert(expires_at_ms);
                 }
                 if let Some(resource_url) = first_env(&["MINIMAX_RESOURCE_URL"]) {
-                    metadata
-                        .entry("minimax.resource_url".to_owned())
-                        .or_insert(resource_url);
+                    metadata.entry("minimax.resource_url".to_owned()).or_insert(resource_url);
                 }
                 if override_config.and_then(|config| config.base_url.as_ref()).is_none() {
                     base_url = metadata
@@ -478,20 +448,12 @@ impl ResolvedProvider {
             _ => {}
         }
 
-        Self {
-            spec: spec.clone(),
-            base_url,
-            api_key,
-            model_id,
-            headers,
-            metadata,
-        }
+        Self { spec: spec.clone(), base_url, api_key, model_id, headers, metadata }
     }
 }
 
 fn first_env(keys: &[&str]) -> Option<String> {
-    keys.iter()
-        .find_map(|key| env::var(key).ok().filter(|value| !value.trim().is_empty()))
+    keys.iter().find_map(|key| env::var(key).ok().filter(|value| !value.trim().is_empty()))
 }
 
 fn resolve_qwen_base_url(endpoint: &str) -> String {
@@ -523,7 +485,10 @@ fn resolve_minimax_base_url(region: &str, host_override: Option<&str>) -> String
             if path.ends_with("/anthropic") {
                 return format!("{}{}", url.origin().ascii_serialization(), path);
             }
-            return format!("{}/anthropic", url.origin().ascii_serialization().trim_end_matches('/'));
+            return format!(
+                "{}/anthropic",
+                url.origin().ascii_serialization().trim_end_matches('/')
+            );
         }
     }
 

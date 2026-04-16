@@ -18,8 +18,8 @@ use tungstenite::{client, Message, WebSocket};
 fn websocket_server_streams_lifecycle_events_without_polling() {
     let temp_dir = TempDir::new().expect("temp dir should be created");
     let server = AppServer::new(StoragePaths::new(temp_dir.path().join(".liz")));
-    let handle = spawn_websocket_server(server, "127.0.0.1:0")
-        .expect("websocket server should bind");
+    let handle =
+        spawn_websocket_server(server, "127.0.0.1:0").expect("websocket server should bind");
     let mut client =
         TestWebSocketClient::connect(&handle.ws_url()).expect("websocket client should connect");
 
@@ -64,10 +64,8 @@ fn websocket_server_streams_lifecycle_events_without_polling() {
     let second_turn_event = client
         .recv_event_timeout(Duration::from_secs(1))
         .expect("thread_updated event should arrive");
-    let third_turn_event = client
-        .recv_event_timeout(Duration::from_secs(1))
-        .expect("assistant event should arrive");
-
+    let third_turn_event =
+        client.recv_event_timeout(Duration::from_secs(1)).expect("assistant event should arrive");
     assert!(matches!(first_turn_event.payload, ServerEventPayload::TurnStarted(_)));
     assert!(matches!(second_turn_event.payload, ServerEventPayload::ThreadUpdated(_)));
     assert!(matches!(
@@ -79,10 +77,7 @@ fn websocket_server_streams_lifecycle_events_without_polling() {
 }
 
 fn envelope(request_id: &str, request: ClientRequest) -> ClientRequestEnvelope {
-    ClientRequestEnvelope {
-        request_id: RequestId::new(request_id),
-        request,
-    }
+    ClientRequestEnvelope { request_id: RequestId::new(request_id), request }
 }
 
 struct TestWebSocketClient {
@@ -132,9 +127,7 @@ impl TestWebSocketClient {
         &mut self,
         timeout: Duration,
     ) -> Result<ServerTransportMessage, Box<dyn std::error::Error>> {
-        self.socket
-            .get_mut()
-            .set_read_timeout(Some(timeout))?;
+        self.socket.get_mut().set_read_timeout(Some(timeout))?;
 
         loop {
             match self.socket.read()? {

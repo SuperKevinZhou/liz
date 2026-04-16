@@ -55,12 +55,7 @@ impl GoogleAdapter {
                 "contents": [{"role": "user", "parts": [{"text": request.prompt}]}],
             })
             .to_string(),
-            notes: provider
-                .spec
-                .notes
-                .iter()
-                .map(|note| (*note).to_owned())
-                .collect(),
+            notes: provider.spec.notes.iter().map(|note| (*note).to_owned()).collect(),
         };
 
         if should_attempt_live_http(provider) {
@@ -96,14 +91,9 @@ impl GoogleAdapter {
             plan.model_id,
             plan.family.transport_label()
         );
-        sink(NormalizedTurnEvent::AssistantMessage {
-            message: final_message.clone(),
-        });
+        sink(NormalizedTurnEvent::AssistantMessage { message: final_message.clone() });
 
-        Ok(ModelRunSummary {
-            assistant_message: Some(final_message),
-            usage,
-        })
+        Ok(ModelRunSummary { assistant_message: Some(final_message), usage })
     }
 }
 
@@ -114,10 +104,12 @@ fn execute_live_http(
     sink: &mut dyn FnMut(NormalizedTurnEvent),
 ) -> Result<ModelRunSummary, ModelError> {
     let (url, body, headers) = match plan.family {
-            ModelProviderFamily::GoogleGenerativeAi => {
-                let api_key = provider.api_key.clone().ok_or_else(|| {
-                    ModelError::ProviderFailure("google provider requires API key for live mode".to_owned())
-                })?;
+        ModelProviderFamily::GoogleGenerativeAi => {
+            let api_key = provider.api_key.clone().ok_or_else(|| {
+                ModelError::ProviderFailure(
+                    "google provider requires API key for live mode".to_owned(),
+                )
+            })?;
             let base = provider
                 .base_url
                 .clone()
@@ -133,17 +125,15 @@ fn execute_live_http(
                     "contents": [{"role": "user", "parts": [{"text": request.prompt}]}],
                 }),
                 provider.headers.clone(),
-                )
-            }
+            )
+        }
         ModelProviderFamily::GoogleVertex => {
             let project = google_vertex_project(provider)?;
             let location = google_vertex_location(provider);
             let host = google_vertex_host(provider, &location);
             let bearer = google_vertex_runtime_bearer(provider)?;
             let mut headers = provider.headers.clone();
-            headers
-                .entry("Authorization".to_owned())
-                .or_insert_with(|| format!("Bearer {bearer}"));
+            headers.entry("Authorization".to_owned()).or_insert_with(|| format!("Bearer {bearer}"));
             (
                 format!(
                     "{host}/v1/projects/{project}/locations/{location}/publishers/google/models/{}:generateContent",
@@ -161,9 +151,7 @@ fn execute_live_http(
             let host = google_vertex_host(provider, &location);
             let bearer = google_vertex_runtime_bearer(provider)?;
             let mut headers = provider.headers.clone();
-            headers
-                .entry("Authorization".to_owned())
-                .or_insert_with(|| format!("Bearer {bearer}"));
+            headers.entry("Authorization".to_owned()).or_insert_with(|| format!("Bearer {bearer}"));
             (
                 format!(
                     "{host}/v1/projects/{project}/locations/{location}/publishers/anthropic/models/{}:rawPredict",
@@ -186,9 +174,7 @@ fn execute_live_http(
     sink(NormalizedTurnEvent::AssistantDelta {
         chunk: format!("Live response from {}.", plan.display_name),
     });
-    sink(NormalizedTurnEvent::AssistantMessage {
-        message: assistant_message.clone(),
-    });
+    sink(NormalizedTurnEvent::AssistantMessage { message: assistant_message.clone() });
 
     Ok(ModelRunSummary {
         assistant_message: Some(assistant_message),
@@ -208,9 +194,7 @@ fn simulate_only(
     sink: &mut dyn FnMut(NormalizedTurnEvent),
 ) -> Result<ModelRunSummary, ModelError> {
     let location_hint = "default-location";
-    sink(NormalizedTurnEvent::AssistantDelta {
-        chunk: format!("Using {}. ", plan.display_name),
-    });
+    sink(NormalizedTurnEvent::AssistantDelta { chunk: format!("Using {}. ", plan.display_name) });
     sink(NormalizedTurnEvent::AssistantDelta {
         chunk: format!("Routing model {} in {}.", plan.model_id, location_hint),
     });
@@ -231,14 +215,9 @@ fn simulate_only(
         plan.model_id,
         plan.family.transport_label()
     );
-    sink(NormalizedTurnEvent::AssistantMessage {
-        message: final_message.clone(),
-    });
+    sink(NormalizedTurnEvent::AssistantMessage { message: final_message.clone() });
 
-    Ok(ModelRunSummary {
-        assistant_message: Some(final_message),
-        usage,
-    })
+    Ok(ModelRunSummary { assistant_message: Some(final_message), usage })
 }
 
 fn should_attempt_live_http(provider: &ResolvedProvider) -> bool {
@@ -285,24 +264,16 @@ fn extract_google_text(plan: &ProviderInvocationPlan, response: &serde_json::Val
 }
 
 fn google_vertex_project(provider: &ResolvedProvider) -> Result<&str, ModelError> {
-    provider
-        .metadata
-        .get("google.project")
-        .map(String::as_str)
-        .ok_or_else(|| {
-            ModelError::ProviderFailure(format!(
-                "provider {} requires GOOGLE_CLOUD_PROJECT or equivalent project metadata",
-                provider.spec.id
-            ))
-        })
+    provider.metadata.get("google.project").map(String::as_str).ok_or_else(|| {
+        ModelError::ProviderFailure(format!(
+            "provider {} requires GOOGLE_CLOUD_PROJECT or equivalent project metadata",
+            provider.spec.id
+        ))
+    })
 }
 
 fn google_vertex_location(provider: &ResolvedProvider) -> String {
-    provider
-        .metadata
-        .get("google.location")
-        .cloned()
-        .unwrap_or_else(|| "global".to_owned())
+    provider.metadata.get("google.location").cloned().unwrap_or_else(|| "global".to_owned())
 }
 
 fn google_vertex_host(provider: &ResolvedProvider, location: &str) -> String {

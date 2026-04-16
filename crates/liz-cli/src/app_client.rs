@@ -54,10 +54,7 @@ impl WebSocketAppClient {
     }
 
     /// Sends a typed request to the server.
-    pub fn send_request(
-        &self,
-        request: ClientRequestEnvelope,
-    ) -> Result<(), AppClientError> {
+    pub fn send_request(&self, request: ClientRequestEnvelope) -> Result<(), AppClientError> {
         self.request_tx.send(request).map_err(|_| AppClientError::Disconnected)
     }
 
@@ -118,18 +115,15 @@ fn run_socket_loop(
     response_tx: Sender<ServerResponseEnvelope>,
     event_tx: Sender<ServerEvent>,
 ) -> Result<(), AppClientError> {
-    socket
-        .get_mut()
-        .set_read_timeout(Some(READ_POLL_INTERVAL))
-        .map_err(AppClientError::Io)?;
+    socket.get_mut().set_read_timeout(Some(READ_POLL_INTERVAL)).map_err(AppClientError::Io)?;
 
     loop {
         flush_requests(&mut socket, &request_rx)?;
 
         match socket.read() {
             Ok(Message::Text(text)) => {
-                let message =
-                    serde_json::from_str::<ServerTransportMessage>(&text).map_err(AppClientError::Json)?;
+                let message = serde_json::from_str::<ServerTransportMessage>(&text)
+                    .map_err(AppClientError::Json)?;
                 match message {
                     ServerTransportMessage::Response(response) => {
                         if response_tx.send(response).is_err() {
@@ -168,9 +162,7 @@ fn flush_requests(
         };
         let payload = serde_json::to_string(&ClientTransportMessage::request(request))
             .map_err(AppClientError::Json)?;
-        socket
-            .send(Message::Text(payload.into()))
-            .map_err(map_tungstenite_error)?;
+        socket.send(Message::Text(payload.into())).map_err(map_tungstenite_error)?;
     }
 }
 
@@ -180,7 +172,10 @@ fn parse_socket_addr(url: &str) -> Result<SocketAddr, AppClientError> {
         .map_err(|error| AppClientError::Protocol(format!("invalid websocket url {url}: {error}")))
 }
 
-fn connect_socket(url: &str, socket_addr: SocketAddr) -> Result<WebSocket<TcpStream>, AppClientError> {
+fn connect_socket(
+    url: &str,
+    socket_addr: SocketAddr,
+) -> Result<WebSocket<TcpStream>, AppClientError> {
     let mut last_error = None;
 
     for _attempt in 0..10 {
@@ -212,9 +207,9 @@ fn map_tungstenite_error(error: tungstenite::Error) -> AppClientError {
     match error {
         tungstenite::Error::ConnectionClosed
         | tungstenite::Error::AlreadyClosed
-        | tungstenite::Error::Protocol(tungstenite::error::ProtocolError::ResetWithoutClosingHandshake) => {
-            AppClientError::Disconnected
-        }
+        | tungstenite::Error::Protocol(
+            tungstenite::error::ProtocolError::ResetWithoutClosingHandshake,
+        ) => AppClientError::Disconnected,
         tungstenite::Error::Io(error)
             if matches!(error.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) =>
         {
@@ -241,7 +236,9 @@ fn handshake_error_is_retryable(
 ) -> bool {
     match error {
         tungstenite::HandshakeError::Interrupted(_) => true,
-        tungstenite::HandshakeError::Failure(error) => error.to_string().contains("Handshake not finished"),
+        tungstenite::HandshakeError::Failure(error) => {
+            error.to_string().contains("Handshake not finished")
+        }
     }
 }
 

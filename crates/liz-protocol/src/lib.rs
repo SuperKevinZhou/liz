@@ -1,8 +1,8 @@
 //! Shared request, response, resource, and event types for liz clients and servers.
 
 pub mod approval;
-pub mod auth;
 pub mod artifact;
+pub mod auth;
 pub mod checkpoint;
 pub mod events;
 pub mod ids;
@@ -10,18 +10,19 @@ pub mod memory;
 pub mod primitives;
 pub mod requests;
 pub mod responses;
+pub mod sandbox;
 pub mod thread;
+pub mod tool;
 pub mod transport;
 pub mod turn;
 
 pub use approval::{ApprovalDecision, ApprovalRequest, ApprovalStatus};
+pub use artifact::{ArtifactKind, ArtifactRef};
 pub use auth::{
     GitHubCopilotDeviceCode, GitHubCopilotDevicePollStatus, GitLabOAuthStart,
-    MiniMaxOAuthDeviceCode, MiniMaxOAuthPollStatus, OpenAiCodexOAuthStart,
-    ProviderAuthProfile,
+    MiniMaxOAuthDeviceCode, MiniMaxOAuthPollStatus, OpenAiCodexOAuthStart, ProviderAuthProfile,
     ProviderCredential,
 };
-pub use artifact::{ArtifactKind, ArtifactRef};
 pub use checkpoint::{Checkpoint, CheckpointScope};
 pub use events::{
     ApprovalRequestedEvent, ApprovalResolvedEvent, ArtifactCreatedEvent, AssistantChunkEvent,
@@ -56,6 +57,18 @@ pub use responses::{
     SuccessResponseEnvelope, ThreadForkResponse, ThreadResumeResponse, ThreadRollbackResponse,
     ThreadStartResponse, TurnCancelResponse, TurnStartResponse,
 };
+pub use sandbox::{
+    SandboxBackendKind, SandboxMode, SandboxNetworkAccess, ShellSandboxRequest, ShellSandboxSummary,
+};
 pub use thread::{Thread, ThreadStatus};
+pub use tool::{
+    ShellExecRequest, ShellExecResult, ShellReadOutputRequest, ShellReadOutputResult,
+    ShellSpawnRequest, ShellSpawnResult, ShellTerminateRequest, ShellTerminateResult,
+    ShellWaitRequest, ShellWaitResult, ToolCallRequest, ToolCallResponse, ToolInvocation, ToolName,
+    ToolResult, WorkspaceApplyPatchRequest, WorkspaceApplyPatchResult, WorkspaceListEntry,
+    WorkspaceListRequest, WorkspaceListResult, WorkspaceReadRequest, WorkspaceReadResult,
+    WorkspaceSearchMatch, WorkspaceSearchRequest, WorkspaceSearchResult, WorkspaceWriteTextRequest,
+    WorkspaceWriteTextResult,
+};
 pub use transport::{ClientTransportMessage, ServerTransportMessage};
 pub use turn::{Turn, TurnKind, TurnStatus};

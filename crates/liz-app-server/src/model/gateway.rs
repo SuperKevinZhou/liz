@@ -192,9 +192,6 @@ impl ModelGateway {
             return Err(ModelError::UnsupportedProvider(self.primary_provider_id().to_owned()));
         };
 
-        Ok(ResolvedProvider::from_spec(
-            spec,
-            self.config.overrides.get(self.primary_provider_id()),
-        ))
+        Ok(ResolvedProvider::from_spec(spec, self.config.overrides.get(self.primary_provider_id())))
     }
 }

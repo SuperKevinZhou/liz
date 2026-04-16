@@ -6,7 +6,8 @@ use liz_protocol::{
     MemoryCompilationAppliedEvent, MemoryCompilationSummary, RequestId, ResponsePayload, RiskLevel,
     ServerEvent, ServerEventPayload, ServerResponseEnvelope, ServerTransportMessage,
     SuccessResponseEnvelope, Thread, ThreadId, ThreadStartRequest, ThreadStartResponse,
-    ThreadStartedEvent, ThreadStatus, Timestamp, TurnId,
+    ThreadStartedEvent, ThreadStatus, Timestamp, ToolCallRequest, ToolCallResponse, ToolInvocation,
+    ToolResult, TurnId, WorkspaceReadRequest, WorkspaceReadResult,
 };
 
 /// Ensures request envelopes serialize with the expected method names.
@@ -242,4 +243,53 @@ fn transport_messages_round_trip_through_json() {
     assert_eq!(request_round_trip, request);
     assert_eq!(response_round_trip, response);
     assert_eq!(event_round_trip, event);
+}
+
+/// Ensures tool-call requests and responses keep their stable wire shape.
+#[test]
+fn tool_call_messages_round_trip() {
+    let request = ClientRequestEnvelope {
+        request_id: RequestId::new("req_tool"),
+        request: ClientRequest::ToolCall(ToolCallRequest {
+            thread_id: ThreadId::new("thread_01"),
+            turn_id: Some(TurnId::new("turn_04")),
+            invocation: ToolInvocation::WorkspaceRead(WorkspaceReadRequest {
+                path: "crates/liz-protocol/src/lib.rs".to_owned(),
+                start_line: Some(1),
+                end_line: Some(5),
+            }),
+        }),
+    };
+    let response = ServerResponseEnvelope::Success(Box::new(SuccessResponseEnvelope {
+        ok: true,
+        request_id: RequestId::new("req_tool"),
+        response: ResponsePayload::ToolCall(ToolCallResponse {
+            execution_turn_id: TurnId::new("turn_04"),
+            summary: "Read 5 lines from crates/liz-protocol/src/lib.rs".to_owned(),
+            result: ToolResult::WorkspaceRead(WorkspaceReadResult {
+                path: "crates/liz-protocol/src/lib.rs".to_owned(),
+                content: "//! Shared request surface".to_owned(),
+                start_line: 1,
+                end_line: 5,
+                total_lines: 42,
+            }),
+            artifact_refs: Vec::new(),
+        }),
+    }));
+
+    let request_value = serde_json::to_value(&request).expect("tool request should serialize");
+    let response_value = serde_json::to_value(&response).expect("tool response should serialize");
+
+    assert_eq!(request_value["method"], "tool/call");
+    assert_eq!(request_value["params"]["tool_name"], "workspace.read");
+    assert_eq!(response_value["method"], "tool/call");
+    assert_eq!(response_value["data"]["tool_name"], "workspace.read");
+
+    let request_round_trip: ClientRequestEnvelope =
+        serde_json::from_value(request_value).expect("tool request should deserialize");
+    let response_round_trip: ServerResponseEnvelope =
+        serde_json::from_value(response_value).expect("tool response should deserialize");
+
+    assert_eq!(request_round_trip, request);
+    assert_eq!(response_round_trip, response);
 }

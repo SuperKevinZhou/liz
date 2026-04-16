@@ -20,10 +20,8 @@ impl AnthropicAdapter {
         request: ModelTurnRequest,
         sink: &mut dyn FnMut(NormalizedTurnEvent),
     ) -> Result<ModelRunSummary, ModelError> {
-        let base_url = provider
-            .base_url
-            .clone()
-            .unwrap_or_else(|| "https://api.anthropic.com".to_owned());
+        let base_url =
+            provider.base_url.clone().unwrap_or_else(|| "https://api.anthropic.com".to_owned());
         let plan = ProviderInvocationPlan {
             provider_id: provider.spec.id.to_owned(),
             display_name: provider.spec.display_name.to_owned(),
@@ -43,12 +41,7 @@ impl AnthropicAdapter {
                 "stream": true,
             })
             .to_string(),
-            notes: provider
-                .spec
-                .notes
-                .iter()
-                .map(|note| (*note).to_owned())
-                .collect(),
+            notes: provider.spec.notes.iter().map(|note| (*note).to_owned()).collect(),
         };
 
         if should_attempt_live_http(provider) {
@@ -76,14 +69,9 @@ impl AnthropicAdapter {
             "{} request prepared for {} using anthropic-messages.",
             plan.display_name, plan.model_id
         );
-        sink(NormalizedTurnEvent::AssistantMessage {
-            message: final_message.clone(),
-        });
+        sink(NormalizedTurnEvent::AssistantMessage { message: final_message.clone() });
 
-        Ok(ModelRunSummary {
-            assistant_message: Some(final_message),
-            usage,
-        })
+        Ok(ModelRunSummary { assistant_message: Some(final_message), usage })
     }
 }
 
@@ -93,10 +81,7 @@ fn execute_live_http(
     request: ModelTurnRequest,
     sink: &mut dyn FnMut(NormalizedTurnEvent),
 ) -> Result<ModelRunSummary, ModelError> {
-    let InvocationTransport::HttpJson {
-        base_url, path, ..
-    } = &plan.transport
-    else {
+    let InvocationTransport::HttpJson { base_url, path, .. } = &plan.transport else {
         return Err(ModelError::ProviderFailure(
             "anthropic transport must be HTTP JSON".to_owned(),
         ));
@@ -112,20 +97,10 @@ fn execute_live_http(
             .and_then(|value| value.parse::<u64>().ok());
         let runtime = resolve_minimax_oauth_runtime_auth(
             provider.api_key.as_deref(),
-            provider
-                .metadata
-                .get("minimax.oauth.refresh_token")
-                .map(String::as_str),
+            provider.metadata.get("minimax.oauth.refresh_token").map(String::as_str),
             expires_at_ms,
-            provider
-                .metadata
-                .get("minimax.region")
-                .map(String::as_str)
-                .unwrap_or("global"),
-            provider
-                .metadata
-                .get("minimax.resource_url")
-                .map(String::as_str),
+            provider.metadata.get("minimax.region").map(String::as_str).unwrap_or("global"),
+            provider.metadata.get("minimax.resource_url").map(String::as_str),
         )?;
         api_key = Some(runtime.access_token);
         resolved_base_url = runtime.resource_url;
@@ -139,13 +114,9 @@ fn execute_live_http(
                 .or_insert_with(|| format!("Bearer {api_key}"));
         }
     } else if let Some(api_key) = api_key.as_ref() {
-        headers
-            .entry("x-api-key".to_owned())
-            .or_insert_with(|| api_key.clone());
+        headers.entry("x-api-key".to_owned()).or_insert_with(|| api_key.clone());
     }
-    headers
-        .entry("anthropic-version".to_owned())
-        .or_insert_with(|| "2023-06-01".to_owned());
+    headers.entry("anthropic-version".to_owned()).or_insert_with(|| "2023-06-01".to_owned());
 
     let mut body = json!({
         "model": provider.model_id,
@@ -175,9 +146,7 @@ fn execute_live_http(
     sink(NormalizedTurnEvent::AssistantDelta {
         chunk: format!("Live response from {}.", plan.display_name),
     });
-    sink(NormalizedTurnEvent::AssistantMessage {
-        message: assistant_message.clone(),
-    });
+    sink(NormalizedTurnEvent::AssistantMessage { message: assistant_message.clone() });
 
     Ok(ModelRunSummary {
         assistant_message: Some(assistant_message),

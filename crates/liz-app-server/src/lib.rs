@@ -1,6 +1,7 @@
 //! App-server workspace skeleton for the liz runtime.
 
 pub mod events;
+pub mod executor;
 pub mod handlers;
 pub mod model;
 pub mod runtime;

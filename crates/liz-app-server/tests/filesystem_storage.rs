@@ -78,6 +78,7 @@ fn turn_log_preserves_append_order() {
         recorded_at: Timestamp::new("2026-04-13T21:03:00Z"),
         event: "turn_started".to_owned(),
         summary: "Started turn".to_owned(),
+        artifact_ids: Vec::new(),
     };
     let second = TurnLogEntry {
         thread_id: ThreadId::new("thread_01"),
@@ -86,6 +87,7 @@ fn turn_log_preserves_append_order() {
         recorded_at: Timestamp::new("2026-04-13T21:03:05Z"),
         event: "turn_completed".to_owned(),
         summary: "Completed turn".to_owned(),
+        artifact_ids: Vec::new(),
     };
 
     store.append_entry(&first).expect("first log entry should append");

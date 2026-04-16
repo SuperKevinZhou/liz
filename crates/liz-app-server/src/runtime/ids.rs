@@ -1,7 +1,7 @@
 //! Runtime-scoped identifier and timestamp helpers.
 
 use liz_protocol::primitives::Timestamp;
-use liz_protocol::{ApprovalId, CheckpointId, ThreadId, TurnId};
+use liz_protocol::{ApprovalId, ArtifactId, CheckpointId, ThreadId, TurnId};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -32,18 +32,19 @@ impl IdGenerator {
         CheckpointId::new(self.next_value("checkpoint"))
     }
 
+    /// Creates an artifact identifier.
+    pub fn next_artifact_id(&self) -> ArtifactId {
+        ArtifactId::new(self.next_value("artifact"))
+    }
+
     /// Produces a serialized timestamp string for persisted protocol resources.
     pub fn now_timestamp(&self) -> Timestamp {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default();
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
         Timestamp::new(format!("unix:{}.{:09}", now.as_secs(), now.subsec_nanos()))
     }
 
     fn next_value(&self, prefix: &str) -> String {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default();
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
         let sequence = self.sequence.fetch_add(1, Ordering::Relaxed) + 1;
         format!("{prefix}_{:x}_{sequence}", now.as_nanos())
     }

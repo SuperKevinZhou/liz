@@ -4,8 +4,8 @@ use liz_app_server::server::AppServer;
 use liz_app_server::storage::StoragePaths;
 use liz_protocol::{
     ClientRequest, ClientRequestEnvelope, ProviderAuthDeleteRequest, ProviderAuthListRequest,
-    ProviderAuthProfile, ProviderAuthUpsertRequest, ProviderCredential, RequestId,
-    ResponsePayload, ServerResponseEnvelope,
+    ProviderAuthProfile, ProviderAuthUpsertRequest, ProviderCredential, RequestId, ResponsePayload,
+    ServerResponseEnvelope,
 };
 use tempfile::TempDir;
 

@@ -14,10 +14,9 @@ use tempfile::TempDir;
 fn websocket_app_client_exchanges_requests_and_events_with_real_server() {
     let temp_dir = TempDir::new().expect("temp dir should be created");
     let server = AppServer::new(StoragePaths::new(temp_dir.path().join(".liz")));
-    let handle = spawn_websocket_server(server, "127.0.0.1:0")
-        .expect("websocket server should bind");
-    let client = WebSocketAppClient::connect(&handle.ws_url())
-        .expect("cli client should connect");
+    let handle =
+        spawn_websocket_server(server, "127.0.0.1:0").expect("websocket server should bind");
+    let client = WebSocketAppClient::connect(&handle.ws_url()).expect("cli client should connect");
 
     client
         .send_request(envelope(
@@ -59,9 +58,8 @@ fn websocket_app_client_exchanges_requests_and_events_with_real_server() {
     let second_turn_event = client
         .recv_event_timeout(Duration::from_secs(1))
         .expect("thread_updated event should arrive");
-    let third_turn_event = client
-        .recv_event_timeout(Duration::from_secs(1))
-        .expect("assistant event should arrive");
+    let third_turn_event =
+        client.recv_event_timeout(Duration::from_secs(1)).expect("assistant event should arrive");
 
     assert!(matches!(first_turn_event.payload, ServerEventPayload::TurnStarted(_)));
     assert!(matches!(second_turn_event.payload, ServerEventPayload::ThreadUpdated(_)));
@@ -74,8 +72,5 @@ fn websocket_app_client_exchanges_requests_and_events_with_real_server() {
 }
 
 fn envelope(request_id: &str, request: ClientRequest) -> ClientRequestEnvelope {
-    ClientRequestEnvelope {
-        request_id: RequestId::new(request_id),
-        request,
-    }
+    ClientRequestEnvelope { request_id: RequestId::new(request_id), request }
 }

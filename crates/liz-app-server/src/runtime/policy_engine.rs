@@ -1,17 +1,17 @@
 //! Minimal policy evaluation for scoped turns and risky actions.
 
 use crate::runtime::context_assembler::{AssembledContext, RetrievalScope};
-use liz_protocol::RiskLevel;
+use liz_protocol::{RiskLevel, SandboxMode, SandboxNetworkAccess};
 
 /// A compact record of the sandbox context that informed the policy decision.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SandboxContextRecord {
     /// The file-system sandbox mode.
-    pub filesystem_mode: String,
+    pub filesystem_mode: SandboxMode,
     /// The writable roots available to the runtime.
     pub writable_roots: Vec<String>,
     /// The network-access posture for the turn.
-    pub network_access: String,
+    pub network_access: SandboxNetworkAccess,
 }
 
 /// The outcome of evaluating one turn against the current policy.
@@ -42,7 +42,8 @@ impl PolicyEngine {
     pub fn evaluate(&self, input: &str, context: &AssembledContext) -> PolicyDecision {
         let protected_targets = protected_targets(input);
         let risk_level = classify_risk(input, &protected_targets);
-        let requires_checkpoint = matches!(risk_level, RiskLevel::Medium | RiskLevel::High | RiskLevel::Critical);
+        let requires_checkpoint =
+            matches!(risk_level, RiskLevel::Medium | RiskLevel::High | RiskLevel::Critical);
         let requires_approval = matches!(risk_level, RiskLevel::High | RiskLevel::Critical);
         let reason = match risk_level {
             RiskLevel::Low => "Scoped read-only or low-side-effect turn".to_owned(),
@@ -51,10 +52,7 @@ impl PolicyEngine {
                 if protected_targets.is_empty() {
                     "Turn may cause broad or destructive side effects".to_owned()
                 } else {
-                    format!(
-                        "Turn touches protected targets: {}",
-                        protected_targets.join(", ")
-                    )
+                    format!("Turn touches protected targets: {}", protected_targets.join(", "))
                 }
             }
             RiskLevel::Critical => format!(
@@ -71,9 +69,9 @@ impl PolicyEngine {
             requires_approval,
             reason,
             sandbox_context: SandboxContextRecord {
-                filesystem_mode: "workspace-write".to_owned(),
+                filesystem_mode: SandboxMode::WorkspaceWrite,
                 writable_roots: vec!["workspace".to_owned()],
-                network_access: "restricted".to_owned(),
+                network_access: SandboxNetworkAccess::Restricted,
             },
         }
     }
@@ -97,16 +95,8 @@ fn classify_risk(input: &str, protected_targets: &[String]) -> RiskLevel {
 
 fn protected_targets(input: &str) -> Vec<String> {
     let lower = input.to_ascii_lowercase();
-    let candidates = [
-        ".env",
-        "secrets",
-        "token",
-        "password",
-        ".git",
-        "cargo.lock",
-        "agents.md",
-        "plan/",
-    ];
+    let candidates =
+        [".env", "secrets", "token", "password", ".git", "cargo.lock", "agents.md", "plan/"];
 
     candidates
         .iter()

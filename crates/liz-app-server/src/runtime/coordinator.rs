@@ -1,5 +1,12 @@
 //! High-level runtime coordination for thread and turn lifecycle work.
 
+use crate::model::{
+    build_openai_codex_authorize_url, exchange_gitlab_oauth_code,
+    exchange_openai_codex_authorization_code, poll_github_copilot_device_authorization,
+    poll_minimax_oauth_authorization, start_github_copilot_device_authorization,
+    start_gitlab_oauth_authorization, start_minimax_oauth_authorization,
+    GitHubCopilotDevicePollOutcome, MiniMaxOAuthPollOutcome,
+};
 use crate::runtime::context_assembler::{AssembledContext, ContextAssembler};
 use crate::runtime::error::{RuntimeError, RuntimeResult};
 use crate::runtime::ids::IdGenerator;
@@ -7,37 +14,29 @@ use crate::runtime::policy_engine::{PolicyDecision, PolicyEngine};
 use crate::runtime::stores::RuntimeStores;
 use crate::runtime::thread_manager::ThreadManager;
 use crate::runtime::turn_manager::TurnManager;
-use crate::model::{
-    build_openai_codex_authorize_url, exchange_openai_codex_authorization_code,
-    poll_github_copilot_device_authorization, start_github_copilot_device_authorization,
-    start_gitlab_oauth_authorization, exchange_gitlab_oauth_code,
-    poll_minimax_oauth_authorization, start_minimax_oauth_authorization,
-    GitHubCopilotDevicePollOutcome, MiniMaxOAuthPollOutcome,
-};
+use crate::storage::StoredArtifact;
 use liz_protocol::memory::ResumeSummary;
 use liz_protocol::requests::{
     ApprovalRespondRequest, GitHubCopilotDevicePollRequest, GitHubCopilotDeviceStartRequest,
     GitLabOAuthCompleteRequest, GitLabOAuthStartRequest, GitLabPatSaveRequest,
     MiniMaxOAuthPollRequest, MiniMaxOAuthStartRequest, OpenAiCodexOAuthCompleteRequest,
-    OpenAiCodexOAuthStartRequest,
-    ProviderAuthDeleteRequest, ProviderAuthListRequest, ProviderAuthUpsertRequest,
-    ThreadForkRequest, ThreadResumeRequest, ThreadStartRequest, TurnCancelRequest,
-    TurnStartRequest,
+    OpenAiCodexOAuthStartRequest, ProviderAuthDeleteRequest, ProviderAuthListRequest,
+    ProviderAuthUpsertRequest, ThreadForkRequest, ThreadResumeRequest, ThreadStartRequest,
+    TurnCancelRequest, TurnStartRequest,
 };
 use liz_protocol::responses::{
-    ApprovalRespondResponse, GitHubCopilotDevicePollResponse,
-    GitHubCopilotDeviceStartResponse, GitLabOAuthCompleteResponse, GitLabOAuthStartResponse,
-    GitLabPatSaveResponse, MiniMaxOAuthPollResponse, MiniMaxOAuthStartResponse,
-    OpenAiCodexOAuthCompleteResponse, OpenAiCodexOAuthStartResponse,
-    ProviderAuthDeleteResponse, ProviderAuthListResponse, ProviderAuthUpsertResponse,
-    ThreadForkResponse, ThreadResumeResponse, ThreadStartResponse, TurnCancelResponse,
-    TurnStartResponse,
+    ApprovalRespondResponse, GitHubCopilotDevicePollResponse, GitHubCopilotDeviceStartResponse,
+    GitLabOAuthCompleteResponse, GitLabOAuthStartResponse, GitLabPatSaveResponse,
+    MiniMaxOAuthPollResponse, MiniMaxOAuthStartResponse, OpenAiCodexOAuthCompleteResponse,
+    OpenAiCodexOAuthStartResponse, ProviderAuthDeleteResponse, ProviderAuthListResponse,
+    ProviderAuthUpsertResponse, ThreadForkResponse, ThreadResumeResponse, ThreadStartResponse,
+    TurnCancelResponse, TurnStartResponse,
 };
 use liz_protocol::{
-    ApprovalDecision, ApprovalRequest, ApprovalStatus, Checkpoint, CheckpointScope,
-    GitHubCopilotDeviceCode, GitHubCopilotDevicePollStatus, GitLabOAuthStart,
-    MiniMaxOAuthDeviceCode, MiniMaxOAuthPollStatus, OpenAiCodexOAuthStart,
-    ProviderAuthProfile, ProviderCredential, Thread, ThreadId, Turn,
+    ApprovalDecision, ApprovalRequest, ApprovalStatus, ArtifactKind, ArtifactRef, Checkpoint,
+    CheckpointScope, GitHubCopilotDeviceCode, GitHubCopilotDevicePollStatus, GitLabOAuthStart,
+    MiniMaxOAuthDeviceCode, MiniMaxOAuthPollStatus, OpenAiCodexOAuthStart, ProviderAuthProfile,
+    ProviderCredential, Thread, ThreadId, Turn, TurnId,
 };
 use std::collections::HashMap;
 
@@ -78,7 +77,10 @@ impl RuntimeCoordinator {
     }
 
     /// Starts a new thread and persists the initial thread projection.
-    pub fn start_thread(&mut self, request: ThreadStartRequest) -> RuntimeResult<ThreadStartResponse> {
+    pub fn start_thread(
+        &mut self,
+        request: ThreadStartRequest,
+    ) -> RuntimeResult<ThreadStartResponse> {
         let thread = self.thread_manager.start_thread(&self.stores, &mut self.ids, request)?;
         Ok(ThreadStartResponse { thread })
     }
@@ -90,13 +92,9 @@ impl RuntimeCoordinator {
     ) -> RuntimeResult<ProviderAuthListResponse> {
         let mut snapshot = self.stores.read_auth_profiles()?;
         if let Some(provider_id) = request.provider_id.as_deref() {
-            snapshot
-                .profiles
-                .retain(|profile| profile.provider_id == provider_id);
+            snapshot.profiles.retain(|profile| profile.provider_id == provider_id);
         }
-        Ok(ProviderAuthListResponse {
-            profiles: snapshot.profiles,
-        })
+        Ok(ProviderAuthListResponse { profiles: snapshot.profiles })
     }
 
     /// Creates or replaces a provider auth profile.
@@ -116,14 +114,10 @@ impl RuntimeCoordinator {
         } else {
             snapshot.profiles.push(request.profile.clone());
         }
-        snapshot
-            .profiles
-            .sort_by(|left, right| left.profile_id.cmp(&right.profile_id));
+        snapshot.profiles.sort_by(|left, right| left.profile_id.cmp(&right.profile_id));
         self.stores.write_auth_profiles(&snapshot)?;
 
-        Ok(ProviderAuthUpsertResponse {
-            profile: request.profile,
-        })
+        Ok(ProviderAuthUpsertResponse { profile: request.profile })
     }
 
     /// Deletes a provider auth profile.
@@ -133,9 +127,7 @@ impl RuntimeCoordinator {
     ) -> RuntimeResult<ProviderAuthDeleteResponse> {
         let mut snapshot = self.stores.read_auth_profiles()?;
         let original_len = snapshot.profiles.len();
-        snapshot
-            .profiles
-            .retain(|profile| profile.profile_id != request.profile_id);
+        snapshot.profiles.retain(|profile| profile.profile_id != request.profile_id);
         if snapshot.profiles.len() == original_len {
             return Err(RuntimeError::not_found(
                 "provider_auth_profile_not_found",
@@ -143,9 +135,7 @@ impl RuntimeCoordinator {
             ));
         }
         self.stores.write_auth_profiles(&snapshot)?;
-        Ok(ProviderAuthDeleteResponse {
-            profile_id: request.profile_id,
-        })
+        Ok(ProviderAuthDeleteResponse { profile_id: request.profile_id })
     }
 
     /// Starts an OpenAI Codex OAuth login flow.
@@ -162,14 +152,12 @@ impl RuntimeCoordinator {
             &state,
             request.originator.as_deref().unwrap_or("liz"),
         )
-        .map_err(|error| RuntimeError::invalid_state("openai_codex_oauth_start_failed", error.to_string()))?;
+        .map_err(|error| {
+            RuntimeError::invalid_state("openai_codex_oauth_start_failed", error.to_string())
+        })?;
 
         Ok(OpenAiCodexOAuthStartResponse {
-            oauth: OpenAiCodexOAuthStart {
-                authorize_url,
-                state,
-                code_verifier,
-            },
+            oauth: OpenAiCodexOAuthStart { authorize_url, state, code_verifier },
         })
     }
 
@@ -178,8 +166,9 @@ impl RuntimeCoordinator {
         &mut self,
         request: OpenAiCodexOAuthCompleteRequest,
     ) -> RuntimeResult<OpenAiCodexOAuthCompleteResponse> {
-        let callback = parse_codex_callback(&request.code_or_redirect_url)
-            .map_err(|error| RuntimeError::invalid_state("openai_codex_oauth_complete_failed", error))?;
+        let callback = parse_codex_callback(&request.code_or_redirect_url).map_err(|error| {
+            RuntimeError::invalid_state("openai_codex_oauth_complete_failed", error)
+        })?;
         if let Some(expected_state) = request.expected_state.as_deref() {
             if callback.state.as_deref() != Some(expected_state) {
                 return Err(RuntimeError::invalid_state(
@@ -198,17 +187,14 @@ impl RuntimeCoordinator {
             &request.code_verifier,
             token_url_override.as_deref(),
         )
-        .map_err(|error| RuntimeError::invalid_state("openai_codex_oauth_complete_failed", error.to_string()))?;
+        .map_err(|error| {
+            RuntimeError::invalid_state("openai_codex_oauth_complete_failed", error.to_string())
+        })?;
 
         let profile = ProviderAuthProfile {
-            profile_id: request
-                .profile_id
-                .unwrap_or_else(|| "openai-codex:default".to_owned()),
+            profile_id: request.profile_id.unwrap_or_else(|| "openai-codex:default".to_owned()),
             provider_id: "openai-codex".to_owned(),
-            display_name: oauth
-                .email
-                .clone()
-                .or(Some("OpenAI Codex".to_owned())),
+            display_name: oauth.email.clone().or(Some("OpenAI Codex".to_owned())),
             credential: ProviderCredential::OAuth {
                 access_token: oauth.access_token,
                 refresh_token: Some(oauth.refresh_token),
@@ -217,12 +203,8 @@ impl RuntimeCoordinator {
                 email: oauth.email,
             },
         };
-        let response = self.upsert_provider_auth_profile(ProviderAuthUpsertRequest {
-            profile,
-        })?;
-        Ok(OpenAiCodexOAuthCompleteResponse {
-            profile: response.profile,
-        })
+        let response = self.upsert_provider_auth_profile(ProviderAuthUpsertRequest { profile })?;
+        Ok(OpenAiCodexOAuthCompleteResponse { profile: response.profile })
     }
 
     /// Starts a GitHub Copilot device-code login flow.
@@ -230,11 +212,14 @@ impl RuntimeCoordinator {
         &self,
         request: GitHubCopilotDeviceStartRequest,
     ) -> RuntimeResult<GitHubCopilotDeviceStartResponse> {
-        let device = start_github_copilot_device_authorization(
-            request.enterprise_url.as_deref(),
-            None,
-        )
-        .map_err(|error| RuntimeError::invalid_state("github_copilot_device_start_failed", error.to_string()))?;
+        let device =
+            start_github_copilot_device_authorization(request.enterprise_url.as_deref(), None)
+                .map_err(|error| {
+                    RuntimeError::invalid_state(
+                        "github_copilot_device_start_failed",
+                        error.to_string(),
+                    )
+                })?;
 
         Ok(GitHubCopilotDeviceStartResponse {
             device: GitHubCopilotDeviceCode {
@@ -258,7 +243,9 @@ impl RuntimeCoordinator {
             request.interval_seconds,
             None,
         )
-        .map_err(|error| RuntimeError::invalid_state("github_copilot_device_poll_failed", error.to_string()))?;
+        .map_err(|error| {
+            RuntimeError::invalid_state("github_copilot_device_poll_failed", error.to_string())
+        })?;
 
         match poll {
             GitHubCopilotDevicePollOutcome::Pending { retry_after_seconds } => {
@@ -275,10 +262,7 @@ impl RuntimeCoordinator {
                     profile: None,
                 })
             }
-            GitHubCopilotDevicePollOutcome::Complete {
-                github_token,
-                api_base_url,
-            } => {
+            GitHubCopilotDevicePollOutcome::Complete { github_token, api_base_url } => {
                 let profile = ProviderAuthProfile {
                     profile_id: request
                         .profile_id
@@ -317,7 +301,9 @@ impl RuntimeCoordinator {
             &request.redirect_uri,
             &request.scopes,
         )
-        .map_err(|error| RuntimeError::invalid_state("gitlab_oauth_start_failed", error.to_string()))?;
+        .map_err(|error| {
+            RuntimeError::invalid_state("gitlab_oauth_start_failed", error.to_string())
+        })?;
 
         Ok(GitLabOAuthStartResponse {
             oauth: GitLabOAuthStart {
@@ -343,12 +329,12 @@ impl RuntimeCoordinator {
             request.code_verifier.as_deref(),
             token_url_override.as_deref(),
         )
-        .map_err(|error| RuntimeError::invalid_state("gitlab_oauth_complete_failed", error.to_string()))?;
+        .map_err(|error| {
+            RuntimeError::invalid_state("gitlab_oauth_complete_failed", error.to_string())
+        })?;
 
         let profile = ProviderAuthProfile {
-            profile_id: request
-                .profile_id
-                .unwrap_or_else(|| "gitlab:default".to_owned()),
+            profile_id: request.profile_id.unwrap_or_else(|| "gitlab:default".to_owned()),
             provider_id: "gitlab".to_owned(),
             display_name: Some("GitLab OAuth".to_owned()),
             credential: ProviderCredential::Token {
@@ -376,12 +362,8 @@ impl RuntimeCoordinator {
                 ),
             },
         };
-        let response = self.upsert_provider_auth_profile(ProviderAuthUpsertRequest {
-            profile,
-        })?;
-        Ok(GitLabOAuthCompleteResponse {
-            profile: response.profile,
-        })
+        let response = self.upsert_provider_auth_profile(ProviderAuthUpsertRequest { profile })?;
+        Ok(GitLabOAuthCompleteResponse { profile: response.profile })
     }
 
     /// Saves a GitLab personal access token as a provider auth profile.
@@ -395,9 +377,7 @@ impl RuntimeCoordinator {
             metadata.insert("gitlab.instance_url".to_owned(), instance_url);
         }
         let profile = ProviderAuthProfile {
-            profile_id: request
-                .profile_id
-                .unwrap_or_else(|| "gitlab:default".to_owned()),
+            profile_id: request.profile_id.unwrap_or_else(|| "gitlab:default".to_owned()),
             provider_id: "gitlab".to_owned(),
             display_name: request.display_name.or(Some("GitLab PAT".to_owned())),
             credential: ProviderCredential::Token {
@@ -406,12 +386,8 @@ impl RuntimeCoordinator {
                 metadata,
             },
         };
-        let response = self.upsert_provider_auth_profile(ProviderAuthUpsertRequest {
-            profile,
-        })?;
-        Ok(GitLabPatSaveResponse {
-            profile: response.profile,
-        })
+        let response = self.upsert_provider_auth_profile(ProviderAuthUpsertRequest { profile })?;
+        Ok(GitLabPatSaveResponse { profile: response.profile })
     }
 
     /// Starts a MiniMax Portal OAuth login flow.
@@ -419,8 +395,9 @@ impl RuntimeCoordinator {
         &self,
         request: MiniMaxOAuthStartRequest,
     ) -> RuntimeResult<MiniMaxOAuthStartResponse> {
-        let device = start_minimax_oauth_authorization(&request.region)
-            .map_err(|error| RuntimeError::invalid_state("minimax_oauth_start_failed", error.to_string()))?;
+        let device = start_minimax_oauth_authorization(&request.region).map_err(|error| {
+            RuntimeError::invalid_state("minimax_oauth_start_failed", error.to_string())
+        })?;
 
         Ok(MiniMaxOAuthStartResponse {
             device: MiniMaxOAuthDeviceCode {
@@ -445,7 +422,9 @@ impl RuntimeCoordinator {
             &request.code_verifier,
             request.interval_ms,
         )
-        .map_err(|error| RuntimeError::invalid_state("minimax_oauth_poll_failed", error.to_string()))?;
+        .map_err(|error| {
+            RuntimeError::invalid_state("minimax_oauth_poll_failed", error.to_string())
+        })?;
 
         match poll {
             MiniMaxOAuthPollOutcome::Pending { retry_after_ms } => Ok(MiniMaxOAuthPollResponse {
@@ -471,9 +450,8 @@ impl RuntimeCoordinator {
                         ]),
                     },
                 };
-                let response = self.upsert_provider_auth_profile(ProviderAuthUpsertRequest {
-                    profile,
-                })?;
+                let response =
+                    self.upsert_provider_auth_profile(ProviderAuthUpsertRequest { profile })?;
                 Ok(MiniMaxOAuthPollResponse {
                     status: MiniMaxOAuthPollStatus::Complete,
                     retry_after_ms: None,
@@ -527,10 +505,9 @@ impl RuntimeCoordinator {
         &mut self,
         request: ApprovalRespondRequest,
     ) -> RuntimeResult<ApprovalRespondResponse> {
-        let approval = self
-            .approvals
-            .get_mut(&request.approval_id)
-            .ok_or_else(|| RuntimeError::not_found("approval_not_found", "approval does not exist"))?;
+        let approval = self.approvals.get_mut(&request.approval_id).ok_or_else(|| {
+            RuntimeError::not_found("approval_not_found", "approval does not exist")
+        })?;
 
         approval.status = match request.decision {
             ApprovalDecision::Deny => ApprovalStatus::Denied,
@@ -539,9 +516,7 @@ impl RuntimeCoordinator {
             }
         };
 
-        Ok(ApprovalRespondResponse {
-            approval: approval.clone(),
-        })
+        Ok(ApprovalRespondResponse { approval: approval.clone() })
     }
 
     /// Marks a running turn as completed and projects the result back onto the thread.
@@ -551,8 +526,13 @@ impl RuntimeCoordinator {
         turn_id: &liz_protocol::TurnId,
         final_message: String,
     ) -> RuntimeResult<Turn> {
-        self.turn_manager
-            .complete_turn(&self.stores, &mut self.ids, thread_id, turn_id, final_message)
+        self.turn_manager.complete_turn(
+            &self.stores,
+            &mut self.ids,
+            thread_id,
+            turn_id,
+            final_message,
+        )
     }
 
     /// Marks a running turn as failed and projects the failure back onto the thread.
@@ -562,8 +542,7 @@ impl RuntimeCoordinator {
         turn_id: &liz_protocol::TurnId,
         message: String,
     ) -> RuntimeResult<Turn> {
-        self.turn_manager
-            .fail_turn(&self.stores, &mut self.ids, thread_id, turn_id, message)
+        self.turn_manager.fail_turn(&self.stores, &mut self.ids, thread_id, turn_id, message)
     }
 
     /// Returns a persisted thread when it exists.
@@ -579,6 +558,53 @@ impl RuntimeCoordinator {
     /// Returns the active in-memory turn projection when it exists.
     pub fn read_turn(&self, turn_id: &liz_protocol::TurnId) -> Option<Turn> {
         self.turn_manager.read_turn(turn_id)
+    }
+
+    /// Persists tool artifacts and records a minimal tool-completion trace.
+    pub fn record_tool_execution(
+        &mut self,
+        thread_id: &ThreadId,
+        turn_id: Option<&TurnId>,
+        tool_name: &str,
+        summary: &str,
+        artifacts: Vec<(ArtifactKind, String, String)>,
+    ) -> RuntimeResult<(TurnId, Vec<ArtifactRef>)> {
+        let execution_turn_id = turn_id.cloned().unwrap_or_else(|| self.ids.next_turn_id());
+        let created_at = self.ids.now_timestamp();
+        let mut references = Vec::with_capacity(artifacts.len());
+
+        for (kind, artifact_summary, body) in artifacts {
+            let artifact_id = self.ids.next_artifact_id();
+            let locator = self
+                .stores
+                .paths()
+                .artifact_file(&artifact_id)
+                .to_string_lossy()
+                .replace('\\', "/");
+            let reference = ArtifactRef {
+                id: artifact_id.clone(),
+                thread_id: thread_id.clone(),
+                turn_id: execution_turn_id.clone(),
+                kind,
+                summary: artifact_summary,
+                locator,
+                created_at: created_at.clone(),
+            };
+            self.stores.put_artifact(&StoredArtifact { reference: reference.clone(), body })?;
+            references.push(reference);
+        }
+
+        self.stores.append_turn_log(&crate::storage::TurnLogEntry {
+            thread_id: thread_id.clone(),
+            sequence: self.next_tool_sequence(thread_id)?,
+            turn_id: Some(execution_turn_id.clone()),
+            recorded_at: created_at,
+            event: "tool_completed".to_owned(),
+            summary: format!("{tool_name}: {summary}"),
+            artifact_ids: references.iter().map(|artifact| artifact.id.clone()).collect(),
+        })?;
+
+        Ok((execution_turn_id, references))
     }
 
     /// Assembles the current context envelope for a thread and input.
@@ -626,9 +652,9 @@ impl RuntimeCoordinator {
             reason: decision.reason.clone(),
             sandbox_context: Some(format!(
                 "mode={} writable_roots={} network={}",
-                decision.sandbox_context.filesystem_mode,
+                decision.sandbox_context.filesystem_mode.as_str(),
                 decision.sandbox_context.writable_roots.join(","),
-                decision.sandbox_context.network_access
+                decision.sandbox_context.network_access.as_str()
             )),
             status: ApprovalStatus::Pending,
         };
@@ -650,8 +676,7 @@ impl RuntimeCoordinator {
         thread_id: &ThreadId,
         turn_id: &liz_protocol::TurnId,
     ) -> RuntimeResult<Turn> {
-        self.turn_manager
-            .mark_running(&self.stores, &mut self.ids, thread_id, turn_id)
+        self.turn_manager.mark_running(&self.stores, &mut self.ids, thread_id, turn_id)
     }
 
     fn build_resume_summary(&self, thread: &Thread) -> ResumeSummary {
@@ -693,6 +718,10 @@ impl RuntimeCoordinator {
         thread.updated_at = checkpoint.created_at.clone();
         self.stores.put_thread(&thread)?;
         Ok(checkpoint)
+    }
+
+    fn next_tool_sequence(&self, thread_id: &ThreadId) -> RuntimeResult<u64> {
+        Ok(self.stores.read_turn_log(thread_id)?.len() as u64 + 1)
     }
 }
 
@@ -736,7 +765,9 @@ fn parse_codex_callback(input: &str) -> Result<ParsedCodexCallback, String> {
             .find(|(key, _)| key == "code")
             .map(|(_, value)| value.into_owned())
             .filter(|value| !value.trim().is_empty())
-            .ok_or_else(|| "OpenAI Codex OAuth redirect URL did not include a code parameter".to_owned())?;
+            .ok_or_else(|| {
+                "OpenAI Codex OAuth redirect URL did not include a code parameter".to_owned()
+            })?;
         let state = url
             .query_pairs()
             .find(|(key, _)| key == "state")
@@ -745,10 +776,7 @@ fn parse_codex_callback(input: &str) -> Result<ParsedCodexCallback, String> {
         return Ok(ParsedCodexCallback { code, state });
     }
 
-    Ok(ParsedCodexCallback {
-        code: trimmed.to_owned(),
-        state: None,
-    })
+    Ok(ParsedCodexCallback { code: trimmed.to_owned(), state: None })
 }
 
 fn generate_codex_state() -> String {
@@ -771,12 +799,8 @@ fn pkce_sha256_challenge(verifier: &str) -> String {
 fn generate_oauth_random_string(length: usize) -> String {
     use rand::RngCore;
 
-    const ALPHABET: &[u8] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
     let mut bytes = vec![0_u8; length];
     rand::rngs::OsRng.fill_bytes(&mut bytes);
-    bytes
-        .into_iter()
-        .map(|value| ALPHABET[usize::from(value) % ALPHABET.len()] as char)
-        .collect()
+    bytes.into_iter().map(|value| ALPHABET[usize::from(value) % ALPHABET.len()] as char).collect()
 }

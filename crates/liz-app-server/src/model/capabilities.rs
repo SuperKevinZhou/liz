@@ -176,10 +176,7 @@ impl ModelCapabilities {
     }
 
     /// Overrides reasoning token accounting support.
-    pub fn with_reasoning_token_accounting(
-        mut self,
-        reasoning_token_accounting: bool,
-    ) -> Self {
+    pub fn with_reasoning_token_accounting(mut self, reasoning_token_accounting: bool) -> Self {
         self.reasoning_token_accounting = reasoning_token_accounting;
         self
     }

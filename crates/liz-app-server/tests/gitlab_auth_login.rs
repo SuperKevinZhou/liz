@@ -18,7 +18,9 @@ fn gitlab_oauth_start_complete_and_pat_save_persist_profiles() {
     let capture = Arc::new(Mutex::new(Vec::<String>::new()));
     let base_url = spawn_json_server_sequence(
         capture.clone(),
-        vec![r#"{"access_token":"gitlab-oauth-token","refresh_token":"gitlab-refresh","expires_in":3600}"#],
+        vec![
+            r#"{"access_token":"gitlab-oauth-token","refresh_token":"gitlab-refresh","expires_in":3600}"#,
+        ],
     );
     std::env::set_var("LIZ_GITLAB_OAUTH_TOKEN_URL", format!("{base_url}/oauth/token"));
 
@@ -37,7 +39,10 @@ fn gitlab_oauth_start_complete_and_pat_save_persist_profiles() {
     match start {
         ServerResponseEnvelope::Success(success) => match success.response {
             ResponsePayload::GitLabOAuthStart(response) => {
-                assert!(response.oauth.authorize_url.starts_with("https://gitlab.example.com/oauth/authorize?"));
+                assert!(response
+                    .oauth
+                    .authorize_url
+                    .starts_with("https://gitlab.example.com/oauth/authorize?"));
                 assert!(response.oauth.authorize_url.contains("client_id=gitlab-client"));
                 assert!(response.oauth.authorize_url.contains("scope=api+read_user"));
                 assert!(!response.oauth.state.is_empty());
@@ -97,10 +102,7 @@ fn gitlab_oauth_start_complete_and_pat_save_persist_profiles() {
     assert!(persisted.contains("glpat-example"));
     assert!(persisted.contains("gitlab.oauth_client_id"));
 
-    let requests = capture
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clone();
+    let requests = capture.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
     assert_eq!(requests.len(), 1);
     assert!(requests[0].contains("POST /oauth/token HTTP/1.1"));
     assert!(requests[0].contains("grant_type=authorization_code"));
@@ -123,19 +125,14 @@ fn spawn_json_server_sequence(
         for response_body in response_bodies {
             let (mut stream, _) = listener.accept().expect("server should accept");
             let request = read_http_request(&mut stream);
-            capture
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .push(request);
+            capture.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push(request);
 
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                 response_body.len(),
                 response_body
             );
-            stream
-                .write_all(response.as_bytes())
-                .expect("response should be writable");
+            stream.write_all(response.as_bytes()).expect("response should be writable");
             stream.flush().expect("response should flush");
         }
     });
@@ -175,10 +172,7 @@ fn read_http_request(stream: &mut std::net::TcpStream) -> String {
 }
 
 fn find_header_end(buffer: &[u8]) -> Option<usize> {
-    buffer
-        .windows(4)
-        .position(|window| window == b"\r\n\r\n")
-        .map(|index| index + 4)
+    buffer.windows(4).position(|window| window == b"\r\n\r\n").map(|index| index + 4)
 }
 
 fn parse_content_length(headers: &[u8]) -> usize {

@@ -63,6 +63,7 @@ impl TurnManager {
             recorded_at: now.clone(),
             event: "turn_started".to_owned(),
             summary: turn.summary.clone().unwrap_or_default(),
+            artifact_ids: Vec::new(),
         })?;
         thread_manager.update_thread_after_turn(stores, &thread)?;
 
@@ -120,6 +121,7 @@ impl TurnManager {
             recorded_at: ended_at,
             event: "turn_cancelled".to_owned(),
             summary: turn.summary.clone().unwrap_or_default(),
+            artifact_ids: Vec::new(),
         })?;
         stores.put_thread(&thread)?;
         Ok(turn)
@@ -167,6 +169,7 @@ impl TurnManager {
             recorded_at,
             event: "approval_wait".to_owned(),
             summary: reason.to_owned(),
+            artifact_ids: Vec::new(),
         })?;
         stores.put_thread(&thread)?;
         Ok(turn)
@@ -211,6 +214,7 @@ impl TurnManager {
             recorded_at,
             event: "approval_resolved".to_owned(),
             summary: "Approval granted; resuming turn".to_owned(),
+            artifact_ids: Vec::new(),
         })?;
         stores.put_thread(&thread)?;
         Ok(turn)
@@ -251,6 +255,7 @@ impl TurnManager {
             recorded_at: ended_at,
             event: "turn_completed".to_owned(),
             summary: turn.summary.clone().unwrap_or_default(),
+            artifact_ids: Vec::new(),
         })?;
         stores.put_thread(&thread)?;
         Ok(turn)
@@ -290,6 +295,7 @@ impl TurnManager {
             recorded_at: ended_at,
             event: "turn_failed".to_owned(),
             summary: turn.summary.clone().unwrap_or_default(),
+            artifact_ids: Vec::new(),
         })?;
         stores.put_thread(&thread)?;
         Ok(turn)
@@ -301,10 +307,7 @@ impl TurnManager {
         thread_id: &liz_protocol::ThreadId,
     ) -> RuntimeResult<u64> {
         let recovered = self.recover_sequence(stores, thread_id)?;
-        let sequence = self
-            .next_sequence
-            .entry(thread_id.clone())
-            .or_insert(recovered);
+        let sequence = self.next_sequence.entry(thread_id.clone()).or_insert(recovered);
         *sequence += 1;
         Ok(*sequence)
     }
@@ -314,16 +317,13 @@ impl TurnManager {
         stores: &RuntimeStores,
         thread_id: &liz_protocol::ThreadId,
     ) -> RuntimeResult<u64> {
-        Ok(stores
-            .read_turn_log(thread_id)?
-            .last()
-            .map(|entry| entry.sequence)
-            .unwrap_or(0))
+        Ok(stores.read_turn_log(thread_id)?.last().map(|entry| entry.sequence).unwrap_or(0))
     }
 
     fn thread_has_running_turn(&self, thread_id: &liz_protocol::ThreadId) -> bool {
         self.active_turns.values().any(|turn| {
-            turn.thread_id == *thread_id && matches!(turn.status, TurnStatus::Running | TurnStatus::WaitingApproval)
+            turn.thread_id == *thread_id
+                && matches!(turn.status, TurnStatus::Running | TurnStatus::WaitingApproval)
         })
     }
 }

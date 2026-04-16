@@ -80,13 +80,7 @@ impl ContextAssembler {
             input
         );
 
-        AssembledContext {
-            wakeup,
-            thread_projection,
-            retrieval,
-            scope,
-            prompt,
-        }
+        AssembledContext { wakeup, thread_projection, retrieval, scope, prompt }
     }
 }
 
@@ -106,7 +100,9 @@ fn classify_scope(input: &str) -> RetrievalScope {
 
 fn derive_query_terms(input: &str) -> Vec<String> {
     input
-        .split(|character: char| !character.is_alphanumeric() && character != '_' && character != '.')
+        .split(|character: char| {
+            !character.is_alphanumeric() && character != '_' && character != '.'
+        })
         .filter(|term| term.len() >= 3)
         .take(6)
         .map(|term| term.to_ascii_lowercase())

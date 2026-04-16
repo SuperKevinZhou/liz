@@ -41,12 +41,7 @@ impl AwsBedrockAdapter {
                 "messages": [{"role": "user", "content": [{"text": request.prompt}]}],
             })
             .to_string(),
-            notes: provider
-                .spec
-                .notes
-                .iter()
-                .map(|note| (*note).to_owned())
-                .collect(),
+            notes: provider.spec.notes.iter().map(|note| (*note).to_owned()).collect(),
         };
 
         if should_attempt_live_http(provider) {
@@ -74,14 +69,9 @@ impl AwsBedrockAdapter {
             "{} request prepared for {} using aws-bedrock-converse.",
             plan.display_name, plan.model_id
         );
-        sink(NormalizedTurnEvent::AssistantMessage {
-            message: final_message.clone(),
-        });
+        sink(NormalizedTurnEvent::AssistantMessage { message: final_message.clone() });
 
-        Ok(ModelRunSummary {
-            assistant_message: Some(final_message),
-            usage,
-        })
+        Ok(ModelRunSummary { assistant_message: Some(final_message), usage })
     }
 }
 
@@ -92,10 +82,7 @@ fn execute_live_http(
     request: ModelTurnRequest,
     sink: &mut dyn FnMut(NormalizedTurnEvent),
 ) -> Result<ModelRunSummary, ModelError> {
-    let InvocationTransport::HttpJson {
-        base_url, path, ..
-    } = &plan.transport
-    else {
+    let InvocationTransport::HttpJson { base_url, path, .. } = &plan.transport else {
         return Err(ModelError::ProviderFailure(
             "amazon-bedrock transport must be HTTP JSON".to_owned(),
         ));
@@ -115,17 +102,11 @@ fn execute_live_http(
     })?;
 
     let mut headers = provider.headers.clone();
-    headers
-        .entry("content-type".to_owned())
-        .or_insert_with(|| "application/json".to_owned());
-    headers
-        .entry("accept".to_owned())
-        .or_insert_with(|| "application/json".to_owned());
+    headers.entry("content-type".to_owned()).or_insert_with(|| "application/json".to_owned());
+    headers.entry("accept".to_owned()).or_insert_with(|| "application/json".to_owned());
 
     let final_headers = if let Some(token) = provider.api_key.as_ref() {
-        headers
-            .entry("Authorization".to_owned())
-            .or_insert_with(|| format!("Bearer {token}"));
+        headers.entry("Authorization".to_owned()).or_insert_with(|| format!("Bearer {token}"));
         headers
     } else {
         sign_bedrock_request("POST", &url, &headers, &body_text, region)?
@@ -146,9 +127,7 @@ fn execute_live_http(
     sink(NormalizedTurnEvent::AssistantDelta {
         chunk: format!("Live response from {}.", plan.display_name),
     });
-    sink(NormalizedTurnEvent::AssistantMessage {
-        message: assistant_message.clone(),
-    });
+    sink(NormalizedTurnEvent::AssistantMessage { message: assistant_message.clone() });
 
     Ok(ModelRunSummary {
         assistant_message: Some(assistant_message),
@@ -181,9 +160,10 @@ fn normalize_bedrock_model_id(model_id: &str) -> String {
 }
 
 fn resolve_bedrock_base_url(provider: &ResolvedProvider, region: &str) -> String {
-    provider.base_url.clone().unwrap_or_else(|| {
-        format!("https://bedrock-runtime.{region}.amazonaws.com")
-    })
+    provider
+        .base_url
+        .clone()
+        .unwrap_or_else(|| format!("https://bedrock-runtime.{region}.amazonaws.com"))
 }
 
 fn resolve_bedrock_region(provider: &ResolvedProvider) -> String {
@@ -192,10 +172,7 @@ fn resolve_bedrock_region(provider: &ResolvedProvider) -> String {
         .get("aws.region")
         .cloned()
         .or_else(|| {
-            provider
-                .base_url
-                .as_ref()
-                .and_then(|value| extract_bedrock_region_from_url(value))
+            provider.base_url.as_ref().and_then(|value| extract_bedrock_region_from_url(value))
         })
         .or_else(|| first_env(&["AWS_REGION", "AWS_DEFAULT_REGION"]))
         .unwrap_or_else(|| "us-east-1".to_owned())
@@ -210,8 +187,7 @@ fn extract_bedrock_region_from_url(url: &str) -> Option<String> {
 }
 
 fn first_env(keys: &[&str]) -> Option<String> {
-    keys.iter()
-        .find_map(|key| std::env::var(key).ok().filter(|value| !value.trim().is_empty()))
+    keys.iter().find_map(|key| std::env::var(key).ok().filter(|value| !value.trim().is_empty()))
 }
 
 fn trim_trailing_slash(value: &str) -> &str {

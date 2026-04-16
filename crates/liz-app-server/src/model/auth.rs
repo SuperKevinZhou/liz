@@ -53,14 +53,8 @@ const BEDROCK_MANTLE_SUPPORTED_REGIONS: &[&str] = &[
     "eu-north-1",
     "sa-east-1",
 ];
-const OPENAI_CODEX_OAUTH_REQUIRED_SCOPES: &[&str] = &[
-    "openid",
-    "profile",
-    "email",
-    "offline_access",
-    "model.request",
-    "api.responses.write",
-];
+const OPENAI_CODEX_OAUTH_REQUIRED_SCOPES: &[&str] =
+    &["openid", "profile", "email", "offline_access", "model.request", "api.responses.write"];
 
 #[derive(Debug, Deserialize)]
 struct GoogleCredentialType {
@@ -279,9 +273,7 @@ struct CachedBedrockMantleToken {
 /// Resolves a Google ADC bearer token for Vertex AI requests.
 pub fn google_vertex_bearer_token() -> Result<String, ModelError> {
     let runtime = tokio::runtime::Runtime::new().map_err(|error| {
-        ModelError::ProviderFailure(format!(
-            "failed to initialize Google auth runtime: {error}"
-        ))
+        ModelError::ProviderFailure(format!("failed to initialize Google auth runtime: {error}"))
     })?;
     runtime.block_on(async { google_vertex_bearer_token_async().await })
 }
@@ -291,14 +283,11 @@ async fn google_vertex_bearer_token_async() -> Result<String, ModelError> {
 
     if let Some(secret) = load_authorized_user_secret()? {
         let authenticator =
-            AuthorizedUserAuthenticator::builder(secret)
-                .build()
-                .await
-                .map_err(|error| {
-                    ModelError::ProviderFailure(format!(
-                        "failed to initialize Google authorized-user auth: {error}"
-                    ))
-                })?;
+            AuthorizedUserAuthenticator::builder(secret).build().await.map_err(|error| {
+                ModelError::ProviderFailure(format!(
+                    "failed to initialize Google authorized-user auth: {error}"
+                ))
+            })?;
         return extract_google_token(&authenticator, &scopes).await;
     }
 
@@ -324,10 +313,9 @@ async fn extract_google_token(
         ModelError::ProviderFailure(format!("failed to fetch Google access token: {error}"))
     })?;
 
-    token
-        .token()
-        .map(str::to_owned)
-        .ok_or_else(|| ModelError::ProviderFailure("google access token response was empty".to_owned()))
+    token.token().map(str::to_owned).ok_or_else(|| {
+        ModelError::ProviderFailure("google access token response was empty".to_owned())
+    })
 }
 
 fn load_authorized_user_secret() -> Result<Option<AuthorizedUserSecret>, ModelError> {
@@ -338,12 +326,13 @@ fn load_authorized_user_secret() -> Result<Option<AuthorizedUserSecret>, ModelEr
         return Ok(None);
     };
 
-    let credential_type: GoogleCredentialType = serde_json::from_str(&contents).map_err(|error| {
-        ModelError::ProviderFailure(format!(
-            "failed to parse Google ADC credentials type from {}: {error}",
-            path.display()
-        ))
-    })?;
+    let credential_type: GoogleCredentialType =
+        serde_json::from_str(&contents).map_err(|error| {
+            ModelError::ProviderFailure(format!(
+                "failed to parse Google ADC credentials type from {}: {error}",
+                path.display()
+            ))
+        })?;
     if credential_type.credential_type != "authorized_user" {
         return Ok(None);
     }
@@ -392,9 +381,7 @@ pub fn detect_zai_endpoint(
         .timeout(Duration::from_secs(5))
         .build()
         .map_err(|error| {
-            ModelError::ProviderFailure(format!(
-                "failed to build Z.AI detection client: {error}"
-            ))
+            ModelError::ProviderFailure(format!("failed to build Z.AI detection client: {error}"))
         })?;
 
     for candidate in zai_endpoint_candidates(preferred_endpoint) {
@@ -453,27 +440,21 @@ pub fn resolve_sap_ai_core_runtime_auth(
         }
     }
 
-    let client_id = client_id
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| {
+    let client_id =
+        client_id.map(str::trim).filter(|value| !value.is_empty()).ok_or_else(|| {
             ModelError::ProviderFailure(
                 "sap-ai-core requires a service key client id or explicit bearer token".to_owned(),
             )
         })?;
-    let client_secret = client_secret
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| {
+    let client_secret =
+        client_secret.map(str::trim).filter(|value| !value.is_empty()).ok_or_else(|| {
             ModelError::ProviderFailure(
                 "sap-ai-core requires a service key client secret or explicit bearer token"
                     .to_owned(),
             )
         })?;
-    let oauth_base_url = oauth_base_url
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| {
+    let oauth_base_url =
+        oauth_base_url.map(str::trim).filter(|value| !value.is_empty()).ok_or_else(|| {
             ModelError::ProviderFailure(
                 "sap-ai-core requires a service key oauth base URL or explicit bearer token"
                     .to_owned(),
@@ -524,7 +505,11 @@ async fn resolve_bedrock_mantle_runtime_auth_async(region: &str) -> Result<Strin
         credentials.secret_access_key(),
         credentials.session_token(),
     )?;
-    store_cached_bedrock_mantle_token(region, token.clone(), mantle_cache_expiry_ms(now, &credentials));
+    store_cached_bedrock_mantle_token(
+        region,
+        token.clone(),
+        mantle_cache_expiry_ms(now, &credentials),
+    );
     Ok(token)
 }
 
@@ -537,9 +522,7 @@ pub fn sign_bedrock_request(
     region: &str,
 ) -> Result<BTreeMap<String, String>, ModelError> {
     let runtime = tokio::runtime::Runtime::new().map_err(|error| {
-        ModelError::ProviderFailure(format!(
-            "failed to initialize AWS auth runtime: {error}"
-        ))
+        ModelError::ProviderFailure(format!("failed to initialize AWS auth runtime: {error}"))
     })?;
     runtime.block_on(async { sign_bedrock_request_async(method, url, headers, body, region).await })
 }
@@ -551,10 +534,9 @@ async fn sign_bedrock_request_async(
     body: &[u8],
     region: &str,
 ) -> Result<BTreeMap<String, String>, ModelError> {
-    if let (Some(access_key), Some(secret_key)) = (
-        first_env(&["AWS_ACCESS_KEY_ID"]),
-        first_env(&["AWS_SECRET_ACCESS_KEY"]),
-    ) {
+    if let (Some(access_key), Some(secret_key)) =
+        (first_env(&["AWS_ACCESS_KEY_ID"]), first_env(&["AWS_SECRET_ACCESS_KEY"]))
+    {
         return sign_bedrock_request_with_credentials(
             method,
             url,
@@ -567,10 +549,7 @@ async fn sign_bedrock_request_async(
         );
     }
 
-    let config = aws_config::from_env()
-        .region(Region::new(region.to_owned()))
-        .load()
-        .await;
+    let config = aws_config::from_env().region(Region::new(region.to_owned())).load().await;
     let provider = config.credentials_provider().ok_or_else(|| {
         ModelError::ProviderFailure(
             "aws credential chain is not available for Amazon Bedrock".to_owned(),
@@ -595,10 +574,9 @@ async fn sign_bedrock_request_async(
 }
 
 async fn resolve_aws_credentials(region: &str) -> Result<Credentials, ModelError> {
-    if let (Some(access_key), Some(secret_key)) = (
-        first_env(&["AWS_ACCESS_KEY_ID"]),
-        first_env(&["AWS_SECRET_ACCESS_KEY"]),
-    ) {
+    if let (Some(access_key), Some(secret_key)) =
+        (first_env(&["AWS_ACCESS_KEY_ID"]), first_env(&["AWS_SECRET_ACCESS_KEY"]))
+    {
         return Ok(Credentials::new(
             access_key,
             secret_key,
@@ -608,10 +586,7 @@ async fn resolve_aws_credentials(region: &str) -> Result<Credentials, ModelError
         ));
     }
 
-    let config = aws_config::from_env()
-        .region(Region::new(region.to_owned()))
-        .load()
-        .await;
+    let config = aws_config::from_env().region(Region::new(region.to_owned())).load().await;
     let provider = config.credentials_provider().ok_or_else(|| {
         ModelError::ProviderFailure(
             "aws credential chain is not available for Amazon Bedrock Mantle".to_owned(),
@@ -643,25 +618,23 @@ fn sign_bedrock_request_with_credentials(
         .settings(SigningSettings::default());
     signing_params_builder.set_security_token(session_token);
     let signing_params = signing_params_builder.build().map_err(|error| {
-        ModelError::ProviderFailure(format!(
-            "failed to build AWS Bedrock signing params: {error}"
-        ))
+        ModelError::ProviderFailure(format!("failed to build AWS Bedrock signing params: {error}"))
     })?;
 
-    let mut signed_request = http::Request::builder()
-        .method(method)
-        .uri(url)
-        .body(body.to_vec())
-        .map_err(|error| {
+    let mut signed_request =
+        http::Request::builder().method(method).uri(url).body(body.to_vec()).map_err(|error| {
             ModelError::ProviderFailure(format!(
                 "failed to build AWS Bedrock request shell: {error}"
             ))
         })?;
 
     for (key, value) in headers {
-        let header_name = http::header::HeaderName::from_bytes(key.as_bytes()).map_err(|error| {
-            ModelError::ProviderFailure(format!("invalid AWS Bedrock header name {key}: {error}"))
-        })?;
+        let header_name =
+            http::header::HeaderName::from_bytes(key.as_bytes()).map_err(|error| {
+                ModelError::ProviderFailure(format!(
+                    "invalid AWS Bedrock header name {key}: {error}"
+                ))
+            })?;
         let header_value = http::header::HeaderValue::from_str(value).map_err(|error| {
             ModelError::ProviderFailure(format!(
                 "invalid AWS Bedrock header value for {key}: {error}"
@@ -706,9 +679,7 @@ fn mint_bedrock_mantle_bearer_token(
 ) -> Result<String, ModelError> {
     let mut settings = SigningSettings::default();
     settings.signature_location = SignatureLocation::QueryParams;
-    settings.expires_in = Some(Duration::from_secs(
-        BEDROCK_MANTLE_TOKEN_EXPIRES_SECONDS,
-    ));
+    settings.expires_in = Some(Duration::from_secs(BEDROCK_MANTLE_TOKEN_EXPIRES_SECONDS));
     let mut signing_params_builder = aws_sigv4::SigningParams::builder()
         .access_key(access_key)
         .secret_key(secret_key)
@@ -750,15 +721,9 @@ fn mint_bedrock_mantle_bearer_token(
     instructions.apply_to_request(&mut signed_request);
 
     let presigned_url = signed_request.uri().to_string();
-    let encoded = STANDARD.encode(
-        presigned_url
-            .strip_prefix("https://")
-            .unwrap_or(&presigned_url)
-            .as_bytes(),
-    );
-    Ok(format!(
-        "{BEDROCK_MANTLE_TOKEN_PREFIX}{encoded}{BEDROCK_MANTLE_TOKEN_SUFFIX}"
-    ))
+    let encoded = STANDARD
+        .encode(presigned_url.strip_prefix("https://").unwrap_or(&presigned_url).as_bytes());
+    Ok(format!("{BEDROCK_MANTLE_TOKEN_PREFIX}{encoded}{BEDROCK_MANTLE_TOKEN_SUFFIX}"))
 }
 
 fn validate_bedrock_mantle_region(region: &str) -> Result<(), ModelError> {
@@ -801,19 +766,12 @@ fn load_cached_bedrock_mantle_token(region: &str, now_ms: u64) -> Option<String>
 
 fn store_cached_bedrock_mantle_token(region: &str, token: String, expires_at_ms: u64) {
     if let Ok(mut cache) = bedrock_mantle_token_cache().lock() {
-        cache.insert(
-            region.to_owned(),
-            CachedBedrockMantleToken {
-                token,
-                expires_at_ms,
-            },
-        );
+        cache.insert(region.to_owned(), CachedBedrockMantleToken { token, expires_at_ms });
     }
 }
 
 fn first_env(keys: &[&str]) -> Option<String> {
-    keys.iter()
-        .find_map(|key| env::var(key).ok().filter(|value| !value.trim().is_empty()))
+    keys.iter().find_map(|key| env::var(key).ok().filter(|value| !value.trim().is_empty()))
 }
 
 #[derive(Clone, Copy)]
@@ -975,13 +933,9 @@ pub fn resolve_copilot_runtime_auth(
 ) -> Result<CopilotRuntimeAuth, ModelError> {
     let token_url =
         token_url_override.unwrap_or("https://api.github.com/copilot_internal/v2/token");
-    let client = reqwest::blocking::Client::builder()
-        .build()
-        .map_err(|error| {
-            ModelError::ProviderFailure(format!(
-                "failed to build GitHub Copilot auth client: {error}"
-            ))
-        })?;
+    let client = reqwest::blocking::Client::builder().build().map_err(|error| {
+        ModelError::ProviderFailure(format!("failed to build GitHub Copilot auth client: {error}"))
+    })?;
 
     let response = client
         .get(token_url)
@@ -992,9 +946,7 @@ pub fn resolve_copilot_runtime_auth(
         .header("X-Github-Api-Version", "2025-04-01")
         .send()
         .map_err(|error| {
-            ModelError::ProviderFailure(format!(
-                "github copilot token exchange failed: {error}"
-            ))
+            ModelError::ProviderFailure(format!("github copilot token exchange failed: {error}"))
         })?;
 
     let status = response.status();
@@ -1025,10 +977,8 @@ pub fn resolve_copilot_runtime_auth(
 }
 
 fn derive_copilot_api_base_url_from_token(token: &str) -> Option<String> {
-    let proxy_endpoint = token
-        .split(';')
-        .find_map(|part| part.trim().strip_prefix("proxy-ep="))
-        .map(str::trim)?;
+    let proxy_endpoint =
+        token.split(';').find_map(|part| part.trim().strip_prefix("proxy-ep=")).map(str::trim)?;
     let mut url = reqwest::Url::parse(proxy_endpoint).ok()?;
     let host = url.host_str()?.replace("proxy.", "api.");
     url.set_host(Some(&host)).ok()?;
@@ -1040,11 +990,8 @@ fn normalize_github_copilot_domain(enterprise_url: Option<&str>) -> String {
         return "github.com".to_owned();
     };
 
-    let candidate = if value.contains("://") {
-        value.to_owned()
-    } else {
-        format!("https://{value}")
-    };
+    let candidate =
+        if value.contains("://") { value.to_owned() } else { format!("https://{value}") };
     reqwest::Url::parse(&candidate)
         .ok()
         .and_then(|url| url.host_str().map(str::to_owned))
@@ -1063,11 +1010,9 @@ fn post_json_body<T: for<'de> Deserialize<'de>>(
     body: &serde_json::Value,
     headers: &BTreeMap<String, String>,
 ) -> Result<T, ModelError> {
-    let client = reqwest::blocking::Client::builder()
-        .build()
-        .map_err(|error| {
-            ModelError::ProviderFailure(format!("failed to build HTTP client: {error}"))
-        })?;
+    let client = reqwest::blocking::Client::builder().build().map_err(|error| {
+        ModelError::ProviderFailure(format!("failed to build HTTP client: {error}"))
+    })?;
     let response = client
         .post(url)
         .headers(crate::model::http::build_headers(headers)?)
@@ -1158,19 +1103,11 @@ pub fn poll_github_copilot_device_authorization(
         });
     }
 
-    let retry_after_seconds = response
-        .interval
-        .or(interval_seconds)
-        .unwrap_or(5)
-        .saturating_add(3);
+    let retry_after_seconds = response.interval.or(interval_seconds).unwrap_or(5).saturating_add(3);
     match response.error.as_deref() {
-        Some("slow_down") => Ok(GitHubCopilotDevicePollOutcome::SlowDown {
-            retry_after_seconds,
-        }),
+        Some("slow_down") => Ok(GitHubCopilotDevicePollOutcome::SlowDown { retry_after_seconds }),
         Some("authorization_pending") | Some("expired_token") | Some("incorrect_device_code") => {
-            Ok(GitHubCopilotDevicePollOutcome::Pending {
-                retry_after_seconds,
-            })
+            Ok(GitHubCopilotDevicePollOutcome::Pending { retry_after_seconds })
         }
         Some(error) => Err(ModelError::ProviderFailure(format!(
             "github copilot device-code login failed: {error}"
@@ -1228,8 +1165,8 @@ pub fn poll_minimax_oauth_authorization(
 ) -> Result<MiniMaxOAuthPollOutcome, ModelError> {
     let normalized_region = normalize_minimax_region(region)?;
     let (_base_url, default_token_endpoint) = minimax_oauth_endpoints(normalized_region);
-    let token_endpoint = first_env(&["LIZ_MINIMAX_OAUTH_TOKEN_URL"])
-        .unwrap_or(default_token_endpoint);
+    let token_endpoint =
+        first_env(&["LIZ_MINIMAX_OAUTH_TOKEN_URL"]).unwrap_or(default_token_endpoint);
     let response: MiniMaxOAuthTokenResponseBody = post_form_json(
         &token_endpoint,
         &[
@@ -1247,9 +1184,9 @@ pub fn poll_minimax_oauth_authorization(
                 minimax_default_resource_url(normalized_region),
             )?,
         }),
-        Some("error") => Err(ModelError::ProviderFailure(
-            "MiniMax OAuth authorization failed".to_owned(),
-        )),
+        Some("error") => {
+            Err(ModelError::ProviderFailure("MiniMax OAuth authorization failed".to_owned()))
+        }
         _ => Ok(MiniMaxOAuthPollOutcome::Pending {
             retry_after_ms: interval_ms.unwrap_or(2000).max(2000),
         }),
@@ -1264,8 +1201,8 @@ pub fn refresh_minimax_oauth_token(
 ) -> Result<MiniMaxOAuthRuntimeAuth, ModelError> {
     let normalized_region = normalize_minimax_region(region)?;
     let (_base_url, default_token_endpoint) = minimax_oauth_endpoints(normalized_region);
-    let token_endpoint = first_env(&["LIZ_MINIMAX_OAUTH_TOKEN_URL"])
-        .unwrap_or(default_token_endpoint);
+    let token_endpoint =
+        first_env(&["LIZ_MINIMAX_OAUTH_TOKEN_URL"]).unwrap_or(default_token_endpoint);
     let response: MiniMaxOAuthTokenResponseBody = post_form_json(
         &token_endpoint,
         &[
@@ -1291,10 +1228,9 @@ pub fn resolve_minimax_oauth_runtime_auth(
 ) -> Result<MiniMaxOAuthRuntimeAuth, ModelError> {
     let normalized_region = normalize_minimax_region(region)?;
     let now = current_unix_time_ms();
-    if let (Some(access_token), Some(expires_at_ms)) = (
-        access_token.map(str::trim).filter(|value| !value.is_empty()),
-        expires_at_ms,
-    ) {
+    if let (Some(access_token), Some(expires_at_ms)) =
+        (access_token.map(str::trim).filter(|value| !value.is_empty()), expires_at_ms)
+    {
         if expires_at_ms > now {
             return Ok(MiniMaxOAuthRuntimeAuth {
                 access_token: access_token.to_owned(),
@@ -1308,19 +1244,11 @@ pub fn resolve_minimax_oauth_runtime_auth(
         }
     }
 
-    let refresh_token = refresh_token
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| {
-            ModelError::ProviderFailure(
-                "MiniMax OAuth refresh requires a refresh token".to_owned(),
-            )
+    let refresh_token =
+        refresh_token.map(str::trim).filter(|value| !value.is_empty()).ok_or_else(|| {
+            ModelError::ProviderFailure("MiniMax OAuth refresh requires a refresh token".to_owned())
         })?;
-    refresh_minimax_oauth_token(
-        normalized_region,
-        refresh_token,
-        resource_url,
-    )
+    refresh_minimax_oauth_token(normalized_region, refresh_token, resource_url)
 }
 
 /// Starts a GitLab OAuth authorization flow using the standard authorize endpoint and PKCE.
@@ -1334,13 +1262,13 @@ pub fn start_gitlab_oauth_authorization(
     let code_verifier = generate_oauth_random_string(43);
     let code_challenge = pkce_code_challenge(&code_verifier);
 
-    let mut url = reqwest::Url::parse(&format!(
-        "{}/oauth/authorize",
-        instance_url.trim_end_matches('/')
-    ))
-    .map_err(|error| {
-        ModelError::ProviderFailure(format!("failed to build GitLab authorize URL: {error}"))
-    })?;
+    let mut url =
+        reqwest::Url::parse(&format!("{}/oauth/authorize", instance_url.trim_end_matches('/')))
+            .map_err(|error| {
+                ModelError::ProviderFailure(format!(
+                    "failed to build GitLab authorize URL: {error}"
+                ))
+            })?;
     url.query_pairs_mut()
         .append_pair("response_type", "code")
         .append_pair("client_id", client_id)
@@ -1349,15 +1277,10 @@ pub fn start_gitlab_oauth_authorization(
         .append_pair("code_challenge", &code_challenge)
         .append_pair("code_challenge_method", "S256");
     if !scopes.is_empty() {
-        url.query_pairs_mut()
-            .append_pair("scope", &scopes.join(" "));
+        url.query_pairs_mut().append_pair("scope", &scopes.join(" "));
     }
 
-    Ok(GitLabOAuthStartAuth {
-        authorize_url: url.to_string(),
-        state,
-        code_verifier,
-    })
+    Ok(GitLabOAuthStartAuth { authorize_url: url.to_string(), state, code_verifier })
 }
 
 /// Completes a GitLab OAuth authorization flow by exchanging the callback code for tokens.
@@ -1421,10 +1344,9 @@ pub fn resolve_gitlab_oauth_runtime_auth(
     token_url_override: Option<&str>,
 ) -> Result<GitLabOAuthRuntimeAuth, ModelError> {
     let now = current_unix_time_ms();
-    if let (Some(access_token), Some(expires_at_ms)) = (
-        access_token.map(str::trim).filter(|value| !value.is_empty()),
-        expires_at_ms,
-    ) {
+    if let (Some(access_token), Some(expires_at_ms)) =
+        (access_token.map(str::trim).filter(|value| !value.is_empty()), expires_at_ms)
+    {
         if expires_at_ms > now {
             return Ok(GitLabOAuthRuntimeAuth {
                 access_token: access_token.to_owned(),
@@ -1434,21 +1356,15 @@ pub fn resolve_gitlab_oauth_runtime_auth(
         }
     }
 
-    let refresh_token = refresh_token
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| {
+    let refresh_token =
+        refresh_token.map(str::trim).filter(|value| !value.is_empty()).ok_or_else(|| {
             ModelError::ProviderFailure(
                 "gitlab oauth requires a refresh token when the access token is expired".to_owned(),
             )
         })?;
-    let client_id = client_id
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| {
-            ModelError::ProviderFailure(
-                "gitlab oauth refresh requires a client id".to_owned(),
-            )
+    let client_id =
+        client_id.map(str::trim).filter(|value| !value.is_empty()).ok_or_else(|| {
+            ModelError::ProviderFailure("gitlab oauth refresh requires a client id".to_owned())
         })?;
     refresh_gitlab_oauth_token(
         instance_url,
@@ -1625,19 +1541,15 @@ pub fn resolve_openai_codex_runtime_auth(
     let now_ms = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .map_err(|error| {
-            ModelError::ProviderFailure(format!("failed to read system clock for Codex OAuth: {error}"))
+            ModelError::ProviderFailure(format!(
+                "failed to read system clock for Codex OAuth: {error}"
+            ))
         })?
         .as_millis() as u64;
 
-    let current_access = params
-        .access_token
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    let current_refresh = params
-        .refresh_token
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| {
+    let current_access = params.access_token.map(str::trim).filter(|value| !value.is_empty());
+    let current_refresh =
+        params.refresh_token.map(str::trim).filter(|value| !value.is_empty()).ok_or_else(|| {
             ModelError::ProviderFailure(
                 "openai-codex requires a refresh token or externally managed OAuth credential"
                     .to_owned(),
@@ -1655,39 +1567,29 @@ pub fn resolve_openai_codex_runtime_auth(
                     .account_id
                     .map(str::to_owned)
                     .or_else(|| claims.as_ref().and_then(extract_openai_codex_account_id)),
-                email: claims
-                    .as_ref()
-                    .and_then(extract_openai_codex_email),
+                email: claims.as_ref().and_then(extract_openai_codex_email),
             });
         }
     }
 
     let refreshed = refresh_openai_codex_token(current_refresh, params.token_url_override)?;
     Ok(OpenAiCodexRuntimeAuth {
-        account_id: refreshed
-            .account_id
-            .or_else(|| params.account_id.map(str::to_owned)),
+        account_id: refreshed.account_id.or_else(|| params.account_id.map(str::to_owned)),
         ..refreshed
     })
 }
 
 fn post_form(url: &str, body: &[(&str, &str)]) -> Result<OpenAiCodexRawTokenResponse, ModelError> {
-    let client = reqwest::blocking::Client::builder()
-        .build()
-        .map_err(|error| {
-            ModelError::ProviderFailure(format!(
-                "failed to build OpenAI Codex OAuth client: {error}"
-            ))
-        })?;
+    let client = reqwest::blocking::Client::builder().build().map_err(|error| {
+        ModelError::ProviderFailure(format!("failed to build OpenAI Codex OAuth client: {error}"))
+    })?;
     let response = client
         .post(url)
         .header("Content-Type", "application/x-www-form-urlencoded")
         .form(body)
         .send()
         .map_err(|error| {
-            ModelError::ProviderFailure(format!(
-                "OpenAI Codex OAuth request failed: {error}"
-            ))
+            ModelError::ProviderFailure(format!("OpenAI Codex OAuth request failed: {error}"))
         })?;
 
     let status = response.status();
@@ -1703,9 +1605,7 @@ fn post_form(url: &str, body: &[(&str, &str)]) -> Result<OpenAiCodexRawTokenResp
     }
 
     serde_json::from_str(&body).map_err(|error| {
-        ModelError::ProviderFailure(format!(
-            "failed to parse OpenAI Codex OAuth response: {error}"
-        ))
+        ModelError::ProviderFailure(format!("failed to parse OpenAI Codex OAuth response: {error}"))
     })
 }
 
@@ -1713,19 +1613,15 @@ fn post_form_json<T: for<'de> Deserialize<'de>>(
     url: &str,
     body: &[(&str, &str)],
 ) -> Result<T, ModelError> {
-    let client = reqwest::blocking::Client::builder()
-        .build()
-        .map_err(|error| {
-            ModelError::ProviderFailure(format!("failed to build OAuth client: {error}"))
-        })?;
+    let client = reqwest::blocking::Client::builder().build().map_err(|error| {
+        ModelError::ProviderFailure(format!("failed to build OAuth client: {error}"))
+    })?;
     let response = client
         .post(url)
         .header("Content-Type", "application/x-www-form-urlencoded")
         .form(body)
         .send()
-        .map_err(|error| {
-            ModelError::ProviderFailure(format!("OAuth request failed: {error}"))
-        })?;
+        .map_err(|error| ModelError::ProviderFailure(format!("OAuth request failed: {error}")))?;
 
     let status = response.status();
     let body = response.text().map_err(|error| {
@@ -1760,24 +1656,19 @@ fn materialize_minimax_oauth_runtime_auth(
 ) -> Result<MiniMaxOAuthRuntimeAuth, ModelError> {
     let access_token = response.access_token.ok_or_else(|| {
         ModelError::ProviderFailure(
-            "MiniMax OAuth returned an incomplete token payload (missing access token)"
-                .to_owned(),
+            "MiniMax OAuth returned an incomplete token payload (missing access token)".to_owned(),
         )
     })?;
     let refresh_token = response.refresh_token.ok_or_else(|| {
         ModelError::ProviderFailure(
-            "MiniMax OAuth returned an incomplete token payload (missing refresh token)"
-                .to_owned(),
+            "MiniMax OAuth returned an incomplete token payload (missing refresh token)".to_owned(),
         )
     })?;
-    let expires_at_ms = response
-        .expired_in
-        .map(normalize_minimax_timestamp)
-        .ok_or_else(|| {
-            ModelError::ProviderFailure(
-                "MiniMax OAuth returned an incomplete token payload (missing expiry)".to_owned(),
-            )
-        })?;
+    let expires_at_ms = response.expired_in.map(normalize_minimax_timestamp).ok_or_else(|| {
+        ModelError::ProviderFailure(
+            "MiniMax OAuth returned an incomplete token payload (missing expiry)".to_owned(),
+        )
+    })?;
 
     Ok(MiniMaxOAuthRuntimeAuth {
         access_token,
@@ -1791,24 +1682,15 @@ fn materialize_minimax_oauth_runtime_auth(
 }
 
 fn generate_oauth_random_string(length: usize) -> String {
-    const ALPHABET: &[u8] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
     let mut bytes = vec![0_u8; length];
     rand::rngs::OsRng.fill_bytes(&mut bytes);
-    bytes
-        .into_iter()
-        .map(|value| ALPHABET[usize::from(value) % ALPHABET.len()] as char)
-        .collect()
+    bytes.into_iter().map(|value| ALPHABET[usize::from(value) % ALPHABET.len()] as char).collect()
 }
 
 fn pkce_code_challenge(verifier: &str) -> String {
     let hash = Sha256::digest(verifier.as_bytes());
-    STANDARD
-        .encode(hash)
-        .replace('+', "-")
-        .replace('/', "_")
-        .trim_end_matches('=')
-        .to_owned()
+    STANDARD.encode(hash).replace('+', "-").replace('/', "_").trim_end_matches('=').to_owned()
 }
 
 fn materialize_openai_codex_runtime_auth(
@@ -1820,10 +1702,8 @@ fn materialize_openai_codex_runtime_auth(
         .as_deref()
         .and_then(decode_openai_codex_jwt_claims)
         .or_else(|| decode_openai_codex_jwt_claims(&response.access_token));
-    let account_id = claims
-        .as_ref()
-        .and_then(extract_openai_codex_account_id)
-        .or(fallback_account_id);
+    let account_id =
+        claims.as_ref().and_then(extract_openai_codex_account_id).or(fallback_account_id);
     let email = claims.as_ref().and_then(extract_openai_codex_email);
 
     OpenAiCodexRuntimeAuth {
@@ -1843,20 +1723,14 @@ fn current_unix_time_ms() -> u64 {
 }
 
 fn minimax_oauth_endpoints(region: &str) -> (&'static str, String) {
-    let base_url = if region == "cn" {
-        "https://api.minimaxi.com"
-    } else {
-        "https://api.minimax.io"
-    };
+    let base_url =
+        if region == "cn" { "https://api.minimaxi.com" } else { "https://api.minimax.io" };
     (base_url, format!("{base_url}/oauth/token"))
 }
 
 fn minimax_code_endpoint(region: &str) -> String {
-    let base_url = if region == "cn" {
-        "https://api.minimaxi.com"
-    } else {
-        "https://api.minimax.io"
-    };
+    let base_url =
+        if region == "cn" { "https://api.minimaxi.com" } else { "https://api.minimax.io" };
     format!("{base_url}/oauth/code")
 }
 
@@ -1872,9 +1746,7 @@ fn normalize_minimax_region(region: &str) -> Result<&str, ModelError> {
     match region.trim().to_ascii_lowercase().as_str() {
         "global" => Ok("global"),
         "cn" => Ok("cn"),
-        other => Err(ModelError::ProviderFailure(format!(
-            "unsupported MiniMax region {other}"
-        ))),
+        other => Err(ModelError::ProviderFailure(format!("unsupported MiniMax region {other}"))),
     }
 }
 
@@ -1900,37 +1772,22 @@ fn extract_openai_codex_account_id(claims: &OpenAiCodexJwtClaims) -> Option<Stri
         .as_ref()
         .cloned()
         .or_else(|| claims.openai_auth.as_ref()?.chatgpt_account_id.clone())
-        .or_else(|| {
-            claims
-                .organizations
-                .as_ref()?
-                .first()?
-                .id
-                .as_ref()
-                .cloned()
-        })
+        .or_else(|| claims.organizations.as_ref()?.first()?.id.as_ref().cloned())
 }
 
 fn extract_openai_codex_email(claims: &OpenAiCodexJwtClaims) -> Option<String> {
-    claims
-        .email
-        .as_ref()
-        .cloned()
-        .or_else(|| claims.openai_profile.as_ref()?.email.clone())
+    claims.email.as_ref().cloned().or_else(|| claims.openai_profile.as_ref()?.email.clone())
 }
 
 /// Resolves a stable fallback identity from OpenAI Codex JWT claims when email is unavailable.
 pub fn resolve_openai_codex_stable_subject(access_token: &str) -> Option<String> {
     let claims = decode_openai_codex_jwt_claims(access_token)?;
-    claims
-        .openai_auth
-        .as_ref()
-        .and_then(|auth| {
-            auth.chatgpt_account_user_id
-                .clone()
-                .or_else(|| auth.chatgpt_user_id.clone())
-                .or_else(|| auth.user_id.clone())
-        })
+    claims.openai_auth.as_ref().and_then(|auth| {
+        auth.chatgpt_account_user_id
+            .clone()
+            .or_else(|| auth.chatgpt_user_id.clone())
+            .or_else(|| auth.user_id.clone())
+    })
 }
 
 fn base64url_decode(input: &str) -> Option<Vec<u8>> {
@@ -1944,8 +1801,9 @@ fn base64url_decode(input: &str) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_openai_codex_authorize_url, detect_zai_endpoint, normalize_openai_codex_authorize_url,
-        resolve_openai_codex_runtime_auth, OpenAiCodexRuntimeAuthRequest,
+        build_openai_codex_authorize_url, detect_zai_endpoint,
+        normalize_openai_codex_authorize_url, resolve_openai_codex_runtime_auth,
+        OpenAiCodexRuntimeAuthRequest,
     };
     use std::io::{Read, Write};
     use std::net::TcpListener;

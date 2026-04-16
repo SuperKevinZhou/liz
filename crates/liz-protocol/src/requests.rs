@@ -4,6 +4,7 @@ use crate::approval::ApprovalDecision;
 use crate::auth::ProviderAuthProfile;
 use crate::checkpoint::CheckpointScope;
 use crate::ids::{ApprovalId, CheckpointId, RequestId, ThreadId, TurnId};
+use crate::tool::ToolCallRequest;
 use serde::{Deserialize, Serialize};
 
 /// Describes what kind of user input started a turn.
@@ -86,6 +87,9 @@ pub enum ClientRequest {
     /// Responds to a pending approval.
     #[serde(rename = "approval/respond")]
     ApprovalRespond(ApprovalRespondRequest),
+    /// Executes a runtime tool call.
+    #[serde(rename = "tool/call")]
+    ToolCall(ToolCallRequest),
     /// Rolls back a thread to a prior checkpoint.
     #[serde(rename = "thread/rollback")]
     ThreadRollback(ThreadRollbackRequest),
