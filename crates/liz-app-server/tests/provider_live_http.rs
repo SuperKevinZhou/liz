@@ -586,6 +586,97 @@ fn github_copilot_live_request_uses_messages_transport_for_claude_models() {
     std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
 }
 
+#[test]
+fn gitlab_live_request_uses_bearer_auth_for_oauth_tokens() {
+    let _guard = env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");
+
+    let capture = Arc::new(Mutex::new(String::new()));
+    let base_url = spawn_json_server(capture.clone(), r#""hello from gitlab oauth""#);
+
+    let mut overrides = BTreeMap::new();
+    overrides.insert(
+        "gitlab".to_owned(),
+        ProviderOverride {
+            base_url: Some(base_url),
+            api_key: Some("oauth-token".to_owned()),
+            model_id: Some("duo-chat-sonnet-4-5".to_owned()),
+            headers: BTreeMap::new(),
+            metadata: BTreeMap::new(),
+        },
+    );
+
+    let gateway = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "gitlab".to_owned(),
+        overrides,
+    });
+    let summary = gateway
+        .run_turn(demo_request(), |_| {})
+        .expect("gitlab oauth request should succeed");
+
+    let request = capture
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    let lowercase = request.to_ascii_lowercase();
+    assert!(request.contains("POST /api/v4/chat/completions HTTP/1.1"));
+    assert!(lowercase.contains("authorization: bearer oauth-token"));
+    assert!(request.contains(r#""content":"Run a patch tool command for this task""#));
+    assert_eq!(
+        summary.assistant_message.as_deref(),
+        Some("hello from gitlab oauth")
+    );
+
+    std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
+}
+
+#[test]
+fn gitlab_live_request_uses_private_token_for_pat_tokens() {
+    let _guard = env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");
+
+    let capture = Arc::new(Mutex::new(String::new()));
+    let base_url = spawn_json_server(capture.clone(), r#""hello from gitlab pat""#);
+
+    let mut overrides = BTreeMap::new();
+    overrides.insert(
+        "gitlab".to_owned(),
+        ProviderOverride {
+            base_url: Some(base_url),
+            api_key: Some("glpat-example-token".to_owned()),
+            model_id: Some("duo-chat-sonnet-4-5".to_owned()),
+            headers: BTreeMap::new(),
+            metadata: BTreeMap::new(),
+        },
+    );
+
+    let gateway = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "gitlab".to_owned(),
+        overrides,
+    });
+    let summary = gateway
+        .run_turn(demo_request(), |_| {})
+        .expect("gitlab pat request should succeed");
+
+    let request = capture
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    let lowercase = request.to_ascii_lowercase();
+    assert!(request.contains("POST /api/v4/chat/completions HTTP/1.1"));
+    assert!(lowercase.contains("private-token: glpat-example-token"));
+    assert_eq!(
+        summary.assistant_message.as_deref(),
+        Some("hello from gitlab pat")
+    );
+
+    std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
+}
+
 fn spawn_json_server(capture: Arc<Mutex<String>>, response_body: &'static str) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
     let address = listener.local_addr().expect("address should resolve");

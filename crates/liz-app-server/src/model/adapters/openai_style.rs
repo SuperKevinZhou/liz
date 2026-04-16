@@ -239,7 +239,36 @@ fn execute_live_http(
                     )
                 }
             }
-            ModelProviderFamily::GitLabDuo => return simulate_stream(plan.clone(), request, sink),
+            ModelProviderFamily::GitLabDuo => {
+                let base_url = provider.base_url.as_ref().ok_or_else(|| {
+                    ModelError::ProviderFailure(
+                        "gitlab provider requires an instance or AI gateway base URL for live mode"
+                            .to_owned(),
+                    )
+                })?;
+                let api_key = provider.api_key.as_ref().ok_or_else(|| {
+                    ModelError::ProviderFailure(
+                        "gitlab provider requires a token for live mode".to_owned(),
+                    )
+                })?;
+                let mut headers = provider.headers.clone();
+                if gitlab_uses_private_token(api_key, provider) {
+                    headers
+                        .entry("PRIVATE-TOKEN".to_owned())
+                        .or_insert_with(|| api_key.clone());
+                } else {
+                    headers
+                        .entry("Authorization".to_owned())
+                        .or_insert_with(|| format!("Bearer {api_key}"));
+                }
+                (
+                    gitlab_chat_endpoint(base_url),
+                    json!({
+                        "content": request.prompt,
+                    }),
+                    headers,
+                )
+            }
             _ => return simulate_stream(plan.clone(), request, sink),
         },
     };
@@ -428,6 +457,7 @@ fn extract_openai_style_text(response: &serde_json::Value) -> Option<String> {
                         .map(str::to_owned)
                 })
         })
+        .or_else(|| response.as_str().map(str::to_owned))
 }
 
 fn trim_trailing_slash(value: &str) -> &str {
@@ -450,6 +480,25 @@ fn should_use_copilot_responses_api(model_id: &str) -> bool {
 
 fn copilot_uses_anthropic_messages_model(model_id: &str) -> bool {
     model_id.to_ascii_lowercase().contains("claude")
+}
+
+fn gitlab_uses_private_token(api_key: &str, provider: &ResolvedProvider) -> bool {
+    provider
+        .metadata
+        .get("gitlab.auth_mode")
+        .map(|value| value == "pat")
+        .unwrap_or_else(|| api_key.starts_with("glpat-"))
+}
+
+fn gitlab_chat_endpoint(base_url: &str) -> String {
+    let trimmed = trim_trailing_slash(base_url);
+    if trimmed.ends_with("/api/v4/chat/completions") {
+        trimmed.to_owned()
+    } else if trimmed.ends_with("/api/v4") {
+        format!("{trimmed}/chat/completions")
+    } else {
+        format!("{trimmed}/api/v4/chat/completions")
+    }
 }
 
 fn needs_tool_call(prompt: &str) -> bool {
