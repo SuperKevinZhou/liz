@@ -384,6 +384,12 @@ fn provider_override_from_auth_profile(profile: &ProviderAuthProfile) -> Provide
             override_config.api_key = Some(token.clone());
             override_config.metadata.extend(metadata.clone());
             if let Some(expires_at_ms) = expires_at_ms {
+                if profile.provider_id == "minimax-portal" {
+                    override_config.metadata.insert(
+                        "minimax.oauth.expires_at_ms".to_owned(),
+                        expires_at_ms.to_string(),
+                    );
+                }
                 override_config.metadata.insert(
                     "auth.expires_at_ms".to_owned(),
                     expires_at_ms.to_string(),

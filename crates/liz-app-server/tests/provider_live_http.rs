@@ -531,6 +531,130 @@ fn bedrock_mantle_live_request_mints_bearer_token_from_aws_credentials() {
 }
 
 #[test]
+fn minimax_live_request_uses_anthropic_messages_with_bearer_auth() {
+    let _guard = env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");
+
+    let capture = Arc::new(Mutex::new(String::new()));
+    let base_url = spawn_json_server(
+        capture.clone(),
+        r#"{"content":[{"text":"hello from minimax"}]}"#,
+    );
+
+    let mut overrides = BTreeMap::new();
+    overrides.insert(
+        "minimax".to_owned(),
+        ProviderOverride {
+            base_url: Some(base_url),
+            api_key: Some("minimax-api-key".to_owned()),
+            model_id: Some("MiniMax-M2.7".to_owned()),
+            headers: BTreeMap::new(),
+            metadata: BTreeMap::new(),
+        },
+    );
+
+    let gateway = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "minimax".to_owned(),
+        overrides,
+    });
+    let summary = gateway
+        .run_turn(demo_request(), |_| {})
+        .expect("minimax request should succeed");
+
+    let request = capture
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    assert!(request.contains("POST /v1/messages HTTP/1.1"));
+    assert!(
+        request
+            .to_ascii_lowercase()
+            .contains("authorization: bearer minimax-api-key")
+    );
+    assert!(request.contains(r#""model":"MiniMax-M2.7""#));
+    assert!(request.contains(r#""thinking":{"type":"disabled"}"#));
+    assert_eq!(summary.assistant_message.as_deref(), Some("hello from minimax"));
+
+    std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
+}
+
+#[test]
+fn minimax_portal_live_request_refreshes_oauth_and_uses_resource_url() {
+    let _guard = env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");
+
+    let capture = Arc::new(Mutex::new(Vec::<String>::new()));
+    let base_url = spawn_json_server_sequence(
+        capture.clone(),
+        vec![
+            r#"{"status":"success","access_token":"portal-fresh-token","refresh_token":"portal-refresh-next","expired_in":3600}"#,
+            r#"{"content":[{"text":"hello from minimax portal"}]}"#,
+        ],
+    );
+    std::env::set_var("LIZ_MINIMAX_OAUTH_TOKEN_URL", format!("{base_url}/oauth/token"));
+
+    let mut overrides = BTreeMap::new();
+    overrides.insert(
+        "minimax-portal".to_owned(),
+        ProviderOverride {
+            base_url: Some(base_url.clone()),
+            api_key: Some("expired-portal-token".to_owned()),
+            model_id: Some("MiniMax-M2.7".to_owned()),
+            headers: BTreeMap::new(),
+            metadata: BTreeMap::from([
+                (String::from("minimax.region"), String::from("global")),
+                (
+                    String::from("minimax.oauth.refresh_token"),
+                    String::from("portal-refresh"),
+                ),
+                (
+                    String::from("minimax.oauth.expires_at_ms"),
+                    String::from("1"),
+                ),
+                (
+                    String::from("minimax.resource_url"),
+                    base_url.clone(),
+                ),
+            ]),
+        },
+    );
+
+    let gateway = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "minimax-portal".to_owned(),
+        overrides,
+    });
+    let summary = gateway
+        .run_turn(demo_request(), |_| {})
+        .expect("minimax portal request should succeed");
+
+    let requests = capture
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    assert!(requests[0].contains("POST /oauth/token HTTP/1.1"));
+    assert!(requests[0].contains("grant_type=refresh_token"));
+    assert!(requests[0].contains("refresh_token=portal-refresh"));
+    assert!(requests[1].contains("POST /v1/messages HTTP/1.1"));
+    assert!(
+        requests[1]
+            .to_ascii_lowercase()
+            .contains("authorization: bearer portal-fresh-token")
+    );
+    assert!(requests[1].contains(r#""thinking":{"type":"disabled"}"#));
+    assert_eq!(
+        summary.assistant_message.as_deref(),
+        Some("hello from minimax portal")
+    );
+
+    std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
+    std::env::remove_var("LIZ_MINIMAX_OAUTH_TOKEN_URL");
+}
+
+#[test]
 fn bedrock_live_request_uses_sigv4_when_credential_chain_is_available() {
     let _guard = env_lock()
         .lock()

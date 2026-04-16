@@ -234,6 +234,32 @@ fn special_providers_expose_explicit_auth_strategies() {
             .iter()
             .any(|strategy| strategy.label == "cn")
     );
+
+    let minimax = registry.provider("minimax").expect("minimax spec");
+    assert_eq!(
+        minimax.auth_kind,
+        liz_app_server::model::ProviderAuthKind::ApiKey
+    );
+    assert!(
+        minimax
+            .auth_strategies
+            .iter()
+            .any(|strategy| strategy.label == "api-global")
+    );
+
+    let minimax_portal = registry
+        .provider("minimax-portal")
+        .expect("minimax portal spec");
+    assert_eq!(
+        minimax_portal.auth_kind,
+        liz_app_server::model::ProviderAuthKind::OAuth
+    );
+    assert!(
+        minimax_portal
+            .auth_strategies
+            .iter()
+            .any(|strategy| strategy.label == "oauth-global")
+    );
 }
 
 #[test]
@@ -410,6 +436,50 @@ fn zai_env_resolution_supports_forced_coding_plan_endpoint() {
 
     std::env::remove_var("ZAI_API_KEY");
     std::env::remove_var("ZAI_ENDPOINT");
+}
+
+#[test]
+fn minimax_env_resolution_supports_global_and_cn_routes() {
+    let _guard = env_lock().lock().expect("env lock");
+    std::env::set_var("MINIMAX_API_KEY", "minimax-key");
+    std::env::set_var("MINIMAX_REGION", "cn");
+
+    let minimax = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "minimax".to_owned(),
+        overrides: BTreeMap::new(),
+    })
+    .resolved_primary_provider()
+    .expect("minimax provider should resolve");
+
+    assert_eq!(
+        minimax.base_url.as_deref(),
+        Some("https://api.minimaxi.com/anthropic")
+    );
+    assert_eq!(
+        minimax.metadata.get("minimax.region").map(String::as_str),
+        Some("cn")
+    );
+
+    std::env::set_var("MINIMAX_OAUTH_TOKEN", "portal-token");
+    let minimax_portal = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "minimax-portal".to_owned(),
+        overrides: BTreeMap::new(),
+    })
+    .resolved_primary_provider()
+    .expect("minimax portal provider should resolve");
+
+    assert_eq!(
+        minimax_portal.base_url.as_deref(),
+        Some("https://api.minimaxi.com/anthropic")
+    );
+    assert_eq!(
+        minimax_portal.metadata.get("minimax.region").map(String::as_str),
+        Some("cn")
+    );
+
+    std::env::remove_var("MINIMAX_API_KEY");
+    std::env::remove_var("MINIMAX_OAUTH_TOKEN");
+    std::env::remove_var("MINIMAX_REGION");
 }
 
 #[test]

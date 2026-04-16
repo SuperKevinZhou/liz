@@ -47,6 +47,12 @@ pub enum ClientRequest {
     /// Polls a GitHub Copilot device-code login flow to completion.
     #[serde(rename = "provider_auth/github_copilot_device_poll")]
     GitHubCopilotDevicePoll(GitHubCopilotDevicePollRequest),
+    /// Starts a MiniMax Portal OAuth login flow.
+    #[serde(rename = "provider_auth/minimax_oauth_start")]
+    MiniMaxOAuthStart(MiniMaxOAuthStartRequest),
+    /// Polls a MiniMax Portal OAuth login flow to completion.
+    #[serde(rename = "provider_auth/minimax_oauth_poll")]
+    MiniMaxOAuthPoll(MiniMaxOAuthPollRequest),
     /// Lists persisted provider auth profiles.
     #[serde(rename = "provider_auth/list")]
     ProviderAuthList(ProviderAuthListRequest),
@@ -140,6 +146,28 @@ pub struct GitHubCopilotDevicePollRequest {
     pub enterprise_url: Option<String>,
     /// Optional polling interval hint returned from the device-code start call.
     pub interval_seconds: Option<u32>,
+    /// Optional profile id to persist when authorization completes.
+    pub profile_id: Option<String>,
+}
+
+/// Starts a MiniMax Portal OAuth login flow.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MiniMaxOAuthStartRequest {
+    /// Selected MiniMax region, either `global` or `cn`.
+    pub region: String,
+}
+
+/// Polls a MiniMax Portal OAuth login flow.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MiniMaxOAuthPollRequest {
+    /// One-time user code returned from the start request.
+    pub user_code: String,
+    /// PKCE verifier returned from the start request.
+    pub code_verifier: String,
+    /// Selected MiniMax region, either `global` or `cn`.
+    pub region: String,
+    /// Optional polling interval hint returned from the start request.
+    pub interval_ms: Option<u32>,
     /// Optional profile id to persist when authorization completes.
     pub profile_id: Option<String>,
 }

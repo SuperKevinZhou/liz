@@ -319,6 +319,59 @@ impl ResolvedProvider {
                     }
                 }
             }
+            "minimax" => {
+                if override_config.and_then(|config| config.api_key.as_ref()).is_none() {
+                    api_key = first_env(&["MINIMAX_API_KEY"]);
+                }
+                let region = override_config
+                    .and_then(|config| config.metadata.get("minimax.region"))
+                    .cloned()
+                    .or_else(|| first_env(&["MINIMAX_REGION"]))
+                    .unwrap_or_else(|| "global".to_owned());
+                metadata
+                    .entry("minimax.region".to_owned())
+                    .or_insert(region.clone());
+                if override_config.and_then(|config| config.base_url.as_ref()).is_none() {
+                    base_url = Some(resolve_minimax_base_url(
+                        &region,
+                        first_env(&["MINIMAX_API_HOST"]).as_deref(),
+                    ));
+                }
+            }
+            "minimax-portal" => {
+                if override_config.and_then(|config| config.api_key.as_ref()).is_none() {
+                    api_key = first_env(&["MINIMAX_OAUTH_TOKEN", "MINIMAX_API_KEY"]);
+                }
+                let region = override_config
+                    .and_then(|config| config.metadata.get("minimax.region"))
+                    .cloned()
+                    .or_else(|| first_env(&["MINIMAX_REGION"]))
+                    .unwrap_or_else(|| "global".to_owned());
+                metadata
+                    .entry("minimax.region".to_owned())
+                    .or_insert(region.clone());
+                if let Some(refresh_token) = first_env(&["MINIMAX_OAUTH_REFRESH_TOKEN"]) {
+                    metadata
+                        .entry("minimax.oauth.refresh_token".to_owned())
+                        .or_insert(refresh_token);
+                }
+                if let Some(expires_at_ms) = first_env(&["MINIMAX_OAUTH_EXPIRES_AT_MS"]) {
+                    metadata
+                        .entry("minimax.oauth.expires_at_ms".to_owned())
+                        .or_insert(expires_at_ms);
+                }
+                if let Some(resource_url) = first_env(&["MINIMAX_RESOURCE_URL"]) {
+                    metadata
+                        .entry("minimax.resource_url".to_owned())
+                        .or_insert(resource_url);
+                }
+                if override_config.and_then(|config| config.base_url.as_ref()).is_none() {
+                    base_url = metadata
+                        .get("minimax.resource_url")
+                        .cloned()
+                        .or_else(|| Some(resolve_minimax_base_url(&region, None)));
+                }
+            }
             _ => {}
         }
 
@@ -357,5 +410,23 @@ fn resolve_zai_base_url(endpoint: &str) -> String {
         "cn" => "https://open.bigmodel.cn/api/paas/v4".to_owned(),
         "coding-global" => "https://api.z.ai/api/coding/paas/v4".to_owned(),
         _ => "https://api.z.ai/api/paas/v4".to_owned(),
+    }
+}
+
+fn resolve_minimax_base_url(region: &str, host_override: Option<&str>) -> String {
+    if let Some(host_override) = host_override.map(str::trim).filter(|value| !value.is_empty()) {
+        if let Ok(url) = reqwest::Url::parse(host_override) {
+            let path = url.path().trim_end_matches('/');
+            if path.ends_with("/anthropic") {
+                return format!("{}{}", url.origin().ascii_serialization(), path);
+            }
+            return format!("{}/anthropic", url.origin().ascii_serialization().trim_end_matches('/'));
+        }
+    }
+
+    if region.eq_ignore_ascii_case("cn") {
+        "https://api.minimaxi.com/anthropic".to_owned()
+    } else {
+        "https://api.minimax.io/anthropic".to_owned()
     }
 }

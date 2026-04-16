@@ -10,12 +10,14 @@ use crate::runtime::turn_manager::TurnManager;
 use crate::model::{
     poll_github_copilot_device_authorization, start_github_copilot_device_authorization,
     start_gitlab_oauth_authorization, exchange_gitlab_oauth_code,
-    GitHubCopilotDevicePollOutcome,
+    poll_minimax_oauth_authorization, start_minimax_oauth_authorization,
+    GitHubCopilotDevicePollOutcome, MiniMaxOAuthPollOutcome,
 };
 use liz_protocol::memory::ResumeSummary;
 use liz_protocol::requests::{
     ApprovalRespondRequest, GitHubCopilotDevicePollRequest, GitHubCopilotDeviceStartRequest,
     GitLabOAuthCompleteRequest, GitLabOAuthStartRequest, GitLabPatSaveRequest,
+    MiniMaxOAuthPollRequest, MiniMaxOAuthStartRequest,
     ProviderAuthDeleteRequest, ProviderAuthListRequest, ProviderAuthUpsertRequest,
     ThreadForkRequest, ThreadResumeRequest, ThreadStartRequest, TurnCancelRequest,
     TurnStartRequest,
@@ -23,13 +25,15 @@ use liz_protocol::requests::{
 use liz_protocol::responses::{
     ApprovalRespondResponse, GitHubCopilotDevicePollResponse,
     GitHubCopilotDeviceStartResponse, GitLabOAuthCompleteResponse, GitLabOAuthStartResponse,
-    GitLabPatSaveResponse, ProviderAuthDeleteResponse, ProviderAuthListResponse,
+    GitLabPatSaveResponse, MiniMaxOAuthPollResponse, MiniMaxOAuthStartResponse,
+    ProviderAuthDeleteResponse, ProviderAuthListResponse,
     ProviderAuthUpsertResponse, ThreadForkResponse, ThreadResumeResponse, ThreadStartResponse,
     TurnCancelResponse, TurnStartResponse,
 };
 use liz_protocol::{
     ApprovalDecision, ApprovalRequest, ApprovalStatus, Checkpoint, CheckpointScope,
     GitHubCopilotDeviceCode, GitHubCopilotDevicePollStatus, GitLabOAuthStart,
+    MiniMaxOAuthDeviceCode, MiniMaxOAuthPollStatus,
     ProviderAuthProfile, ProviderCredential, Thread, ThreadId, Turn,
 };
 use std::collections::HashMap;
@@ -328,6 +332,75 @@ impl RuntimeCoordinator {
         Ok(GitLabPatSaveResponse {
             profile: response.profile,
         })
+    }
+
+    /// Starts a MiniMax Portal OAuth login flow.
+    pub fn start_minimax_oauth_login(
+        &self,
+        request: MiniMaxOAuthStartRequest,
+    ) -> RuntimeResult<MiniMaxOAuthStartResponse> {
+        let device = start_minimax_oauth_authorization(&request.region)
+            .map_err(|error| RuntimeError::invalid_state("minimax_oauth_start_failed", error.to_string()))?;
+
+        Ok(MiniMaxOAuthStartResponse {
+            device: MiniMaxOAuthDeviceCode {
+                verification_uri: device.verification_uri,
+                user_code: device.user_code,
+                code_verifier: device.code_verifier,
+                interval_ms: device.interval_ms,
+                expires_at_ms: device.expires_at_ms,
+                region: device.region,
+            },
+        })
+    }
+
+    /// Polls a MiniMax Portal OAuth login flow until completion.
+    pub fn poll_minimax_oauth_login(
+        &mut self,
+        request: MiniMaxOAuthPollRequest,
+    ) -> RuntimeResult<MiniMaxOAuthPollResponse> {
+        let poll = poll_minimax_oauth_authorization(
+            &request.region,
+            &request.user_code,
+            &request.code_verifier,
+            request.interval_ms,
+        )
+        .map_err(|error| RuntimeError::invalid_state("minimax_oauth_poll_failed", error.to_string()))?;
+
+        match poll {
+            MiniMaxOAuthPollOutcome::Pending { retry_after_ms } => Ok(MiniMaxOAuthPollResponse {
+                status: MiniMaxOAuthPollStatus::Pending,
+                retry_after_ms: Some(retry_after_ms),
+                profile: None,
+            }),
+            MiniMaxOAuthPollOutcome::Complete { auth } => {
+                let profile = ProviderAuthProfile {
+                    profile_id: request
+                        .profile_id
+                        .unwrap_or_else(|| "minimax-portal:default".to_owned()),
+                    provider_id: "minimax-portal".to_owned(),
+                    display_name: Some(format!("MiniMax OAuth ({})", request.region)),
+                    credential: ProviderCredential::Token {
+                        token: auth.access_token,
+                        expires_at_ms: Some(auth.expires_at_ms),
+                        metadata: std::collections::BTreeMap::from([
+                            ("minimax.auth_mode".to_owned(), "oauth".to_owned()),
+                            ("minimax.region".to_owned(), request.region.clone()),
+                            ("minimax.oauth.refresh_token".to_owned(), auth.refresh_token),
+                            ("minimax.resource_url".to_owned(), auth.resource_url),
+                        ]),
+                    },
+                };
+                let response = self.upsert_provider_auth_profile(ProviderAuthUpsertRequest {
+                    profile,
+                })?;
+                Ok(MiniMaxOAuthPollResponse {
+                    status: MiniMaxOAuthPollStatus::Complete,
+                    retry_after_ms: None,
+                    profile: Some(response.profile),
+                })
+            }
+        }
     }
 
     /// Resumes a thread and returns the current wake-up projection.

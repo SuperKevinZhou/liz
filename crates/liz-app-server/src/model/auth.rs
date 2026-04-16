@@ -29,6 +29,9 @@ const GOOGLE_CLOUD_PLATFORM_SCOPE: &str = "https://www.googleapis.com/auth/cloud
 const GITHUB_COPILOT_DEVICE_CLIENT_ID: &str = "Ov23li8tweQw6odWQebz";
 const OPENAI_CODEX_OAUTH_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const OPENAI_CODEX_OAUTH_ISSUER: &str = "https://auth.openai.com";
+const MINIMAX_OAUTH_CLIENT_ID: &str = "78257093-7e40-4613-99e0-527b14b39113";
+const MINIMAX_OAUTH_SCOPE: &str = "group_id profile model.completion";
+const MINIMAX_OAUTH_DEVICE_GRANT_TYPE: &str = "urn:ietf:params:oauth:grant-type:user_code";
 const BEDROCK_MANTLE_CONTROL_PLANE_URL: &str =
     "https://bedrock.amazonaws.com/?Action=CallWithBearerToken";
 const BEDROCK_MANTLE_TOKEN_PREFIX: &str = "bedrock-api-key-";
@@ -87,6 +90,51 @@ pub struct GitHubCopilotDeviceCodeAuth {
     pub interval_seconds: u32,
     /// Final Copilot API base URL for the selected deployment.
     pub api_base_url: String,
+}
+
+/// Device-code bootstrap information for MiniMax Portal OAuth.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MiniMaxOAuthDeviceCodeAuth {
+    /// Verification URL the user should open.
+    pub verification_uri: String,
+    /// One-time user code.
+    pub user_code: String,
+    /// PKCE verifier retained for token polling.
+    pub code_verifier: String,
+    /// Suggested polling interval in milliseconds.
+    pub interval_ms: u32,
+    /// Expiry timestamp in milliseconds since epoch.
+    pub expires_at_ms: u64,
+    /// Selected MiniMax region.
+    pub region: String,
+}
+
+/// Runtime MiniMax Portal OAuth credentials.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MiniMaxOAuthRuntimeAuth {
+    /// Current access token.
+    pub access_token: String,
+    /// Refresh token retained for future refreshes.
+    pub refresh_token: String,
+    /// Expiry timestamp in milliseconds since epoch.
+    pub expires_at_ms: u64,
+    /// Resolved MiniMax resource base URL.
+    pub resource_url: String,
+}
+
+/// Poll result for MiniMax Portal OAuth completion.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MiniMaxOAuthPollOutcome {
+    /// Authorization is still pending.
+    Pending {
+        /// Suggested retry delay in milliseconds.
+        retry_after_ms: u32,
+    },
+    /// Authorization completed successfully.
+    Complete {
+        /// Resolved runtime credentials.
+        auth: MiniMaxOAuthRuntimeAuth,
+    },
 }
 
 /// Current poll result when completing a GitHub Copilot device-code login flow.
@@ -1037,6 +1085,148 @@ pub fn poll_github_copilot_device_authorization(
     }
 }
 
+/// Starts a MiniMax Portal OAuth device flow.
+pub fn start_minimax_oauth_authorization(
+    region: &str,
+) -> Result<MiniMaxOAuthDeviceCodeAuth, ModelError> {
+    let normalized_region = normalize_minimax_region(region)?;
+    let code_verifier = generate_oauth_random_string(43);
+    let code_challenge = pkce_code_challenge(&code_verifier);
+    let state = generate_oauth_random_string(32);
+    let code_endpoint = first_env(&["LIZ_MINIMAX_OAUTH_CODE_URL"])
+        .unwrap_or_else(|| minimax_code_endpoint(normalized_region));
+    let response: MiniMaxOAuthAuthorizationResponse = post_form_json(
+        &code_endpoint,
+        &[
+            ("response_type", "code"),
+            ("client_id", MINIMAX_OAUTH_CLIENT_ID),
+            ("scope", MINIMAX_OAUTH_SCOPE),
+            ("code_challenge", &code_challenge),
+            ("code_challenge_method", "S256"),
+            ("state", &state),
+        ],
+    )?;
+
+    if !response.state.is_empty() && response.state != state {
+        return Err(ModelError::ProviderFailure(
+            "MiniMax OAuth state mismatch during authorization".to_owned(),
+        ));
+    }
+
+    Ok(MiniMaxOAuthDeviceCodeAuth {
+        verification_uri: response.verification_uri,
+        user_code: response.user_code,
+        code_verifier,
+        interval_ms: response.interval.unwrap_or(2000),
+        expires_at_ms: normalize_minimax_timestamp(response.expired_in),
+        region: normalized_region.to_owned(),
+    })
+}
+
+/// Polls a MiniMax Portal OAuth device flow.
+pub fn poll_minimax_oauth_authorization(
+    region: &str,
+    user_code: &str,
+    code_verifier: &str,
+    interval_ms: Option<u32>,
+) -> Result<MiniMaxOAuthPollOutcome, ModelError> {
+    let normalized_region = normalize_minimax_region(region)?;
+    let (_base_url, default_token_endpoint) = minimax_oauth_endpoints(normalized_region);
+    let token_endpoint = first_env(&["LIZ_MINIMAX_OAUTH_TOKEN_URL"])
+        .unwrap_or(default_token_endpoint);
+    let response: MiniMaxOAuthTokenResponseBody = post_form_json(
+        &token_endpoint,
+        &[
+            ("grant_type", MINIMAX_OAUTH_DEVICE_GRANT_TYPE),
+            ("client_id", MINIMAX_OAUTH_CLIENT_ID),
+            ("user_code", user_code),
+            ("code_verifier", code_verifier),
+        ],
+    )?;
+
+    match response.status.as_deref() {
+        Some("success") => Ok(MiniMaxOAuthPollOutcome::Complete {
+            auth: materialize_minimax_oauth_runtime_auth(
+                response,
+                minimax_default_resource_url(normalized_region),
+            )?,
+        }),
+        Some("error") => Err(ModelError::ProviderFailure(
+            "MiniMax OAuth authorization failed".to_owned(),
+        )),
+        _ => Ok(MiniMaxOAuthPollOutcome::Pending {
+            retry_after_ms: interval_ms.unwrap_or(2000).max(2000),
+        }),
+    }
+}
+
+/// Refreshes a MiniMax Portal OAuth credential.
+pub fn refresh_minimax_oauth_token(
+    region: &str,
+    refresh_token: &str,
+    fallback_resource_url: Option<&str>,
+) -> Result<MiniMaxOAuthRuntimeAuth, ModelError> {
+    let normalized_region = normalize_minimax_region(region)?;
+    let (_base_url, default_token_endpoint) = minimax_oauth_endpoints(normalized_region);
+    let token_endpoint = first_env(&["LIZ_MINIMAX_OAUTH_TOKEN_URL"])
+        .unwrap_or(default_token_endpoint);
+    let response: MiniMaxOAuthTokenResponseBody = post_form_json(
+        &token_endpoint,
+        &[
+            ("grant_type", "refresh_token"),
+            ("client_id", MINIMAX_OAUTH_CLIENT_ID),
+            ("refresh_token", refresh_token),
+        ],
+    )?;
+
+    materialize_minimax_oauth_runtime_auth(
+        response,
+        fallback_resource_url.unwrap_or(minimax_default_resource_url(normalized_region)),
+    )
+}
+
+/// Resolves a live MiniMax Portal OAuth credential, refreshing it when required.
+pub fn resolve_minimax_oauth_runtime_auth(
+    access_token: Option<&str>,
+    refresh_token: Option<&str>,
+    expires_at_ms: Option<u64>,
+    region: &str,
+    resource_url: Option<&str>,
+) -> Result<MiniMaxOAuthRuntimeAuth, ModelError> {
+    let normalized_region = normalize_minimax_region(region)?;
+    let now = current_unix_time_ms();
+    if let (Some(access_token), Some(expires_at_ms)) = (
+        access_token.map(str::trim).filter(|value| !value.is_empty()),
+        expires_at_ms,
+    ) {
+        if expires_at_ms > now {
+            return Ok(MiniMaxOAuthRuntimeAuth {
+                access_token: access_token.to_owned(),
+                refresh_token: refresh_token.unwrap_or_default().to_owned(),
+                expires_at_ms,
+                resource_url: resource_url
+                    .map(str::to_owned)
+                    .filter(|value| !value.trim().is_empty())
+                    .unwrap_or_else(|| minimax_default_resource_url(normalized_region).to_owned()),
+            });
+        }
+    }
+
+    let refresh_token = refresh_token
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            ModelError::ProviderFailure(
+                "MiniMax OAuth refresh requires a refresh token".to_owned(),
+            )
+        })?;
+    refresh_minimax_oauth_token(
+        normalized_region,
+        refresh_token,
+        resource_url,
+    )
+}
+
 /// Starts a GitLab OAuth authorization flow using the standard authorize endpoint and PKCE.
 pub fn start_gitlab_oauth_authorization(
     instance_url: &str,
@@ -1193,6 +1383,24 @@ struct GitLabOAuthTokenResponse {
     access_token: String,
     refresh_token: Option<String>,
     expires_in: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MiniMaxOAuthAuthorizationResponse {
+    user_code: String,
+    verification_uri: String,
+    expired_in: u64,
+    interval: Option<u32>,
+    state: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct MiniMaxOAuthTokenResponseBody {
+    status: Option<String>,
+    access_token: Option<String>,
+    refresh_token: Option<String>,
+    expired_in: Option<u64>,
+    resource_url: Option<String>,
 }
 
 /// Normalizes an OpenAI Codex authorize URL so the required OAuth scopes are always present.
@@ -1431,6 +1639,42 @@ fn materialize_gitlab_oauth_runtime_auth(
     })
 }
 
+fn materialize_minimax_oauth_runtime_auth(
+    response: MiniMaxOAuthTokenResponseBody,
+    fallback_resource_url: &str,
+) -> Result<MiniMaxOAuthRuntimeAuth, ModelError> {
+    let access_token = response.access_token.ok_or_else(|| {
+        ModelError::ProviderFailure(
+            "MiniMax OAuth returned an incomplete token payload (missing access token)"
+                .to_owned(),
+        )
+    })?;
+    let refresh_token = response.refresh_token.ok_or_else(|| {
+        ModelError::ProviderFailure(
+            "MiniMax OAuth returned an incomplete token payload (missing refresh token)"
+                .to_owned(),
+        )
+    })?;
+    let expires_at_ms = response
+        .expired_in
+        .map(normalize_minimax_timestamp)
+        .ok_or_else(|| {
+            ModelError::ProviderFailure(
+                "MiniMax OAuth returned an incomplete token payload (missing expiry)".to_owned(),
+            )
+        })?;
+
+    Ok(MiniMaxOAuthRuntimeAuth {
+        access_token,
+        refresh_token,
+        expires_at_ms,
+        resource_url: response
+            .resource_url
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| fallback_resource_url.to_owned()),
+    })
+}
+
 fn generate_oauth_random_string(length: usize) -> String {
     const ALPHABET: &[u8] =
         b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
@@ -1481,6 +1725,52 @@ fn current_unix_time_ms() -> u64 {
         .duration_since(SystemTime::UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or_default()
+}
+
+fn minimax_oauth_endpoints(region: &str) -> (&'static str, String) {
+    let base_url = if region == "cn" {
+        "https://api.minimaxi.com"
+    } else {
+        "https://api.minimax.io"
+    };
+    (base_url, format!("{base_url}/oauth/token"))
+}
+
+fn minimax_code_endpoint(region: &str) -> String {
+    let base_url = if region == "cn" {
+        "https://api.minimaxi.com"
+    } else {
+        "https://api.minimax.io"
+    };
+    format!("{base_url}/oauth/code")
+}
+
+fn minimax_default_resource_url(region: &str) -> &'static str {
+    if region == "cn" {
+        "https://api.minimaxi.com/anthropic"
+    } else {
+        "https://api.minimax.io/anthropic"
+    }
+}
+
+fn normalize_minimax_region(region: &str) -> Result<&str, ModelError> {
+    match region.trim().to_ascii_lowercase().as_str() {
+        "global" => Ok("global"),
+        "cn" => Ok("cn"),
+        other => Err(ModelError::ProviderFailure(format!(
+            "unsupported MiniMax region {other}"
+        ))),
+    }
+}
+
+fn normalize_minimax_timestamp(raw: u64) -> u64 {
+    if raw > 1_000_000_000_000 {
+        raw
+    } else if raw > 10_000_000_000 {
+        raw * 1000
+    } else {
+        current_unix_time_ms() + raw * 1000
+    }
 }
 
 fn decode_openai_codex_jwt_claims(token: &str) -> Option<OpenAiCodexJwtClaims> {

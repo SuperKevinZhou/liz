@@ -55,6 +55,14 @@ pub fn handle_request(
                 (ResponsePayload::GitHubCopilotDevicePoll(response), Vec::new())
             })
         }
+        ClientRequest::MiniMaxOAuthStart(request) => runtime.start_minimax_oauth_login(request).map(|response| {
+            (ResponsePayload::MiniMaxOAuthStart(response), Vec::new())
+        }),
+        ClientRequest::MiniMaxOAuthPoll(request) => {
+            runtime.poll_minimax_oauth_login(request).map(|response| {
+                (ResponsePayload::MiniMaxOAuthPoll(response), Vec::new())
+            })
+        }
         ClientRequest::ProviderAuthList(request) => runtime.list_provider_auth_profiles(request).map(|response| {
             (ResponsePayload::ProviderAuthList(response), Vec::new())
         }),

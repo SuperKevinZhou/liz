@@ -16,7 +16,8 @@ pub mod turn;
 pub use approval::{ApprovalDecision, ApprovalRequest, ApprovalStatus};
 pub use auth::{
     GitHubCopilotDeviceCode, GitHubCopilotDevicePollStatus, GitLabOAuthStart,
-    ProviderAuthProfile, ProviderCredential,
+    MiniMaxOAuthDeviceCode, MiniMaxOAuthPollStatus, ProviderAuthProfile,
+    ProviderCredential,
 };
 pub use artifact::{ArtifactKind, ArtifactRef};
 pub use checkpoint::{Checkpoint, CheckpointScope};

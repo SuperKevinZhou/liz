@@ -76,6 +76,33 @@ pub enum GitHubCopilotDevicePollStatus {
     Complete,
 }
 
+/// Device-code bootstrap data for a MiniMax Portal OAuth flow.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MiniMaxOAuthDeviceCode {
+    /// Verification URL the user should open.
+    pub verification_uri: String,
+    /// One-time user code shown by MiniMax.
+    pub user_code: String,
+    /// PKCE verifier retained until token exchange.
+    pub code_verifier: String,
+    /// Polling interval in milliseconds suggested by MiniMax.
+    pub interval_ms: u32,
+    /// Expiry timestamp in milliseconds since epoch.
+    pub expires_at_ms: u64,
+    /// Selected MiniMax region.
+    pub region: String,
+}
+
+/// The polling status returned by MiniMax Portal OAuth completion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MiniMaxOAuthPollStatus {
+    /// Authorization is still pending.
+    Pending,
+    /// Authorization completed successfully and a profile was stored.
+    Complete,
+}
+
 /// OAuth bootstrap data for a GitLab authorization flow.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GitLabOAuthStart {

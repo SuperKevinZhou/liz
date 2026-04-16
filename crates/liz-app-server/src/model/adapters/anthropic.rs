@@ -1,5 +1,6 @@
 //! Adapter for Anthropic Messages-compatible providers.
 
+use crate::model::auth::resolve_minimax_oauth_runtime_auth;
 use crate::model::config::ResolvedProvider;
 use crate::model::gateway::{ModelError, ModelRunSummary, ModelTurnRequest};
 use crate::model::http::{build_client, post_json};
@@ -102,7 +103,42 @@ fn execute_live_http(
     };
 
     let mut headers = provider.headers.clone();
-    if let Some(api_key) = provider.api_key.as_ref() {
+    let mut resolved_base_url = base_url.to_owned();
+    let mut api_key = provider.api_key.clone();
+    if provider.spec.id == "minimax-portal" {
+        let expires_at_ms = provider
+            .metadata
+            .get("minimax.oauth.expires_at_ms")
+            .and_then(|value| value.parse::<u64>().ok());
+        let runtime = resolve_minimax_oauth_runtime_auth(
+            provider.api_key.as_deref(),
+            provider
+                .metadata
+                .get("minimax.oauth.refresh_token")
+                .map(String::as_str),
+            expires_at_ms,
+            provider
+                .metadata
+                .get("minimax.region")
+                .map(String::as_str)
+                .unwrap_or("global"),
+            provider
+                .metadata
+                .get("minimax.resource_url")
+                .map(String::as_str),
+        )?;
+        api_key = Some(runtime.access_token);
+        resolved_base_url = runtime.resource_url;
+        headers
+            .entry("Authorization".to_owned())
+            .or_insert_with(|| format!("Bearer {}", api_key.clone().unwrap_or_default()));
+    } else if provider.spec.id == "minimax" {
+        if let Some(api_key) = api_key.as_ref() {
+            headers
+                .entry("Authorization".to_owned())
+                .or_insert_with(|| format!("Bearer {api_key}"));
+        }
+    } else if let Some(api_key) = api_key.as_ref() {
         headers
             .entry("x-api-key".to_owned())
             .or_insert_with(|| api_key.clone());
@@ -111,15 +147,18 @@ fn execute_live_http(
         .entry("anthropic-version".to_owned())
         .or_insert_with(|| "2023-06-01".to_owned());
 
-    let body = json!({
+    let mut body = json!({
         "model": provider.model_id,
         "max_tokens": 4096,
         "messages": [{"role": "user", "content": request.prompt}],
         "stream": false,
     });
+    if provider.spec.id == "minimax" || provider.spec.id == "minimax-portal" {
+        body["thinking"] = json!({ "type": "disabled" });
+    }
     let response = post_json(
         &build_client()?,
-        &format!("{}{}", trim_trailing_slash(base_url), path),
+        &format!("{}{}", trim_trailing_slash(&resolved_base_url), path),
         &headers,
         &body,
     )?;

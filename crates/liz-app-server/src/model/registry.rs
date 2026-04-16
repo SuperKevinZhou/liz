@@ -457,7 +457,40 @@ fn builtin_specs() -> Vec<ProviderSpec> {
         openai_compatible_spec("mistral", "Mistral", "mistral-large-latest"),
         openai_compatible_spec("moonshot", "Moonshot", "moonshot-v1-128k"),
         openai_compatible_spec("moonshotai", "Moonshot AI", "moonshot-v1-128k"),
-        openai_compatible_spec("minimax", "MiniMax", "MiniMax-M2.7"),
+        spec(
+            "minimax",
+            "MiniMax",
+            ModelProviderFamily::AnthropicMessages,
+            ProviderAuthKind::ApiKey,
+            Some("https://api.minimax.io/anthropic"),
+            "MiniMax-M2.7",
+            &["MINIMAX_API_KEY"],
+            &["MINIMAX_REGION", "MINIMAX_API_HOST"],
+            &[],
+            ModelCapabilities::anthropic_messages()
+                .with_image_input(true)
+                .with_server_side_conversation_state(false),
+            &[
+                "Uses the Anthropic-compatible MiniMax M2.7 endpoint.",
+                "Supports global and CN Coding Plan API-key routing.",
+            ],
+        )
+        .with_auth_strategies(vec![
+            auth_strategy(
+                ProviderAuthKind::ApiKey,
+                "api-global",
+                &["MINIMAX_API_KEY"],
+                &["MINIMAX_REGION=global", "provider.minimax.region=global"],
+                &["Uses https://api.minimax.io/anthropic."],
+            ),
+            auth_strategy(
+                ProviderAuthKind::ApiKey,
+                "api-cn",
+                &["MINIMAX_API_KEY"],
+                &["MINIMAX_REGION=cn", "provider.minimax.region=cn"],
+                &["Uses https://api.minimaxi.com/anthropic."],
+            ),
+        ]),
         openai_compatible_spec("litellm", "LiteLLM", "anthropic/claude-opus-4.6"),
         openai_compatible_spec("huggingface", "Hugging Face", "Qwen/Qwen3-Coder-480B-A35B-Instruct"),
         openai_compatible_spec("together", "Together AI", "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8"),
@@ -491,7 +524,40 @@ fn builtin_specs() -> Vec<ProviderSpec> {
         openai_compatible_spec("kilocode", "KiloCode", "kilocode/kilo-agent"),
         openai_compatible_spec("llama.cpp", "llama.cpp", "meta-llama/Llama-3.1-8B-Instruct"),
         openai_compatible_spec("lmstudio", "LM Studio", "google/gemma-3n-e4b"),
-        openai_compatible_spec("minimax-portal", "MiniMax Portal", "MiniMax-M2.7"),
+        spec(
+            "minimax-portal",
+            "MiniMax Portal",
+            ModelProviderFamily::AnthropicMessages,
+            ProviderAuthKind::OAuth,
+            Some("https://api.minimax.io/anthropic"),
+            "MiniMax-M2.7",
+            &["MINIMAX_OAUTH_TOKEN", "MINIMAX_API_KEY"],
+            &["MINIMAX_REGION", "provider.minimax-portal.region"],
+            &[],
+            ModelCapabilities::anthropic_messages()
+                .with_image_input(true)
+                .with_server_side_conversation_state(false),
+            &[
+                "Uses MiniMax Portal OAuth against the Anthropic-compatible endpoint.",
+                "Supports global and CN device-code-style OAuth login.",
+            ],
+        )
+        .with_auth_strategies(vec![
+            auth_strategy(
+                ProviderAuthKind::OAuth,
+                "oauth-global",
+                &["MINIMAX_OAUTH_TOKEN"],
+                &["MINIMAX_REGION=global", "provider.minimax-portal.region=global"],
+                &["Uses https://api.minimax.io."],
+            ),
+            auth_strategy(
+                ProviderAuthKind::OAuth,
+                "oauth-cn",
+                &["MINIMAX_OAUTH_TOKEN"],
+                &["MINIMAX_REGION=cn", "provider.minimax-portal.region=cn"],
+                &["Uses https://api.minimaxi.com."],
+            ),
+        ]),
         openai_compatible_spec("nebius-token-factory", "Nebius Token Factory", "moonshotai/kimi-k2-instruct"),
         openai_compatible_spec("nebius", "Nebius Token Factory", "moonshotai/kimi-k2-instruct"),
         openai_compatible_spec("nvidia", "NVIDIA", "meta/llama-3.1-70b-instruct"),
@@ -558,7 +624,6 @@ fn openai_compatible_spec(
         "deepseek" => Some("https://api.deepseek.com"),
         "helicone" => Some("https://ai-gateway.helicone.ai/v1"),
         "io-net" => Some("https://api.intelligence.io.solutions/api/v1"),
-        "minimax" | "minimax-portal" => Some("https://api.minimax.io/anthropic/v1"),
         "moonshot" | "moonshotai" => Some("https://api.moonshot.ai/v1"),
         "nebius" | "nebius-token-factory" => Some("https://api.tokenfactory.nebius.com/v1"),
         "ovhcloud" | "ovhcloud-ai-endpoints" => Some("https://oai.endpoints.kepler.ai.cloud.ovh.net/v1"),
@@ -582,7 +647,6 @@ fn openai_compatible_spec(
         "xai" => &["XAI_API_KEY"][..],
         "mistral" => &["MISTRAL_API_KEY"][..],
         "moonshot" | "moonshotai" => &["MOONSHOT_API_KEY"][..],
-        "minimax" | "minimax-portal" => &["MINIMAX_API_KEY"][..],
         "together" | "togetherai" => &["TOGETHER_API_KEY"][..],
         "venice" => &["VENICE_API_KEY"][..],
         "qianfan" => &["QIANFAN_API_KEY"][..],

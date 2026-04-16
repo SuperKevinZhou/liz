@@ -3,7 +3,7 @@
 use crate::approval::ApprovalRequest;
 use crate::auth::{
     GitHubCopilotDeviceCode, GitHubCopilotDevicePollStatus, GitLabOAuthStart,
-    ProviderAuthProfile,
+    MiniMaxOAuthDeviceCode, MiniMaxOAuthPollStatus, ProviderAuthProfile,
 };
 use crate::checkpoint::{Checkpoint, CheckpointScope};
 use crate::ids::{RequestId, ThreadId};
@@ -75,6 +75,12 @@ pub enum ResponsePayload {
     /// Acknowledges `provider_auth/github_copilot_device_poll`.
     #[serde(rename = "provider_auth/github_copilot_device_poll")]
     GitHubCopilotDevicePoll(GitHubCopilotDevicePollResponse),
+    /// Acknowledges `provider_auth/minimax_oauth_start`.
+    #[serde(rename = "provider_auth/minimax_oauth_start")]
+    MiniMaxOAuthStart(MiniMaxOAuthStartResponse),
+    /// Acknowledges `provider_auth/minimax_oauth_poll`.
+    #[serde(rename = "provider_auth/minimax_oauth_poll")]
+    MiniMaxOAuthPoll(MiniMaxOAuthPollResponse),
     /// Acknowledges `provider_auth/list`.
     #[serde(rename = "provider_auth/list")]
     ProviderAuthList(ProviderAuthListResponse),
@@ -145,6 +151,24 @@ pub struct GitHubCopilotDevicePollResponse {
     pub status: GitHubCopilotDevicePollStatus,
     /// Suggested retry delay in seconds when polling should continue.
     pub retry_after_seconds: Option<u32>,
+    /// The persisted profile when authorization completed.
+    pub profile: Option<ProviderAuthProfile>,
+}
+
+/// The response payload for `provider_auth/minimax_oauth_start`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MiniMaxOAuthStartResponse {
+    /// The device-code bootstrap information.
+    pub device: MiniMaxOAuthDeviceCode,
+}
+
+/// The response payload for `provider_auth/minimax_oauth_poll`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MiniMaxOAuthPollResponse {
+    /// The current polling status.
+    pub status: MiniMaxOAuthPollStatus,
+    /// Suggested retry delay in milliseconds when polling should continue.
+    pub retry_after_ms: Option<u32>,
     /// The persisted profile when authorization completed.
     pub profile: Option<ProviderAuthProfile>,
 }
