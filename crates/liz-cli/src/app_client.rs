@@ -30,10 +30,7 @@ impl WebSocketAppClient {
     }
 
     /// Sends a typed request to the server.
-    pub fn send_request(
-        &self,
-        request: ClientRequestEnvelope,
-    ) -> Result<(), AppClientError> {
+    pub fn send_request(&self, request: ClientRequestEnvelope) -> Result<(), AppClientError> {
         self.request_tx.send(request).map_err(|_| AppClientError::Disconnected)
     }
 

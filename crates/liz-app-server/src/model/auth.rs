@@ -22,14 +22,8 @@ use yup_oauth2::{
 const GOOGLE_CLOUD_PLATFORM_SCOPE: &str = "https://www.googleapis.com/auth/cloud-platform";
 const OPENAI_CODEX_OAUTH_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const OPENAI_CODEX_OAUTH_ISSUER: &str = "https://auth.openai.com";
-const OPENAI_CODEX_OAUTH_REQUIRED_SCOPES: &[&str] = &[
-    "openid",
-    "profile",
-    "email",
-    "offline_access",
-    "model.request",
-    "api.responses.write",
-];
+const OPENAI_CODEX_OAUTH_REQUIRED_SCOPES: &[&str] =
+    &["openid", "profile", "email", "offline_access", "model.request", "api.responses.write"];
 
 #[derive(Debug, Deserialize)]
 struct GoogleCredentialType {
@@ -116,9 +110,7 @@ struct OpenAiCodexProfileClaims {
 /// Resolves a Google ADC bearer token for Vertex AI requests.
 pub fn google_vertex_bearer_token() -> Result<String, ModelError> {
     let runtime = tokio::runtime::Runtime::new().map_err(|error| {
-        ModelError::ProviderFailure(format!(
-            "failed to initialize Google auth runtime: {error}"
-        ))
+        ModelError::ProviderFailure(format!("failed to initialize Google auth runtime: {error}"))
     })?;
     runtime.block_on(async { google_vertex_bearer_token_async().await })
 }
@@ -128,14 +120,11 @@ async fn google_vertex_bearer_token_async() -> Result<String, ModelError> {
 
     if let Some(secret) = load_authorized_user_secret()? {
         let authenticator =
-            AuthorizedUserAuthenticator::builder(secret)
-                .build()
-                .await
-                .map_err(|error| {
-                    ModelError::ProviderFailure(format!(
-                        "failed to initialize Google authorized-user auth: {error}"
-                    ))
-                })?;
+            AuthorizedUserAuthenticator::builder(secret).build().await.map_err(|error| {
+                ModelError::ProviderFailure(format!(
+                    "failed to initialize Google authorized-user auth: {error}"
+                ))
+            })?;
         return extract_google_token(&authenticator, &scopes).await;
     }
 
@@ -161,10 +150,9 @@ async fn extract_google_token(
         ModelError::ProviderFailure(format!("failed to fetch Google access token: {error}"))
     })?;
 
-    token
-        .token()
-        .map(str::to_owned)
-        .ok_or_else(|| ModelError::ProviderFailure("google access token response was empty".to_owned()))
+    token.token().map(str::to_owned).ok_or_else(|| {
+        ModelError::ProviderFailure("google access token response was empty".to_owned())
+    })
 }
 
 fn load_authorized_user_secret() -> Result<Option<AuthorizedUserSecret>, ModelError> {
@@ -175,12 +163,13 @@ fn load_authorized_user_secret() -> Result<Option<AuthorizedUserSecret>, ModelEr
         return Ok(None);
     };
 
-    let credential_type: GoogleCredentialType = serde_json::from_str(&contents).map_err(|error| {
-        ModelError::ProviderFailure(format!(
-            "failed to parse Google ADC credentials type from {}: {error}",
-            path.display()
-        ))
-    })?;
+    let credential_type: GoogleCredentialType =
+        serde_json::from_str(&contents).map_err(|error| {
+            ModelError::ProviderFailure(format!(
+                "failed to parse Google ADC credentials type from {}: {error}",
+                path.display()
+            ))
+        })?;
     if credential_type.credential_type != "authorized_user" {
         return Ok(None);
     }
@@ -229,9 +218,7 @@ pub fn sign_bedrock_request(
     region: &str,
 ) -> Result<BTreeMap<String, String>, ModelError> {
     let runtime = tokio::runtime::Runtime::new().map_err(|error| {
-        ModelError::ProviderFailure(format!(
-            "failed to initialize AWS auth runtime: {error}"
-        ))
+        ModelError::ProviderFailure(format!("failed to initialize AWS auth runtime: {error}"))
     })?;
     runtime.block_on(async { sign_bedrock_request_async(method, url, headers, body, region).await })
 }
@@ -243,10 +230,9 @@ async fn sign_bedrock_request_async(
     body: &[u8],
     region: &str,
 ) -> Result<BTreeMap<String, String>, ModelError> {
-    if let (Some(access_key), Some(secret_key)) = (
-        first_env(&["AWS_ACCESS_KEY_ID"]),
-        first_env(&["AWS_SECRET_ACCESS_KEY"]),
-    ) {
+    if let (Some(access_key), Some(secret_key)) =
+        (first_env(&["AWS_ACCESS_KEY_ID"]), first_env(&["AWS_SECRET_ACCESS_KEY"]))
+    {
         return sign_bedrock_request_with_credentials(
             method,
             url,
@@ -259,10 +245,7 @@ async fn sign_bedrock_request_async(
         );
     }
 
-    let config = aws_config::from_env()
-        .region(Region::new(region.to_owned()))
-        .load()
-        .await;
+    let config = aws_config::from_env().region(Region::new(region.to_owned())).load().await;
     let provider = config.credentials_provider().ok_or_else(|| {
         ModelError::ProviderFailure(
             "aws credential chain is not available for Amazon Bedrock".to_owned(),
@@ -305,25 +288,23 @@ fn sign_bedrock_request_with_credentials(
         .settings(SigningSettings::default());
     signing_params_builder.set_security_token(session_token);
     let signing_params = signing_params_builder.build().map_err(|error| {
-        ModelError::ProviderFailure(format!(
-            "failed to build AWS Bedrock signing params: {error}"
-        ))
+        ModelError::ProviderFailure(format!("failed to build AWS Bedrock signing params: {error}"))
     })?;
 
-    let mut signed_request = http::Request::builder()
-        .method(method)
-        .uri(url)
-        .body(body.to_vec())
-        .map_err(|error| {
+    let mut signed_request =
+        http::Request::builder().method(method).uri(url).body(body.to_vec()).map_err(|error| {
             ModelError::ProviderFailure(format!(
                 "failed to build AWS Bedrock request shell: {error}"
             ))
         })?;
 
     for (key, value) in headers {
-        let header_name = http::header::HeaderName::from_bytes(key.as_bytes()).map_err(|error| {
-            ModelError::ProviderFailure(format!("invalid AWS Bedrock header name {key}: {error}"))
-        })?;
+        let header_name =
+            http::header::HeaderName::from_bytes(key.as_bytes()).map_err(|error| {
+                ModelError::ProviderFailure(format!(
+                    "invalid AWS Bedrock header name {key}: {error}"
+                ))
+            })?;
         let header_value = http::header::HeaderValue::from_str(value).map_err(|error| {
             ModelError::ProviderFailure(format!(
                 "invalid AWS Bedrock header value for {key}: {error}"
@@ -361,8 +342,7 @@ fn sign_bedrock_request_with_credentials(
 }
 
 fn first_env(keys: &[&str]) -> Option<String> {
-    keys.iter()
-        .find_map(|key| env::var(key).ok().filter(|value| !value.trim().is_empty()))
+    keys.iter().find_map(|key| env::var(key).ok().filter(|value| !value.trim().is_empty()))
 }
 
 #[derive(Debug, Deserialize)]
@@ -378,13 +358,9 @@ pub fn resolve_copilot_runtime_auth(
 ) -> Result<CopilotRuntimeAuth, ModelError> {
     let token_url =
         token_url_override.unwrap_or("https://api.github.com/copilot_internal/v2/token");
-    let client = reqwest::blocking::Client::builder()
-        .build()
-        .map_err(|error| {
-            ModelError::ProviderFailure(format!(
-                "failed to build GitHub Copilot auth client: {error}"
-            ))
-        })?;
+    let client = reqwest::blocking::Client::builder().build().map_err(|error| {
+        ModelError::ProviderFailure(format!("failed to build GitHub Copilot auth client: {error}"))
+    })?;
 
     let response = client
         .get(token_url)
@@ -395,9 +371,7 @@ pub fn resolve_copilot_runtime_auth(
         .header("X-Github-Api-Version", "2025-04-01")
         .send()
         .map_err(|error| {
-            ModelError::ProviderFailure(format!(
-                "github copilot token exchange failed: {error}"
-            ))
+            ModelError::ProviderFailure(format!("github copilot token exchange failed: {error}"))
         })?;
 
     let status = response.status();
@@ -428,10 +402,8 @@ pub fn resolve_copilot_runtime_auth(
 }
 
 fn derive_copilot_api_base_url_from_token(token: &str) -> Option<String> {
-    let proxy_endpoint = token
-        .split(';')
-        .find_map(|part| part.trim().strip_prefix("proxy-ep="))
-        .map(str::trim)?;
+    let proxy_endpoint =
+        token.split(';').find_map(|part| part.trim().strip_prefix("proxy-ep=")).map(str::trim)?;
     let mut url = reqwest::Url::parse(proxy_endpoint).ok()?;
     let host = url.host_str()?.replace("proxy.", "api.");
     url.set_host(Some(&host)).ok()?;
@@ -545,19 +517,15 @@ pub fn resolve_openai_codex_runtime_auth(
     let now_ms = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .map_err(|error| {
-            ModelError::ProviderFailure(format!("failed to read system clock for Codex OAuth: {error}"))
+            ModelError::ProviderFailure(format!(
+                "failed to read system clock for Codex OAuth: {error}"
+            ))
         })?
         .as_millis() as u64;
 
-    let current_access = params
-        .access_token
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    let current_refresh = params
-        .refresh_token
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| {
+    let current_access = params.access_token.map(str::trim).filter(|value| !value.is_empty());
+    let current_refresh =
+        params.refresh_token.map(str::trim).filter(|value| !value.is_empty()).ok_or_else(|| {
             ModelError::ProviderFailure(
                 "openai-codex requires a refresh token or externally managed OAuth credential"
                     .to_owned(),
@@ -575,39 +543,29 @@ pub fn resolve_openai_codex_runtime_auth(
                     .account_id
                     .map(str::to_owned)
                     .or_else(|| claims.as_ref().and_then(extract_openai_codex_account_id)),
-                email: claims
-                    .as_ref()
-                    .and_then(extract_openai_codex_email),
+                email: claims.as_ref().and_then(extract_openai_codex_email),
             });
         }
     }
 
     let refreshed = refresh_openai_codex_token(current_refresh, params.token_url_override)?;
     Ok(OpenAiCodexRuntimeAuth {
-        account_id: refreshed
-            .account_id
-            .or_else(|| params.account_id.map(str::to_owned)),
+        account_id: refreshed.account_id.or_else(|| params.account_id.map(str::to_owned)),
         ..refreshed
     })
 }
 
 fn post_form(url: &str, body: &[(&str, &str)]) -> Result<OpenAiCodexRawTokenResponse, ModelError> {
-    let client = reqwest::blocking::Client::builder()
-        .build()
-        .map_err(|error| {
-            ModelError::ProviderFailure(format!(
-                "failed to build OpenAI Codex OAuth client: {error}"
-            ))
-        })?;
+    let client = reqwest::blocking::Client::builder().build().map_err(|error| {
+        ModelError::ProviderFailure(format!("failed to build OpenAI Codex OAuth client: {error}"))
+    })?;
     let response = client
         .post(url)
         .header("Content-Type", "application/x-www-form-urlencoded")
         .form(body)
         .send()
         .map_err(|error| {
-            ModelError::ProviderFailure(format!(
-                "OpenAI Codex OAuth request failed: {error}"
-            ))
+            ModelError::ProviderFailure(format!("OpenAI Codex OAuth request failed: {error}"))
         })?;
 
     let status = response.status();
@@ -623,9 +581,7 @@ fn post_form(url: &str, body: &[(&str, &str)]) -> Result<OpenAiCodexRawTokenResp
     }
 
     serde_json::from_str(&body).map_err(|error| {
-        ModelError::ProviderFailure(format!(
-            "failed to parse OpenAI Codex OAuth response: {error}"
-        ))
+        ModelError::ProviderFailure(format!("failed to parse OpenAI Codex OAuth response: {error}"))
     })
 }
 
@@ -638,10 +594,8 @@ fn materialize_openai_codex_runtime_auth(
         .as_deref()
         .and_then(decode_openai_codex_jwt_claims)
         .or_else(|| decode_openai_codex_jwt_claims(&response.access_token));
-    let account_id = claims
-        .as_ref()
-        .and_then(extract_openai_codex_account_id)
-        .or(fallback_account_id);
+    let account_id =
+        claims.as_ref().and_then(extract_openai_codex_account_id).or(fallback_account_id);
     let email = claims.as_ref().and_then(extract_openai_codex_email);
 
     OpenAiCodexRuntimeAuth {
@@ -672,37 +626,22 @@ fn extract_openai_codex_account_id(claims: &OpenAiCodexJwtClaims) -> Option<Stri
         .as_ref()
         .cloned()
         .or_else(|| claims.openai_auth.as_ref()?.chatgpt_account_id.clone())
-        .or_else(|| {
-            claims
-                .organizations
-                .as_ref()?
-                .first()?
-                .id
-                .as_ref()
-                .cloned()
-        })
+        .or_else(|| claims.organizations.as_ref()?.first()?.id.as_ref().cloned())
 }
 
 fn extract_openai_codex_email(claims: &OpenAiCodexJwtClaims) -> Option<String> {
-    claims
-        .email
-        .as_ref()
-        .cloned()
-        .or_else(|| claims.openai_profile.as_ref()?.email.clone())
+    claims.email.as_ref().cloned().or_else(|| claims.openai_profile.as_ref()?.email.clone())
 }
 
 /// Resolves a stable fallback identity from OpenAI Codex JWT claims when email is unavailable.
 pub fn resolve_openai_codex_stable_subject(access_token: &str) -> Option<String> {
     let claims = decode_openai_codex_jwt_claims(access_token)?;
-    claims
-        .openai_auth
-        .as_ref()
-        .and_then(|auth| {
-            auth.chatgpt_account_user_id
-                .clone()
-                .or_else(|| auth.chatgpt_user_id.clone())
-                .or_else(|| auth.user_id.clone())
-        })
+    claims.openai_auth.as_ref().and_then(|auth| {
+        auth.chatgpt_account_user_id
+            .clone()
+            .or_else(|| auth.chatgpt_user_id.clone())
+            .or_else(|| auth.user_id.clone())
+    })
 }
 
 fn base64url_decode(input: &str) -> Option<Vec<u8>> {

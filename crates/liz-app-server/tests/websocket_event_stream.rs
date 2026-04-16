@@ -65,9 +65,8 @@ fn loopback_websocket_streams_lifecycle_events_without_polling() {
     let second_turn_event = client
         .recv_event_timeout(Duration::from_secs(1))
         .expect("thread_updated event should arrive");
-    let third_turn_event = client
-        .recv_event_timeout(Duration::from_secs(1))
-        .expect("assistant event should arrive");
+    let third_turn_event =
+        client.recv_event_timeout(Duration::from_secs(1)).expect("assistant event should arrive");
     assert!(matches!(first_turn_event.payload, ServerEventPayload::TurnStarted(_)));
     assert!(matches!(second_turn_event.payload, ServerEventPayload::ThreadUpdated(_)));
     assert!(matches!(
@@ -77,8 +76,5 @@ fn loopback_websocket_streams_lifecycle_events_without_polling() {
 }
 
 fn envelope(request_id: &str, request: ClientRequest) -> ClientRequestEnvelope {
-    ClientRequestEnvelope {
-        request_id: RequestId::new(request_id),
-        request,
-    }
+    ClientRequestEnvelope { request_id: RequestId::new(request_id), request }
 }

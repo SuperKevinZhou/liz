@@ -60,17 +60,11 @@ fn provider_families_match_expected_transport_groups() {
         ModelProviderFamily::GoogleGenerativeAi
     );
     assert_eq!(
-        registry
-            .provider("amazon-bedrock")
-            .expect("bedrock spec")
-            .family,
+        registry.provider("amazon-bedrock").expect("bedrock spec").family,
         ModelProviderFamily::AwsBedrockConverse
     );
     assert_eq!(
-        registry
-            .provider("github-copilot")
-            .expect("copilot spec")
-            .family,
+        registry.provider("github-copilot").expect("copilot spec").family,
         ModelProviderFamily::GitHubCopilot
     );
     assert_eq!(
@@ -126,66 +120,37 @@ fn special_providers_expose_explicit_auth_strategies() {
 
     let openai = registry.provider("openai").expect("openai spec");
     assert_eq!(openai.auth_strategies.len(), 2);
-    assert!(
-        openai
-            .auth_strategies
-            .iter()
-            .any(|strategy| strategy.label == "chatgpt-oauth")
-    );
-    assert!(
-        openai
-            .auth_strategies
-            .iter()
-            .any(|strategy| strategy.env_keys.contains(&"OPENAI_API_KEY"))
-    );
+    assert!(openai.auth_strategies.iter().any(|strategy| strategy.label == "chatgpt-oauth"));
+    assert!(openai
+        .auth_strategies
+        .iter()
+        .any(|strategy| strategy.env_keys.contains(&"OPENAI_API_KEY")));
 
     let anthropic = registry.provider("anthropic").expect("anthropic spec");
-    assert!(
-        anthropic
-            .auth_strategies
-            .iter()
-            .any(|strategy| strategy.label == "setup-token")
-    );
+    assert!(anthropic.auth_strategies.iter().any(|strategy| strategy.label == "setup-token"));
 
-    let bedrock = registry
-        .provider("amazon-bedrock")
-        .expect("bedrock spec");
-    assert!(
-        bedrock
-            .auth_strategies
-            .iter()
-            .any(|strategy| strategy.env_keys.contains(&"AWS_BEARER_TOKEN_BEDROCK"))
-    );
-    assert!(
-        bedrock
-            .auth_strategies
-            .iter()
-            .any(|strategy| strategy.env_keys.contains(&"AWS_PROFILE"))
-    );
+    let bedrock = registry.provider("amazon-bedrock").expect("bedrock spec");
+    assert!(bedrock
+        .auth_strategies
+        .iter()
+        .any(|strategy| strategy.env_keys.contains(&"AWS_BEARER_TOKEN_BEDROCK")));
+    assert!(bedrock
+        .auth_strategies
+        .iter()
+        .any(|strategy| strategy.env_keys.contains(&"AWS_PROFILE")));
 
-    let copilot = registry
-        .provider("github-copilot")
-        .expect("copilot spec");
+    let copilot = registry.provider("github-copilot").expect("copilot spec");
     assert_eq!(copilot.auth_strategies.len(), 1);
     assert_eq!(copilot.auth_strategies[0].label, "device-code");
 
     let gitlab = registry.provider("gitlab").expect("gitlab spec");
-    assert!(
-        gitlab
-            .auth_strategies
-            .iter()
-            .any(|strategy| strategy.label == "oauth")
-    );
-    assert!(
-        gitlab
-            .auth_strategies
-            .iter()
-            .any(|strategy| strategy.label == "personal-access-token")
-    );
+    assert!(gitlab.auth_strategies.iter().any(|strategy| strategy.label == "oauth"));
+    assert!(gitlab
+        .auth_strategies
+        .iter()
+        .any(|strategy| strategy.label == "personal-access-token"));
 
-    let openai_codex = registry
-        .provider("openai-codex")
-        .expect("openai-codex spec");
+    let openai_codex = registry.provider("openai-codex").expect("openai-codex spec");
     assert_eq!(openai_codex.auth_kind, liz_app_server::model::ProviderAuthKind::OAuth);
     assert_eq!(openai_codex.auth_strategies.len(), 1);
     assert_eq!(openai_codex.auth_strategies[0].label, "chatgpt-oauth");
@@ -201,9 +166,7 @@ fn gitlab_env_resolution_prefers_ai_gateway_and_keeps_instance_metadata() {
         primary_provider: "gitlab".to_owned(),
         overrides: BTreeMap::new(),
     });
-    let provider = gateway
-        .resolved_primary_provider()
-        .expect("gitlab provider should resolve");
+    let provider = gateway.resolved_primary_provider().expect("gitlab provider should resolve");
 
     assert_eq!(provider.base_url.as_deref(), Some("https://ai-gateway.example.com"));
     assert_eq!(
@@ -256,10 +219,7 @@ fn explicit_metadata_override_beats_process_env_for_bedrock_and_vertex() {
     })
     .resolved_primary_provider()
     .expect("bedrock provider should resolve");
-    assert_eq!(
-        bedrock.metadata.get("aws.region").map(String::as_str),
-        Some("eu-west-1")
-    );
+    assert_eq!(bedrock.metadata.get("aws.region").map(String::as_str), Some("eu-west-1"));
 
     let vertex = ModelGateway::from_config(ModelGatewayConfig {
         primary_provider: "google-vertex".to_owned(),
@@ -267,10 +227,7 @@ fn explicit_metadata_override_beats_process_env_for_bedrock_and_vertex() {
     })
     .resolved_primary_provider()
     .expect("vertex provider should resolve");
-    assert_eq!(
-        vertex.metadata.get("google.location").map(String::as_str),
-        Some("europe-west4")
-    );
+    assert_eq!(vertex.metadata.get("google.location").map(String::as_str), Some("europe-west4"));
 
     std::env::remove_var("AWS_REGION");
     std::env::remove_var("GOOGLE_VERTEX_LOCATION");
@@ -289,10 +246,9 @@ fn openai_compatible_provider_without_builtin_base_url_still_runs() {
         .expect("provider should still produce a request plan");
 
     assert!(summary.assistant_message.is_some());
-    assert!(events.iter().any(|event| matches!(
-        event,
-        NormalizedTurnEvent::AssistantMessage { .. }
-    )));
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, NormalizedTurnEvent::AssistantMessage { .. })));
 }
 
 #[test]
@@ -303,14 +259,10 @@ fn gitlab_events_do_not_emit_patch_updates_when_capability_disables_patching() {
     });
     let request = demo_request();
     let mut events = Vec::new();
-    gateway
-        .run_turn(request, |event| events.push(event))
-        .expect("gitlab provider should run");
+    gateway.run_turn(request, |event| events.push(event)).expect("gitlab provider should run");
 
     assert!(
-        !events
-            .iter()
-            .any(|event| matches!(event, NormalizedTurnEvent::ToolCallDelta { .. })),
+        !events.iter().any(|event| matches!(event, NormalizedTurnEvent::ToolCallDelta { .. })),
         "gitlab should not emit patch deltas when patching is disabled",
     );
 }

@@ -546,12 +546,7 @@ fn synthesize_tool_arguments(prompt: &str, thread_id: &str, provider_id: &str) -
 fn extract_shell_command(prompt: &str) -> Option<String> {
     let lower = prompt.to_ascii_lowercase();
     lower.find("run command:").map(|index| {
-        prompt[index + "run command:".len()..]
-            .lines()
-            .next()
-            .unwrap_or_default()
-            .trim()
-            .to_owned()
+        prompt[index + "run command:".len()..].lines().next().unwrap_or_default().trim().to_owned()
     })
 }
 

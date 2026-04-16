@@ -40,9 +40,7 @@ impl ModelGatewayConfig {
         primary_override.model_id = env::var("LIZ_PROVIDER_MODEL").ok();
 
         if let Ok(value) = env::var("LIZ_PROVIDER_REFERER") {
-            primary_override
-                .headers
-                .insert("HTTP-Referer".to_owned(), value);
+            primary_override.headers.insert("HTTP-Referer".to_owned(), value);
         }
         if let Ok(value) = env::var("LIZ_PROVIDER_TITLE") {
             primary_override.headers.insert("X-Title".to_owned(), value);
@@ -56,10 +54,7 @@ impl ModelGatewayConfig {
             overrides.insert(primary_provider.clone(), primary_override);
         }
 
-        Self {
-            primary_provider,
-            overrides,
-        }
+        Self { primary_provider, overrides }
     }
 }
 
@@ -92,12 +87,10 @@ impl ResolvedProvider {
         let mut base_url = override_config
             .and_then(|config| config.base_url.clone())
             .or_else(|| spec.default_base_url.map(str::to_owned));
-        let mut api_key = override_config
-            .and_then(|config| config.api_key.clone())
-            .or_else(|| {
-                let keys = spec.credential_env_keys();
-                first_env(&keys)
-            });
+        let mut api_key = override_config.and_then(|config| config.api_key.clone()).or_else(|| {
+            let keys = spec.credential_env_keys();
+            first_env(&keys)
+        });
         let model_id = override_config
             .and_then(|config| config.model_id.clone())
             .unwrap_or_else(|| spec.default_model.to_owned());
@@ -134,10 +127,9 @@ impl ResolvedProvider {
             }
             "cloudflare-ai-gateway" => {
                 if base_url.is_none() {
-                    if let (Ok(account_id), Ok(gateway_id)) = (
-                        env::var("CLOUDFLARE_ACCOUNT_ID"),
-                        env::var("CLOUDFLARE_GATEWAY_ID"),
-                    ) {
+                    if let (Ok(account_id), Ok(gateway_id)) =
+                        (env::var("CLOUDFLARE_ACCOUNT_ID"), env::var("CLOUDFLARE_GATEWAY_ID"))
+                    {
                         metadata
                             .entry("cloudflare.account_id".to_owned())
                             .or_insert(account_id.clone());
@@ -180,9 +172,7 @@ impl ResolvedProvider {
                     }
                 }
                 if let Ok(client_id) = env::var("GITLAB_OAUTH_CLIENT_ID") {
-                    metadata
-                        .entry("gitlab.oauth_client_id".to_owned())
-                        .or_insert(client_id);
+                    metadata.entry("gitlab.oauth_client_id".to_owned()).or_insert(client_id);
                 }
             }
             "openai-codex" => {
@@ -195,32 +185,22 @@ impl ResolvedProvider {
                         .or_insert(refresh_token);
                 }
                 if let Some(expires_at) = first_env(&["OPENAI_CODEX_EXPIRES_AT_MS"]) {
-                    metadata
-                        .entry("openai_codex.expires_at_ms".to_owned())
-                        .or_insert(expires_at);
+                    metadata.entry("openai_codex.expires_at_ms".to_owned()).or_insert(expires_at);
                 }
                 if let Some(account_id) = first_env(&["OPENAI_CODEX_ACCOUNT_ID"]) {
-                    metadata
-                        .entry("openai_codex.account_id".to_owned())
-                        .or_insert(account_id);
+                    metadata.entry("openai_codex.account_id".to_owned()).or_insert(account_id);
                 }
                 if let Some(email) = first_env(&["OPENAI_CODEX_EMAIL"]) {
-                    metadata
-                        .entry("openai_codex.email".to_owned())
-                        .or_insert(email);
+                    metadata.entry("openai_codex.email".to_owned()).or_insert(email);
                 }
                 if let Some(token_url) = first_env(&["OPENAI_CODEX_TOKEN_URL"]) {
-                    metadata
-                        .entry("openai_codex.token_url".to_owned())
-                        .or_insert(token_url);
+                    metadata.entry("openai_codex.token_url".to_owned()).or_insert(token_url);
                 }
             }
             "google-vertex" | "google-vertex-anthropic" | "anthropic-vertex" => {
-                if let Some(project) = first_env(&[
-                    "GOOGLE_CLOUD_PROJECT",
-                    "GCP_PROJECT",
-                    "GCLOUD_PROJECT",
-                ]) {
+                if let Some(project) =
+                    first_env(&["GOOGLE_CLOUD_PROJECT", "GCP_PROJECT", "GCLOUD_PROJECT"])
+                {
                     metadata.entry("google.project".to_owned()).or_insert(project);
                 }
                 if let Some(location) = first_env(&[
@@ -252,18 +232,10 @@ impl ResolvedProvider {
             _ => {}
         }
 
-        Self {
-            spec: spec.clone(),
-            base_url,
-            api_key,
-            model_id,
-            headers,
-            metadata,
-        }
+        Self { spec: spec.clone(), base_url, api_key, model_id, headers, metadata }
     }
 }
 
 fn first_env(keys: &[&str]) -> Option<String> {
-    keys.iter()
-        .find_map(|key| env::var(key).ok().filter(|value| !value.trim().is_empty()))
+    keys.iter().find_map(|key| env::var(key).ok().filter(|value| !value.trim().is_empty()))
 }

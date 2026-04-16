@@ -1,8 +1,8 @@
 //! Runtime lifecycle coverage for Phase 3.
 
 use liz_app_server::runtime::RuntimeCoordinator;
-use liz_app_server::storage::{StoragePaths, TurnLog};
 use liz_app_server::storage::FsTurnLog;
+use liz_app_server::storage::{StoragePaths, TurnLog};
 use liz_protocol::requests::{
     ThreadForkRequest, ThreadResumeRequest, ThreadStartRequest, TurnCancelRequest, TurnInputKind,
     TurnStartRequest,
@@ -40,19 +40,12 @@ fn thread_can_start_turn_interrupt_and_resume() {
 
     assert_eq!(turn.status, TurnStatus::Running);
     assert_eq!(
-        runtime
-            .read_turn(&turn.id)
-            .expect("turn should remain active")
-            .summary
-            .as_deref(),
+        runtime.read_turn(&turn.id).expect("turn should remain active").summary.as_deref(),
         Some("Started turn for: Implement thread and turn managers")
     );
 
     let cancelled_turn = runtime
-        .cancel_turn(TurnCancelRequest {
-            thread_id: thread.id.clone(),
-            turn_id: turn.id.clone(),
-        })
+        .cancel_turn(TurnCancelRequest { thread_id: thread.id.clone(), turn_id: turn.id.clone() })
         .expect("turn cancel should succeed")
         .turn;
 
@@ -65,22 +58,18 @@ fn thread_can_start_turn_interrupt_and_resume() {
         .expect("thread should exist");
     assert_eq!(interrupted_thread.status, ThreadStatus::Interrupted);
     assert_eq!(interrupted_thread.latest_turn_id, Some(cancelled_turn.id.clone()));
-    assert!(
-        interrupted_thread
-            .last_interruption
-            .as_deref()
-            .expect("interruption marker should be present")
-            .contains("Implement thread and turn managers")
-    );
+    assert!(interrupted_thread
+        .last_interruption
+        .as_deref()
+        .expect("interruption marker should be present")
+        .contains("Implement thread and turn managers"));
     assert_eq!(
         interrupted_thread.pending_commitments,
         vec!["Resume interrupted work: Implement thread and turn managers".to_owned()]
     );
 
     let resumed = runtime
-        .resume_thread(ThreadResumeRequest {
-            thread_id: thread.id.clone(),
-        })
+        .resume_thread(ThreadResumeRequest { thread_id: thread.id.clone() })
         .expect("thread resume should succeed");
 
     assert_eq!(resumed.thread.status, ThreadStatus::Active);
@@ -89,9 +78,7 @@ fn thread_can_start_turn_interrupt_and_resume() {
         vec!["Resume interrupted work: Implement thread and turn managers".to_owned()]
     );
 
-    let entries = turn_log
-        .read_entries(&thread.id)
-        .expect("turn log entries should be readable");
+    let entries = turn_log.read_entries(&thread.id).expect("turn log entries should be readable");
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[0].event, "turn_started");
     assert_eq!(entries[1].event, "turn_cancelled");
@@ -124,8 +111,7 @@ fn forked_thread_inherits_parent_state_without_reusing_latest_turn() {
     assert_eq!(child.parent_thread_id, Some(parent.id));
     assert_eq!(child.active_goal.as_deref(), Some("Ship Phase 3"));
     assert!(child.latest_turn_id.is_none());
-    assert!(
-        child.pending_commitments
-            .contains(&"Fork created for: Try a different lifecycle projection".to_owned())
-    );
+    assert!(child
+        .pending_commitments
+        .contains(&"Fork created for: Try a different lifecycle projection".to_owned()));
 }

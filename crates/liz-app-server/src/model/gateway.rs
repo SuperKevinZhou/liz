@@ -102,9 +102,7 @@ impl ModelGateway {
         provider_id: impl Into<String>,
         override_config: ProviderOverride,
     ) -> Self {
-        self.config
-            .overrides
-            .insert(provider_id.into(), override_config);
+        self.config.overrides.insert(provider_id.into(), override_config);
         self
     }
 
@@ -176,9 +174,6 @@ impl ModelGateway {
             return Err(ModelError::UnsupportedProvider(self.primary_provider_id().to_owned()));
         };
 
-        Ok(ResolvedProvider::from_spec(
-            spec,
-            self.config.overrides.get(self.primary_provider_id()),
-        ))
+        Ok(ResolvedProvider::from_spec(spec, self.config.overrides.get(self.primary_provider_id())))
     }
 }

@@ -53,19 +53,13 @@ impl EventBus {
     /// Registers a new subscriber and returns its receiving end.
     pub fn subscribe(&self) -> Receiver<ServerEvent> {
         let (sender, receiver) = mpsc::channel();
-        self.subscribers
-            .lock()
-            .expect("event bus mutex should not be poisoned")
-            .push(sender);
+        self.subscribers.lock().expect("event bus mutex should not be poisoned").push(sender);
         receiver
     }
 
     /// Publishes all provided pending events to the current subscribers.
     pub fn publish_all(&self, events: Vec<PendingEvent>) -> Vec<ServerEvent> {
-        events
-            .into_iter()
-            .map(|event| self.publish(event))
-            .collect()
+        events.into_iter().map(|event| self.publish(event)).collect()
     }
 
     /// Publishes a single pending event to the current subscribers.
@@ -79,18 +73,14 @@ impl EventBus {
             payload: pending.payload,
         };
 
-        let mut subscribers = self
-            .subscribers
-            .lock()
-            .expect("event bus mutex should not be poisoned");
+        let mut subscribers =
+            self.subscribers.lock().expect("event bus mutex should not be poisoned");
         subscribers.retain(|sender| sender.send(event.clone()).is_ok());
         event
     }
 }
 
 fn now_timestamp() -> Timestamp {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
     Timestamp::new(format!("unix:{}.{:09}", now.as_secs(), now.subsec_nanos()))
 }

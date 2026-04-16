@@ -9,10 +9,9 @@ use std::time::Duration;
 
 /// Builds a blocking HTTP client for provider requests.
 pub fn build_client() -> Result<Client, ModelError> {
-    Client::builder()
-        .timeout(Duration::from_secs(60))
-        .build()
-        .map_err(|error| ModelError::ProviderFailure(format!("failed to build HTTP client: {error}")))
+    Client::builder().timeout(Duration::from_secs(60)).build().map_err(|error| {
+        ModelError::ProviderFailure(format!("failed to build HTTP client: {error}"))
+    })
 }
 
 /// Converts a string map into a reqwest header map.
@@ -37,23 +36,22 @@ pub fn post_json(
     headers: &BTreeMap<String, String>,
     body: &Value,
 ) -> Result<Value, ModelError> {
-    let response = client
-        .post(url)
-        .headers(build_headers(headers)?)
-        .json(body)
-        .send()
-        .map_err(|error| ModelError::ProviderFailure(format!("provider request failed: {error}")))?;
+    let response =
+        client.post(url).headers(build_headers(headers)?).json(body).send().map_err(|error| {
+            ModelError::ProviderFailure(format!("provider request failed: {error}"))
+        })?;
 
     let status = response.status();
-    let text = response
-        .text()
-        .map_err(|error| ModelError::ProviderFailure(format!("failed to read response body: {error}")))?;
+    let text = response.text().map_err(|error| {
+        ModelError::ProviderFailure(format!("failed to read response body: {error}"))
+    })?;
     if !status.is_success() {
         return Err(ModelError::ProviderFailure(format!(
             "provider request returned {status}: {text}"
         )));
     }
 
-    serde_json::from_str(&text)
-        .map_err(|error| ModelError::ProviderFailure(format!("failed to parse JSON response: {error}")))
+    serde_json::from_str(&text).map_err(|error| {
+        ModelError::ProviderFailure(format!("failed to parse JSON response: {error}"))
+    })
 }

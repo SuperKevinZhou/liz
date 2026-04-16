@@ -10,9 +10,7 @@ use std::thread;
 
 #[test]
 fn openai_compatible_live_request_uses_chat_completions_shape() {
-    let _guard = env_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = env_lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");
 
     let capture = Arc::new(Mutex::new(String::new()));
@@ -37,37 +35,24 @@ fn openai_compatible_live_request_uses_chat_completions_shape() {
         primary_provider: "openrouter".to_owned(),
         overrides,
     });
-    let summary = gateway
-        .run_turn(demo_request(), |_| {})
-        .expect("openrouter request should succeed");
+    let summary =
+        gateway.run_turn(demo_request(), |_| {}).expect("openrouter request should succeed");
 
-    let request = capture
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clone();
+    let request = capture.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
     assert!(request.contains("POST /v1/chat/completions HTTP/1.1"));
-    assert!(
-        request
-            .to_ascii_lowercase()
-            .contains("authorization: bearer sk-test")
-    );
+    assert!(request.to_ascii_lowercase().contains("authorization: bearer sk-test"));
     assert!(request.contains(r#""model":"openai/gpt-4.1-mini""#));
     assert!(request.contains(r#""messages":["#));
     assert!(request.contains(r#""role":"user""#));
     assert!(request.contains(r#""content":"Run a patch tool command for this task""#));
-    assert_eq!(
-        summary.assistant_message.as_deref(),
-        Some("hello from openai-compatible")
-    );
+    assert_eq!(summary.assistant_message.as_deref(), Some("hello from openai-compatible"));
 
     std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
 }
 
 #[test]
 fn openai_codex_live_request_refreshes_oauth_and_uses_native_codex_endpoint() {
-    let _guard = env_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = env_lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");
 
     let capture = Arc::new(Mutex::new(Vec::<String>::new()));
@@ -88,18 +73,9 @@ fn openai_codex_live_request_refreshes_oauth_and_uses_native_codex_endpoint() {
             model_id: Some("gpt-5.4".to_owned()),
             headers: BTreeMap::new(),
             metadata: BTreeMap::from([
-                (
-                    String::from("openai_codex.refresh_token"),
-                    String::from("refresh-token"),
-                ),
-                (
-                    String::from("openai_codex.expires_at_ms"),
-                    String::from("1"),
-                ),
-                (
-                    String::from("openai_codex.token_url"),
-                    format!("{base_url}/oauth/token"),
-                ),
+                (String::from("openai_codex.refresh_token"), String::from("refresh-token")),
+                (String::from("openai_codex.expires_at_ms"), String::from("1")),
+                (String::from("openai_codex.token_url"), format!("{base_url}/oauth/token")),
             ]),
         },
     );
@@ -108,14 +84,10 @@ fn openai_codex_live_request_refreshes_oauth_and_uses_native_codex_endpoint() {
         primary_provider: "openai-codex".to_owned(),
         overrides,
     });
-    let summary = gateway
-        .run_turn(demo_request(), |_| {})
-        .expect("openai-codex request should succeed");
+    let summary =
+        gateway.run_turn(demo_request(), |_| {}).expect("openai-codex request should succeed");
 
-    let captures = capture
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clone();
+    let captures = capture.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
     let refresh = captures.first().expect("refresh request");
     let runtime = captures.get(1).expect("codex request");
     let refresh_lower = refresh.to_ascii_lowercase();
@@ -129,32 +101,22 @@ fn openai_codex_live_request_refreshes_oauth_and_uses_native_codex_endpoint() {
 
     assert!(runtime.contains("POST /codex/responses HTTP/1.1"));
     assert!(runtime_lower.contains("authorization: bearer header."));
-    assert!(
-        runtime_lower.contains("chatgpt-account-id: acct-codex"),
-        "{runtime}"
-    );
+    assert!(runtime_lower.contains("chatgpt-account-id: acct-codex"), "{runtime}");
     assert!(runtime.contains(r#""model":"gpt-5.4""#));
     assert!(runtime.contains(r#""input":"Run a patch tool command for this task""#));
-    assert_eq!(
-        summary.assistant_message.as_deref(),
-        Some("hello from codex oauth")
-    );
+    assert_eq!(summary.assistant_message.as_deref(), Some("hello from codex oauth"));
 
     std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
 }
 
 #[test]
 fn anthropic_live_request_uses_messages_shape_and_headers() {
-    let _guard = env_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = env_lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");
 
     let capture = Arc::new(Mutex::new(String::new()));
-    let base_url = spawn_json_server(
-        capture.clone(),
-        r#"{"content":[{"text":"hello from anthropic"}]}"#,
-    );
+    let base_url =
+        spawn_json_server(capture.clone(), r#"{"content":[{"text":"hello from anthropic"}]}"#);
 
     let mut overrides = BTreeMap::new();
     overrides.insert(
@@ -172,14 +134,10 @@ fn anthropic_live_request_uses_messages_shape_and_headers() {
         primary_provider: "anthropic".to_owned(),
         overrides,
     });
-    let summary = gateway
-        .run_turn(demo_request(), |_| {})
-        .expect("anthropic request should succeed");
+    let summary =
+        gateway.run_turn(demo_request(), |_| {}).expect("anthropic request should succeed");
 
-    let request = capture
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clone();
+    let request = capture.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
     assert!(request.contains("POST /v1/messages HTTP/1.1"));
     let lowercase = request.to_ascii_lowercase();
     assert!(
@@ -201,9 +159,7 @@ fn anthropic_live_request_uses_messages_shape_and_headers() {
 
 #[test]
 fn google_live_request_uses_generate_content_shape() {
-    let _guard = env_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = env_lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");
 
     let capture = Arc::new(Mutex::new(String::new()));
@@ -228,15 +184,11 @@ fn google_live_request_uses_generate_content_shape() {
         primary_provider: "google".to_owned(),
         overrides,
     });
-    let summary = gateway
-        .run_turn(demo_request(), |_| {})
-        .expect("google request should succeed");
+    let summary = gateway.run_turn(demo_request(), |_| {}).expect("google request should succeed");
 
-    let request = capture
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clone();
-    assert!(request.contains("POST /v1beta/models/gemini-3.1-pro:generateContent?key=google-test HTTP/1.1"));
+    let request = capture.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+    assert!(request
+        .contains("POST /v1beta/models/gemini-3.1-pro:generateContent?key=google-test HTTP/1.1"));
     assert!(request.contains(r#""contents":["#));
     assert!(request.contains(r#""role":"user""#));
     assert!(request.contains(r#""parts":["#));
@@ -248,9 +200,7 @@ fn google_live_request_uses_generate_content_shape() {
 
 #[test]
 fn google_vertex_live_request_uses_vertex_generate_content_path_and_bearer_auth() {
-    let _guard = env_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = env_lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");
 
     let capture = Arc::new(Mutex::new(String::new()));
@@ -278,22 +228,14 @@ fn google_vertex_live_request_uses_vertex_generate_content_path_and_bearer_auth(
         primary_provider: "google-vertex".to_owned(),
         overrides,
     });
-    let summary = gateway
-        .run_turn(demo_request(), |_| {})
-        .expect("google-vertex request should succeed");
+    let summary =
+        gateway.run_turn(demo_request(), |_| {}).expect("google-vertex request should succeed");
 
-    let request = capture
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clone();
+    let request = capture.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
     assert!(request.contains(
         "POST /v1/projects/demo-project/locations/us-central1/publishers/google/models/gemini-3.1-pro:generateContent HTTP/1.1"
     ));
-    assert!(
-        request
-            .to_ascii_lowercase()
-            .contains("authorization: bearer vertex-test")
-    );
+    assert!(request.to_ascii_lowercase().contains("authorization: bearer vertex-test"));
     assert!(request.contains(r#""contents":["#));
     assert!(request.contains(r#""role":"user""#));
     assert!(request.contains(r#""text":"Run a patch tool command for this task""#));
@@ -304,9 +246,7 @@ fn google_vertex_live_request_uses_vertex_generate_content_path_and_bearer_auth(
 
 #[test]
 fn google_vertex_anthropic_live_request_uses_raw_predict_shape() {
-    let _guard = env_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = env_lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");
 
     let capture = Arc::new(Mutex::new(String::new()));
@@ -338,35 +278,23 @@ fn google_vertex_anthropic_live_request_uses_raw_predict_shape() {
         .run_turn(demo_request(), |_| {})
         .expect("google-vertex-anthropic request should succeed");
 
-    let request = capture
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clone();
+    let request = capture.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
     assert!(request.contains(
         "POST /v1/projects/demo-project/locations/global/publishers/anthropic/models/claude-sonnet-4-6:rawPredict HTTP/1.1"
     ));
-    assert!(
-        request
-            .to_ascii_lowercase()
-            .contains("authorization: bearer vertex-anthropic-test")
-    );
+    assert!(request.to_ascii_lowercase().contains("authorization: bearer vertex-anthropic-test"));
     assert!(request.contains(r#""anthropic_version":"vertex-2023-10-16""#));
     assert!(request.contains(r#""messages":["#));
     assert!(request.contains(r#""role":"user""#));
     assert!(request.contains(r#""content":"Run a patch tool command for this task""#));
-    assert_eq!(
-        summary.assistant_message.as_deref(),
-        Some("hello from vertex anthropic")
-    );
+    assert_eq!(summary.assistant_message.as_deref(), Some("hello from vertex anthropic"));
 
     std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
 }
 
 #[test]
 fn bedrock_live_request_uses_bearer_auth_and_converse_path() {
-    let _guard = env_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = env_lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");
 
     let capture = Arc::new(Mutex::new(String::new()));
@@ -391,44 +319,26 @@ fn bedrock_live_request_uses_bearer_auth_and_converse_path() {
         primary_provider: "amazon-bedrock".to_owned(),
         overrides,
     });
-    let summary = gateway
-        .run_turn(demo_request(), |_| {})
-        .expect("bedrock bearer request should succeed");
+    let summary =
+        gateway.run_turn(demo_request(), |_| {}).expect("bedrock bearer request should succeed");
 
-    let request = capture
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clone();
-    assert!(request.contains(
-        "POST /model/anthropic.claude-sonnet-4-6-v1:0/converse HTTP/1.1"
-    ));
-    assert!(
-        request
-            .to_ascii_lowercase()
-            .contains("authorization: bearer bedrock-bearer-test")
-    );
+    let request = capture.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+    assert!(request.contains("POST /model/anthropic.claude-sonnet-4-6-v1:0/converse HTTP/1.1"));
+    assert!(request.to_ascii_lowercase().contains("authorization: bearer bedrock-bearer-test"));
     assert!(request.contains(r#""messages":["#));
     assert!(request.contains(r#""role":"user""#));
     assert!(request.contains(r#""text":"Run a patch tool command for this task""#));
-    assert_eq!(
-        summary.assistant_message.as_deref(),
-        Some("hello from bedrock bearer")
-    );
+    assert_eq!(summary.assistant_message.as_deref(), Some("hello from bedrock bearer"));
 
     std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
 }
 
 #[test]
 fn bedrock_live_request_uses_sigv4_when_credential_chain_is_available() {
-    let _guard = env_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = env_lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");
     std::env::set_var("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE");
-    std::env::set_var(
-        "AWS_SECRET_ACCESS_KEY",
-        "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY",
-    );
+    std::env::set_var("AWS_SECRET_ACCESS_KEY", "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY");
     std::env::set_var("AWS_SESSION_TOKEN", "session-token-example");
     std::env::set_var("AWS_REGION", "us-east-1");
 
@@ -454,18 +364,12 @@ fn bedrock_live_request_uses_sigv4_when_credential_chain_is_available() {
         primary_provider: "amazon-bedrock".to_owned(),
         overrides,
     });
-    let summary = gateway
-        .run_turn(demo_request(), |_| {})
-        .expect("bedrock sigv4 request should succeed");
+    let summary =
+        gateway.run_turn(demo_request(), |_| {}).expect("bedrock sigv4 request should succeed");
 
-    let request = capture
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clone();
+    let request = capture.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
     let lowercase = request.to_ascii_lowercase();
-    assert!(request.contains(
-        "POST /model/anthropic.claude-sonnet-4-6-v1:0/converse HTTP/1.1"
-    ));
+    assert!(request.contains("POST /model/anthropic.claude-sonnet-4-6-v1:0/converse HTTP/1.1"));
     assert!(
         lowercase.contains("authorization: aws4-hmac-sha256 credential=akidexample/"),
         "{request}"
@@ -473,10 +377,7 @@ fn bedrock_live_request_uses_sigv4_when_credential_chain_is_available() {
     assert!(lowercase.contains("x-amz-date: "));
     assert!(lowercase.contains("x-amz-security-token: session-token-example"));
     assert!(request.contains(r#""inferenceConfig":{"maxTokens":4096}"#));
-    assert_eq!(
-        summary.assistant_message.as_deref(),
-        Some("hello from bedrock sigv4")
-    );
+    assert_eq!(summary.assistant_message.as_deref(), Some("hello from bedrock sigv4"));
 
     std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
     std::env::remove_var("AWS_ACCESS_KEY_ID");
@@ -487,9 +388,7 @@ fn bedrock_live_request_uses_sigv4_when_credential_chain_is_available() {
 
 #[test]
 fn github_copilot_live_request_exchanges_token_and_uses_chat_completions() {
-    let _guard = env_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = env_lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");
 
     let capture = Arc::new(Mutex::new(Vec::<String>::new()));
@@ -524,17 +423,12 @@ fn github_copilot_live_request_exchanges_token_and_uses_chat_completions() {
         .run_turn(demo_request(), |_| {})
         .expect("github-copilot chat request should succeed");
 
-    let captures = capture
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clone();
+    let captures = capture.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
     let exchange = captures.first().expect("exchange request");
     let chat = captures.get(1).expect("chat request");
     let exchange_lower = exchange.to_ascii_lowercase();
     assert!(exchange.contains("GET /copilot/token HTTP/1.1"));
-    assert!(
-        exchange_lower.contains("authorization: bearer github-user-token")
-    );
+    assert!(exchange_lower.contains("authorization: bearer github-user-token"));
     assert!(exchange_lower.contains("editor-version: vscode/1.96.2"));
     assert!(exchange_lower.contains("user-agent: githubcopilotchat/0.26.7"));
     assert!(exchange_lower.contains("x-github-api-version: 2025-04-01"));
@@ -544,19 +438,14 @@ fn github_copilot_live_request_exchanges_token_and_uses_chat_completions() {
     assert!(lowercase.contains("authorization: bearer copilot-runtime-token"));
     assert!(lowercase.contains("openai-intent: conversation-edits"));
     assert!(lowercase.contains("x-initiator: user"));
-    assert_eq!(
-        summary.assistant_message.as_deref(),
-        Some("hello from copilot chat")
-    );
+    assert_eq!(summary.assistant_message.as_deref(), Some("hello from copilot chat"));
 
     std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
 }
 
 #[test]
 fn github_copilot_live_request_uses_responses_api_for_gpt5_models() {
-    let _guard = env_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = env_lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");
 
     let capture = Arc::new(Mutex::new(Vec::<String>::new()));
@@ -591,27 +480,19 @@ fn github_copilot_live_request_uses_responses_api_for_gpt5_models() {
         .run_turn(demo_request(), |_| {})
         .expect("github-copilot responses request should succeed");
 
-    let captures = capture
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clone();
+    let captures = capture.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
     let runtime = captures.get(1).expect("responses request");
     assert!(runtime.contains("POST /v1/responses HTTP/1.1"));
     assert!(runtime.contains(r#""model":"gpt-5.4""#));
     assert!(runtime.contains(r#""input":"Run a patch tool command for this task""#));
-    assert_eq!(
-        summary.assistant_message.as_deref(),
-        Some("hello from copilot responses")
-    );
+    assert_eq!(summary.assistant_message.as_deref(), Some("hello from copilot responses"));
 
     std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
 }
 
 #[test]
 fn github_copilot_live_request_uses_messages_transport_for_claude_models() {
-    let _guard = env_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = env_lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");
 
     let capture = Arc::new(Mutex::new(Vec::<String>::new()));
@@ -646,10 +527,7 @@ fn github_copilot_live_request_uses_messages_transport_for_claude_models() {
         .run_turn(demo_request(), |_| {})
         .expect("github-copilot claude request should succeed");
 
-    let captures = capture
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clone();
+    let captures = capture.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
     let messages = captures.get(1).expect("messages request");
     let lowercase = messages.to_ascii_lowercase();
     assert!(messages.contains("POST /v1/messages HTTP/1.1"));
@@ -658,19 +536,14 @@ fn github_copilot_live_request_uses_messages_transport_for_claude_models() {
     assert!(lowercase.contains("anthropic-beta: interleaved-thinking-2025-05-14"));
     assert!(messages.contains(r#""model":"claude-sonnet-4-6""#));
     assert!(messages.contains(r#""content":"Run a patch tool command for this task""#));
-    assert_eq!(
-        summary.assistant_message.as_deref(),
-        Some("hello from copilot claude")
-    );
+    assert_eq!(summary.assistant_message.as_deref(), Some("hello from copilot claude"));
 
     std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
 }
 
 #[test]
 fn gitlab_live_request_uses_bearer_auth_for_oauth_tokens() {
-    let _guard = env_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = env_lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");
 
     let capture = Arc::new(Mutex::new(String::new()));
@@ -692,31 +565,22 @@ fn gitlab_live_request_uses_bearer_auth_for_oauth_tokens() {
         primary_provider: "gitlab".to_owned(),
         overrides,
     });
-    let summary = gateway
-        .run_turn(demo_request(), |_| {})
-        .expect("gitlab oauth request should succeed");
+    let summary =
+        gateway.run_turn(demo_request(), |_| {}).expect("gitlab oauth request should succeed");
 
-    let request = capture
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clone();
+    let request = capture.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
     let lowercase = request.to_ascii_lowercase();
     assert!(request.contains("POST /api/v4/chat/completions HTTP/1.1"));
     assert!(lowercase.contains("authorization: bearer oauth-token"));
     assert!(request.contains(r#""content":"Run a patch tool command for this task""#));
-    assert_eq!(
-        summary.assistant_message.as_deref(),
-        Some("hello from gitlab oauth")
-    );
+    assert_eq!(summary.assistant_message.as_deref(), Some("hello from gitlab oauth"));
 
     std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
 }
 
 #[test]
 fn gitlab_live_request_uses_private_token_for_pat_tokens() {
-    let _guard = env_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = env_lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");
 
     let capture = Arc::new(Mutex::new(String::new()));
@@ -738,21 +602,14 @@ fn gitlab_live_request_uses_private_token_for_pat_tokens() {
         primary_provider: "gitlab".to_owned(),
         overrides,
     });
-    let summary = gateway
-        .run_turn(demo_request(), |_| {})
-        .expect("gitlab pat request should succeed");
+    let summary =
+        gateway.run_turn(demo_request(), |_| {}).expect("gitlab pat request should succeed");
 
-    let request = capture
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clone();
+    let request = capture.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
     let lowercase = request.to_ascii_lowercase();
     assert!(request.contains("POST /api/v4/chat/completions HTTP/1.1"));
     assert!(lowercase.contains("private-token: glpat-example-token"));
-    assert_eq!(
-        summary.assistant_message.as_deref(),
-        Some("hello from gitlab pat")
-    );
+    assert_eq!(summary.assistant_message.as_deref(), Some("hello from gitlab pat"));
 
     std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
 }
@@ -764,18 +621,14 @@ fn spawn_json_server(capture: Arc<Mutex<String>>, response_body: &'static str) -
     thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("server should accept");
         let request = read_http_request(&mut stream);
-        *capture
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = request;
+        *capture.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = request;
 
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
             response_body.len(),
             response_body
         );
-        stream
-            .write_all(response.as_bytes())
-            .expect("response should be writable");
+        stream.write_all(response.as_bytes()).expect("response should be writable");
         stream.flush().expect("response should flush");
     });
 
@@ -793,19 +646,14 @@ fn spawn_json_server_sequence(
         for response_body in response_bodies {
             let (mut stream, _) = listener.accept().expect("server should accept");
             let request = read_http_request(&mut stream);
-            capture
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .push(request);
+            capture.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push(request);
 
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                 response_body.len(),
                 response_body
             );
-            stream
-                .write_all(response.as_bytes())
-                .expect("response should be writable");
+            stream.write_all(response.as_bytes()).expect("response should be writable");
             stream.flush().expect("response should flush");
         }
     });
@@ -882,10 +730,7 @@ fn read_http_request(stream: &mut std::net::TcpStream) -> String {
 }
 
 fn find_header_end(buffer: &[u8]) -> Option<usize> {
-    buffer
-        .windows(4)
-        .position(|window| window == b"\r\n\r\n")
-        .map(|index| index + 4)
+    buffer.windows(4).position(|window| window == b"\r\n\r\n").map(|index| index + 4)
 }
 
 fn parse_content_length(headers: &[u8]) -> usize {

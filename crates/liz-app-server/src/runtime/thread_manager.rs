@@ -116,7 +116,8 @@ impl ThreadManager {
         thread: &Thread,
     ) -> RuntimeResult<()> {
         stores.put_thread(thread)?;
-        let should_be_active = !matches!(thread.status, ThreadStatus::Archived | ThreadStatus::Completed);
+        let should_be_active =
+            !matches!(thread.status, ThreadStatus::Archived | ThreadStatus::Completed);
         self.sync_active_thread_ids(stores, &thread.id, should_be_active)?;
         Ok(())
     }

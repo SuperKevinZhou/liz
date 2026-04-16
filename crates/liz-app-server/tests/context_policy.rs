@@ -60,9 +60,7 @@ fn risky_turn_stops_for_checkpoint_and_approval_then_resumes_after_approval() {
         },
         other => panic!("unexpected response envelope: {other:?}"),
     };
-    client
-        .recv_event_timeout(Duration::from_secs(1))
-        .expect("thread_started event should arrive");
+    client.recv_event_timeout(Duration::from_secs(1)).expect("thread_started event should arrive");
 
     client
         .send_request(envelope(
@@ -112,9 +110,7 @@ fn risky_turn_stops_for_checkpoint_and_approval_then_resumes_after_approval() {
             }),
         ))
         .expect("approval response should be sent");
-    let response = client
-        .recv_response()
-        .expect("approval response should eventually arrive");
+    let response = client.recv_response().expect("approval response should eventually arrive");
     assert!(matches!(response, liz_protocol::ServerResponseEnvelope::Success(_)));
     let resolved = client
         .recv_event_timeout(Duration::from_secs(1))
@@ -143,8 +139,5 @@ fn risky_turn_stops_for_checkpoint_and_approval_then_resumes_after_approval() {
 }
 
 fn envelope(request_id: &str, request: ClientRequest) -> ClientRequestEnvelope {
-    ClientRequestEnvelope {
-        request_id: RequestId::new(request_id),
-        request,
-    }
+    ClientRequestEnvelope { request_id: RequestId::new(request_id), request }
 }

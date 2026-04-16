@@ -1,9 +1,7 @@
 //! Event-driven CLI view-model coverage.
 
 use liz_cli::view_model::ViewModel;
-use liz_protocol::events::{
-    ThreadStartedEvent, TurnCancelledEvent, TurnStartedEvent,
-};
+use liz_protocol::events::{ThreadStartedEvent, TurnCancelledEvent, TurnStartedEvent};
 use liz_protocol::{
     EventId, ServerEvent, ServerEventPayload, Thread, ThreadId, ThreadStatus, Timestamp, Turn,
     TurnId, TurnKind, TurnStatus,

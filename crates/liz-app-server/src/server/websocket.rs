@@ -22,16 +22,12 @@ impl LoopbackWebSocketClient {
         &self,
         request: ClientRequestEnvelope,
     ) -> Result<(), WebSocketTransportError> {
-        self.request_tx
-            .send(request)
-            .map_err(|_| WebSocketTransportError::Disconnected)
+        self.request_tx.send(request).map_err(|_| WebSocketTransportError::Disconnected)
     }
 
     /// Blocks until the next response is available.
     pub fn recv_response(&self) -> Result<ServerResponseEnvelope, WebSocketTransportError> {
-        self.response_rx
-            .recv()
-            .map_err(|_| WebSocketTransportError::Disconnected)
+        self.response_rx.recv().map_err(|_| WebSocketTransportError::Disconnected)
     }
 
     /// Waits for the next server event for up to the provided duration.
