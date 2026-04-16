@@ -4,16 +4,16 @@ use crate::events::PendingEvent;
 use crate::executor::ExecutorGateway;
 use crate::runtime::{RuntimeCoordinator, RuntimeError};
 use liz_protocol::events::{
-    ApprovalResolvedEvent, ArtifactCreatedEvent, DiffAvailableEvent, ThreadForkedEvent,
-    ThreadInterruptedEvent, ThreadResumedEvent, ThreadStartedEvent, ThreadUpdatedEvent,
-    ToolCompletedEvent, TurnCancelledEvent, TurnStartedEvent,
+    ApprovalResolvedEvent, ArtifactCreatedEvent, DiffAvailableEvent, ExecutorOutputChunkEvent,
+    ThreadForkedEvent, ThreadInterruptedEvent, ThreadResumedEvent, ThreadStartedEvent,
+    ThreadUpdatedEvent, ToolCompletedEvent, TurnCancelledEvent, TurnStartedEvent,
 };
 use liz_protocol::requests::ClientRequest;
 use liz_protocol::responses::{
     ErrorResponseEnvelope, ResponseError, ResponsePayload, ServerResponseEnvelope,
     SuccessResponseEnvelope,
 };
-use liz_protocol::{ClientRequestEnvelope, RequestId, ServerEventPayload};
+use liz_protocol::{ClientRequestEnvelope, ExecutorTaskId, RequestId, ServerEventPayload};
 
 /// The fully handled result of a request, including any events that should be published.
 #[derive(Debug)]
@@ -125,6 +125,12 @@ pub fn handle_request(
             })
         }
         ClientRequest::ToolCall(request) => executor.execute_tool(&request).and_then(|executed| {
+            let executor_task_id = ExecutorTaskId::new(format!(
+                "executor_{}_{}",
+                request.thread_id,
+                executed.tool_name.as_str().replace('.', "_")
+            ));
+            let output_chunks = executed.output_chunks.clone();
             let artifacts = executed
                 .artifacts
                 .into_iter()
@@ -158,6 +164,17 @@ pub fn handle_request(
                     pending
                 })
                 .collect::<Vec<_>>();
+            events.extend(output_chunks.into_iter().map(|chunk| {
+                PendingEvent::new(
+                    request.thread_id.clone(),
+                    Some(execution_turn_id.clone()),
+                    ServerEventPayload::ExecutorOutputChunk(ExecutorOutputChunkEvent {
+                        executor_task_id: executor_task_id.clone(),
+                        stream: chunk.stream,
+                        chunk: chunk.chunk,
+                    }),
+                )
+            }));
             events.push(PendingEvent::new(
                 request.thread_id.clone(),
                 Some(execution_turn_id.clone()),

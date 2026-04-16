@@ -1,9 +1,12 @@
 //! Tool-surface execution and normalization.
 
+mod shell;
 mod workspace;
 
 use crate::runtime::RuntimeResult;
-use liz_protocol::{ArtifactKind, ToolCallRequest, ToolInvocation, ToolName, ToolResult};
+use liz_protocol::{
+    ArtifactKind, ExecutorStream, ToolCallRequest, ToolInvocation, ToolName, ToolResult,
+};
 use serde::Serialize;
 
 /// A persisted artifact payload produced while executing one tool.
@@ -28,6 +31,17 @@ pub struct ExecutedTool {
     pub result: ToolResult,
     /// Artifact payloads that should be persisted.
     pub artifacts: Vec<PendingArtifact>,
+    /// Normalized executor output chunks emitted while the tool ran.
+    pub output_chunks: Vec<ExecutorOutput>,
+}
+
+/// One normalized executor output chunk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecutorOutput {
+    /// The stream that emitted the chunk.
+    pub stream: ExecutorStream,
+    /// The emitted text chunk.
+    pub chunk: String,
 }
 
 /// Dispatches typed tool invocations to the local runtime implementation.
@@ -51,6 +65,7 @@ impl ExecutorGateway {
                     ToolResult::WorkspaceList(result),
                     &request.invocation,
                     None,
+                    Vec::new(),
                 ))
             }
             ToolInvocation::WorkspaceSearch(input) => {
@@ -67,6 +82,7 @@ impl ExecutorGateway {
                     ToolResult::WorkspaceSearch(result),
                     &request.invocation,
                     None,
+                    Vec::new(),
                 ))
             }
             ToolInvocation::WorkspaceRead(input) => {
@@ -81,6 +97,7 @@ impl ExecutorGateway {
                     ToolResult::WorkspaceRead(result),
                     &request.invocation,
                     None,
+                    Vec::new(),
                 ))
             }
             ToolInvocation::WorkspaceWriteText(input) => {
@@ -99,6 +116,7 @@ impl ExecutorGateway {
                     ToolResult::WorkspaceWriteText(write.result),
                     &request.invocation,
                     Some(diff_artifact(&input.path, &write.before, &write.after)),
+                    Vec::new(),
                 ))
             }
             ToolInvocation::WorkspaceApplyPatch(input) => {
@@ -113,6 +131,26 @@ impl ExecutorGateway {
                     ToolResult::WorkspaceApplyPatch(patch.result),
                     &request.invocation,
                     Some(diff_artifact(&input.path, &patch.before, &patch.after)),
+                    Vec::new(),
+                ))
+            }
+            ToolInvocation::ShellExec(input) => {
+                let execution = shell::exec(input)?;
+                let summary = format!(
+                    "Command exited with code {}: {}",
+                    execution.result.exit_code, execution.result.command
+                );
+                Ok(executed_tool(
+                    ToolName::ShellExec,
+                    summary,
+                    ToolResult::ShellExec(execution.result.clone()),
+                    &request.invocation,
+                    Some(command_output_artifact(&execution.result)),
+                    execution
+                        .output_chunks
+                        .into_iter()
+                        .map(|chunk| ExecutorOutput { stream: chunk.stream, chunk: chunk.chunk })
+                        .collect(),
                 ))
             }
         }
@@ -125,6 +163,7 @@ fn executed_tool(
     result: ToolResult,
     invocation: &ToolInvocation,
     extra_artifact: Option<PendingArtifact>,
+    output_chunks: Vec<ExecutorOutput>,
 ) -> ExecutedTool {
     let snapshot_body = match &result {
         ToolResult::WorkspaceList(output) => serialize_snapshot(output),
@@ -132,6 +171,7 @@ fn executed_tool(
         ToolResult::WorkspaceRead(output) => serialize_snapshot(output),
         ToolResult::WorkspaceWriteText(output) => serialize_snapshot(output),
         ToolResult::WorkspaceApplyPatch(output) => serialize_snapshot(output),
+        ToolResult::ShellExec(output) => serialize_snapshot(output),
     };
     let trace_body = serde_json::to_string_pretty(&ToolTraceArtifact {
         tool_name: tool_name.as_str().to_owned(),
@@ -157,7 +197,7 @@ fn executed_tool(
         artifacts.push(extra_artifact);
     }
 
-    ExecutedTool { tool_name, summary: summary.clone(), result, artifacts }
+    ExecutedTool { tool_name, summary: summary.clone(), result, artifacts, output_chunks }
 }
 
 fn serialize_snapshot<T: Serialize>(value: &T) -> String {
@@ -196,4 +236,12 @@ fn render_diff(path: &str, before: &str, after: &str) -> String {
         diff.push('\n');
     }
     diff
+}
+
+fn command_output_artifact(result: &liz_protocol::ShellExecResult) -> PendingArtifact {
+    PendingArtifact {
+        kind: ArtifactKind::CommandOutput,
+        summary: format!("Command output for {}", result.command),
+        body: serde_json::to_string_pretty(result).expect("command output should serialize"),
+    }
 }

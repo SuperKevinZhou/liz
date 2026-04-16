@@ -4,8 +4,8 @@ use liz_app_server::server::{spawn_loopback_websocket, AppServer};
 use liz_app_server::storage::StoragePaths;
 use liz_protocol::requests::{ClientRequest, ClientRequestEnvelope, ThreadStartRequest};
 use liz_protocol::{
-    RequestId, ResponsePayload, ServerEventPayload, ServerResponseEnvelope, ToolCallRequest,
-    ToolInvocation, ToolResult, WorkspaceApplyPatchRequest, WorkspaceListRequest,
+    RequestId, ResponsePayload, ServerEventPayload, ServerResponseEnvelope, ShellExecRequest,
+    ToolCallRequest, ToolInvocation, ToolResult, WorkspaceApplyPatchRequest, WorkspaceListRequest,
     WorkspaceReadRequest, WorkspaceSearchRequest, WorkspaceWriteTextRequest,
 };
 use std::fs;
@@ -210,6 +210,59 @@ fn workspace_mutating_tools_write_files_and_publish_diff_artifacts() {
     assert!(patch_events
         .iter()
         .any(|event| matches!(event.payload, ServerEventPayload::DiffAvailable(_))));
+}
+
+#[test]
+fn shell_exec_returns_output_and_emits_executor_chunks() {
+    let temp_dir = TempDir::new().expect("temp dir should be created");
+    let workspace_root = temp_dir.path().join("workspace");
+    fs::create_dir_all(&workspace_root).expect("workspace root should exist");
+
+    let server = AppServer::new(StoragePaths::new(temp_dir.path().join(".liz")));
+    let client = spawn_loopback_websocket(server);
+
+    client
+        .send_request(envelope(
+            "request_21",
+            ClientRequest::ThreadStart(ThreadStartRequest {
+                title: Some("Shell exec".to_owned()),
+                initial_goal: Some("Run one foreground command".to_owned()),
+                workspace_ref: Some(workspace_root.to_string_lossy().to_string()),
+            }),
+        ))
+        .expect("thread request should be sent");
+    let response = client.recv_response().expect("thread response should arrive");
+    let thread = match response {
+        ServerResponseEnvelope::Success(success) => match success.response {
+            ResponsePayload::ThreadStart(response) => response.thread,
+            other => panic!("unexpected response payload: {other:?}"),
+        },
+        other => panic!("unexpected response envelope: {other:?}"),
+    };
+    client.recv_event_timeout(Duration::from_secs(1)).expect("thread_started event should arrive");
+
+    let shell_response = send_tool(
+        &client,
+        "request_22",
+        ToolInvocation::ShellExec(ShellExecRequest {
+            command: "Write-Output 'hello'; [Console]::Error.WriteLine('warn')".to_owned(),
+            working_dir: Some(workspace_root.to_string_lossy().to_string()),
+        }),
+        &thread.id,
+    );
+    match shell_response.result {
+        ToolResult::ShellExec(result) => {
+            assert_eq!(result.exit_code, 0);
+            assert!(result.stdout.contains("hello"));
+            assert!(result.stderr.contains("warn"));
+        }
+        other => panic!("unexpected shell result: {other:?}"),
+    }
+
+    let shell_events = collect_tool_events(&client, 5);
+    assert!(shell_events
+        .iter()
+        .any(|event| matches!(event.payload, ServerEventPayload::ExecutorOutputChunk(_))));
 }
 
 fn send_tool(

@@ -18,6 +18,8 @@ pub enum ToolName {
     WorkspaceWriteText,
     /// Applies a bounded patch to a text file.
     WorkspaceApplyPatch,
+    /// Runs one foreground shell command and waits for it to finish.
+    ShellExec,
 }
 
 impl ToolName {
@@ -29,6 +31,7 @@ impl ToolName {
             Self::WorkspaceRead => "workspace.read",
             Self::WorkspaceWriteText => "workspace.write_text",
             Self::WorkspaceApplyPatch => "workspace.apply_patch",
+            Self::ShellExec => "shell.exec",
         }
     }
 }
@@ -52,6 +55,9 @@ pub enum ToolInvocation {
     /// Invokes `workspace.apply_patch`.
     #[serde(rename = "workspace.apply_patch")]
     WorkspaceApplyPatch(WorkspaceApplyPatchRequest),
+    /// Invokes `shell.exec`.
+    #[serde(rename = "shell.exec")]
+    ShellExec(ShellExecRequest),
 }
 
 impl ToolInvocation {
@@ -63,6 +69,7 @@ impl ToolInvocation {
             Self::WorkspaceRead(_) => ToolName::WorkspaceRead,
             Self::WorkspaceWriteText(_) => ToolName::WorkspaceWriteText,
             Self::WorkspaceApplyPatch(_) => ToolName::WorkspaceApplyPatch,
+            Self::ShellExec(_) => ToolName::ShellExec,
         }
     }
 }
@@ -86,6 +93,9 @@ pub enum ToolResult {
     /// Result payload for `workspace.apply_patch`.
     #[serde(rename = "workspace.apply_patch")]
     WorkspaceApplyPatch(WorkspaceApplyPatchResult),
+    /// Result payload for `shell.exec`.
+    #[serde(rename = "shell.exec")]
+    ShellExec(ShellExecResult),
 }
 
 impl ToolResult {
@@ -97,6 +107,7 @@ impl ToolResult {
             Self::WorkspaceRead(_) => ToolName::WorkspaceRead,
             Self::WorkspaceWriteText(_) => ToolName::WorkspaceWriteText,
             Self::WorkspaceApplyPatch(_) => ToolName::WorkspaceApplyPatch,
+            Self::ShellExec(_) => ToolName::ShellExec,
         }
     }
 }
@@ -253,6 +264,30 @@ pub struct WorkspaceApplyPatchResult {
     pub replacements: usize,
     /// Whether the file contents changed.
     pub changed: bool,
+}
+
+/// Input for `shell.exec`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShellExecRequest {
+    /// The shell command to run.
+    pub command: String,
+    /// The working directory for the command, if different from the process cwd.
+    pub working_dir: Option<String>,
+}
+
+/// Output for `shell.exec`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShellExecResult {
+    /// The command that was run.
+    pub command: String,
+    /// The working directory used for the command, if any.
+    pub working_dir: Option<String>,
+    /// The process exit code.
+    pub exit_code: i32,
+    /// Captured standard output.
+    pub stdout: String,
+    /// Captured standard error.
+    pub stderr: String,
 }
 
 /// Response payload for one tool execution.

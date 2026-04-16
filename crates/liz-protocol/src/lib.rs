@@ -48,8 +48,8 @@ pub use responses::{
 };
 pub use thread::{Thread, ThreadStatus};
 pub use tool::{
-    ToolCallRequest, ToolCallResponse, ToolInvocation, ToolName, ToolResult,
-    WorkspaceApplyPatchRequest, WorkspaceApplyPatchResult, WorkspaceListEntry,
+    ShellExecRequest, ShellExecResult, ToolCallRequest, ToolCallResponse, ToolInvocation, ToolName,
+    ToolResult, WorkspaceApplyPatchRequest, WorkspaceApplyPatchResult, WorkspaceListEntry,
     WorkspaceListRequest, WorkspaceListResult, WorkspaceReadRequest, WorkspaceReadResult,
     WorkspaceSearchMatch, WorkspaceSearchRequest, WorkspaceSearchResult, WorkspaceWriteTextRequest,
     WorkspaceWriteTextResult,
