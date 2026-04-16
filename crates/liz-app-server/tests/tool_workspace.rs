@@ -4,10 +4,11 @@ use liz_app_server::server::{spawn_loopback_websocket, AppServer};
 use liz_app_server::storage::StoragePaths;
 use liz_protocol::requests::{ClientRequest, ClientRequestEnvelope, ThreadStartRequest};
 use liz_protocol::{
-    RequestId, ResponsePayload, ServerEventPayload, ServerResponseEnvelope, ShellExecRequest,
-    ShellReadOutputRequest, ShellSpawnRequest, ShellTerminateRequest, ShellWaitRequest,
-    ToolCallRequest, ToolInvocation, ToolResult, WorkspaceApplyPatchRequest, WorkspaceListRequest,
-    WorkspaceReadRequest, WorkspaceSearchRequest, WorkspaceWriteTextRequest,
+    RequestId, ResponsePayload, SandboxBackendKind, SandboxMode, SandboxNetworkAccess,
+    ServerEventPayload, ServerResponseEnvelope, ShellExecRequest, ShellReadOutputRequest,
+    ShellSandboxRequest, ShellSpawnRequest, ShellTerminateRequest, ShellWaitRequest,
+    ToolCallRequest, ToolInvocation, ToolResult, WorkspaceApplyPatchRequest,
+    WorkspaceListRequest, WorkspaceReadRequest, WorkspaceSearchRequest, WorkspaceWriteTextRequest,
 };
 use std::fs;
 use std::time::Duration;
@@ -248,7 +249,7 @@ fn shell_exec_returns_output_and_emits_executor_chunks() {
         ToolInvocation::ShellExec(ShellExecRequest {
             command: "Write-Output 'hello'; [Console]::Error.WriteLine('warn')".to_owned(),
             working_dir: Some(workspace_root.to_string_lossy().to_string()),
-            sandbox: None,
+            sandbox: Some(danger_full_access()),
         }),
         &thread.id,
     );
@@ -257,6 +258,8 @@ fn shell_exec_returns_output_and_emits_executor_chunks() {
             assert_eq!(result.exit_code, 0);
             assert!(result.stdout.contains("hello"));
             assert!(result.stderr.contains("warn"));
+            assert_eq!(result.sandbox.mode, SandboxMode::DangerFullAccess);
+            assert_eq!(result.sandbox.backend, SandboxBackendKind::None);
         }
         other => panic!("unexpected shell result: {other:?}"),
     }
@@ -302,12 +305,15 @@ fn background_shell_can_spawn_read_and_wait() {
         ToolInvocation::ShellSpawn(ShellSpawnRequest {
             command: "[Console]::Out.WriteLine('bg-out'); [Console]::Error.WriteLine('bg-err'); Start-Sleep -Milliseconds 600".to_owned(),
             working_dir: Some(workspace_root.to_string_lossy().to_string()),
-            sandbox: None,
+            sandbox: Some(danger_full_access()),
         }),
         &thread.id,
     );
     let task_id = match spawn_response.result {
-        ToolResult::ShellSpawn(result) => result.task_id,
+        ToolResult::ShellSpawn(result) => {
+            assert_eq!(result.sandbox.mode, SandboxMode::DangerFullAccess);
+            result.task_id
+        }
         other => panic!("unexpected shell spawn result: {other:?}"),
     };
     let spawn_events = collect_tool_events(&client, 3);
@@ -326,6 +332,7 @@ fn background_shell_can_spawn_read_and_wait() {
             assert_eq!(result.exit_code, Some(0));
             assert!(result.stdout.contains("bg-out"));
             assert!(result.stderr.contains("bg-err"));
+            assert_eq!(result.sandbox.mode, SandboxMode::DangerFullAccess);
         }
         other => panic!("unexpected shell wait result: {other:?}"),
     }
@@ -346,6 +353,7 @@ fn background_shell_can_spawn_read_and_wait() {
             assert!(result.stderr_delta.contains("bg-err"));
             assert_eq!(result.task_id, task_id);
             assert_eq!(result.exit_code, Some(0));
+            assert_eq!(result.sandbox.mode, SandboxMode::DangerFullAccess);
         }
         other => panic!("unexpected shell read_output result: {other:?}"),
     }
@@ -390,7 +398,7 @@ fn background_shell_can_terminate() {
         ToolInvocation::ShellSpawn(ShellSpawnRequest {
             command: "Start-Sleep -Seconds 5".to_owned(),
             working_dir: Some(workspace_root.to_string_lossy().to_string()),
-            sandbox: None,
+            sandbox: Some(danger_full_access()),
         }),
         &thread.id,
     );
@@ -409,6 +417,7 @@ fn background_shell_can_terminate() {
     match terminate_response.result {
         ToolResult::ShellTerminate(result) => {
             assert!(result.terminated);
+            assert_eq!(result.sandbox.mode, SandboxMode::DangerFullAccess);
         }
         other => panic!("unexpected shell terminate result: {other:?}"),
     }
@@ -457,4 +466,11 @@ fn collect_tool_events(
             client.recv_event_timeout(Duration::from_secs(1)).expect("tool event should arrive")
         })
         .collect()
+}
+
+fn danger_full_access() -> ShellSandboxRequest {
+    ShellSandboxRequest {
+        mode: SandboxMode::DangerFullAccess,
+        network_access: SandboxNetworkAccess::Enabled,
+    }
 }

@@ -51,6 +51,46 @@ impl SandboxNetworkAccess {
     }
 }
 
+/// The concrete platform backend that enforced sandbox policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SandboxBackendKind {
+    /// No platform backend enforced the command.
+    None,
+    /// macOS Seatbelt enforcement.
+    MacosSeatbelt,
+    /// Linux helper-backed sandboxing.
+    LinuxHelper,
+    /// Windows restricted-token enforcement.
+    WindowsRestrictedToken,
+    /// Windows sandbox-user enforcement.
+    WindowsSandboxUser,
+}
+
+impl SandboxBackendKind {
+    /// Returns the stable wire name for the backend.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::MacosSeatbelt => "macos-seatbelt",
+            Self::LinuxHelper => "linux-helper",
+            Self::WindowsRestrictedToken => "windows-restricted-token",
+            Self::WindowsSandboxUser => "windows-sandbox-user",
+        }
+    }
+}
+
+/// The effective sandbox settings used for a shell tool execution.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShellSandboxSummary {
+    /// The effective sandbox mode.
+    pub mode: SandboxMode,
+    /// The effective network posture.
+    pub network_access: SandboxNetworkAccess,
+    /// The concrete backend selected for the command.
+    pub backend: SandboxBackendKind,
+}
+
 /// A per-request sandbox override for shell tools.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShellSandboxRequest {

@@ -2,7 +2,7 @@
 
 use crate::artifact::ArtifactRef;
 use crate::ids::{ExecutorTaskId, ThreadId, TurnId};
-use crate::sandbox::ShellSandboxRequest;
+use crate::sandbox::{ShellSandboxRequest, ShellSandboxSummary};
 use serde::{Deserialize, Serialize};
 
 /// The stable tool names exposed by the runtime.
@@ -329,6 +329,8 @@ pub struct ShellExecResult {
     pub command: String,
     /// The working directory used for the command, if any.
     pub working_dir: Option<String>,
+    /// The effective sandbox settings used for the command.
+    pub sandbox: ShellSandboxSummary,
     /// The process exit code.
     pub exit_code: i32,
     /// Captured standard output.
@@ -357,6 +359,8 @@ pub struct ShellSpawnResult {
     pub command: String,
     /// The working directory used for the command, if any.
     pub working_dir: Option<String>,
+    /// The effective sandbox settings used for the command.
+    pub sandbox: ShellSandboxSummary,
 }
 
 /// Input for `shell.wait`.
@@ -371,6 +375,8 @@ pub struct ShellWaitRequest {
 pub struct ShellWaitResult {
     /// The background task that was waited on.
     pub task_id: ExecutorTaskId,
+    /// The effective sandbox settings used for the task.
+    pub sandbox: ShellSandboxSummary,
     /// Whether the command is still running after the wait.
     pub running: bool,
     /// The final exit code when available.
@@ -393,6 +399,8 @@ pub struct ShellReadOutputRequest {
 pub struct ShellReadOutputResult {
     /// The background task whose output was read.
     pub task_id: ExecutorTaskId,
+    /// The effective sandbox settings used for the task.
+    pub sandbox: ShellSandboxSummary,
     /// Whether the command is still running.
     pub running: bool,
     /// The final exit code when available.
@@ -415,6 +423,8 @@ pub struct ShellTerminateRequest {
 pub struct ShellTerminateResult {
     /// The background task that was terminated.
     pub task_id: ExecutorTaskId,
+    /// The effective sandbox settings used for the task.
+    pub sandbox: ShellSandboxSummary,
     /// Whether the terminate request sent a kill signal.
     pub terminated: bool,
     /// The observed exit code when available.

@@ -47,7 +47,10 @@ pub use responses::{
     ThreadForkResponse, ThreadResumeResponse, ThreadRollbackResponse, ThreadStartResponse,
     TurnCancelResponse, TurnStartResponse,
 };
-pub use sandbox::{SandboxMode, SandboxNetworkAccess, ShellSandboxRequest};
+pub use sandbox::{
+    SandboxBackendKind, SandboxMode, SandboxNetworkAccess, ShellSandboxRequest,
+    ShellSandboxSummary,
+};
 pub use thread::{Thread, ThreadStatus};
 pub use tool::{
     ShellExecRequest, ShellExecResult, ShellReadOutputRequest, ShellReadOutputResult, ShellSpawnRequest,

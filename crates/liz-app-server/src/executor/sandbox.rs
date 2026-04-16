@@ -1,7 +1,9 @@
 //! Sandbox mode selection and platform backend planning for shell execution.
 
 use crate::runtime::{RuntimeError, RuntimeResult};
-use liz_protocol::{SandboxMode, SandboxNetworkAccess, ShellSandboxRequest};
+use liz_protocol::{
+    SandboxBackendKind, SandboxMode, SandboxNetworkAccess, ShellSandboxRequest, ShellSandboxSummary,
+};
 use std::env;
 
 /// The concrete platform backend that will enforce sandbox restrictions.
@@ -28,6 +30,17 @@ impl PlatformSandboxBackend {
             Self::LinuxHelper => "linux-helper",
             Self::WindowsRestrictedToken => "windows-restricted-token",
             Self::WindowsSandboxUser => "windows-sandbox-user",
+        }
+    }
+
+    /// Converts the backend into the protocol representation.
+    pub const fn to_protocol(self) -> SandboxBackendKind {
+        match self {
+            Self::None => SandboxBackendKind::None,
+            Self::MacosSeatbelt => SandboxBackendKind::MacosSeatbelt,
+            Self::LinuxHelper => SandboxBackendKind::LinuxHelper,
+            Self::WindowsRestrictedToken => SandboxBackendKind::WindowsRestrictedToken,
+            Self::WindowsSandboxUser => SandboxBackendKind::WindowsSandboxUser,
         }
     }
 }
@@ -172,6 +185,15 @@ impl EffectiveSandboxRequest {
                 )),
                 _ => Ok(()),
             },
+        }
+    }
+
+    /// Converts the effective settings into the protocol shape stored in tool results.
+    pub fn to_summary(&self) -> ShellSandboxSummary {
+        ShellSandboxSummary {
+            mode: self.mode,
+            network_access: self.network_access,
+            backend: self.backend.to_protocol(),
         }
     }
 }
