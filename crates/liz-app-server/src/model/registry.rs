@@ -693,7 +693,32 @@ fn builtin_specs() -> Vec<ProviderSpec> {
                 "Sends API keys with the api-key header instead of Authorization.",
             ],
         )]),
-        openai_compatible_spec("copilot-proxy", "Copilot Proxy", "gpt-5-mini"),
+        spec(
+            "copilot-proxy",
+            "Copilot Proxy",
+            ModelProviderFamily::OpenAiCompatible,
+            ProviderAuthKind::Local,
+            Some("http://localhost:3000/v1"),
+            "gpt-4.1",
+            &[],
+            &[],
+            &[],
+            ModelCapabilities::openai_compatible()
+                .with_tool_call_streaming(true)
+                .with_image_input(true)
+                .with_max_context_window(200_000),
+            &[
+                "Targets a local OpenAI-compatible Copilot proxy endpoint.",
+                "Defaults to http://localhost:3000/v1 and can be overridden for other local proxy ports.",
+            ],
+        )
+        .with_auth_strategies(vec![auth_strategy(
+            ProviderAuthKind::Local,
+            "local",
+            &[],
+            &["provider.copilot-proxy.baseUrl"],
+            &["Optional bearer tokens can still be supplied through a provider override when the local proxy requires them."],
+        )]),
         spec(
             "microsoft-foundry",
             "Microsoft Foundry",

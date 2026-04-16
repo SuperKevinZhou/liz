@@ -213,6 +213,15 @@ fn special_providers_expose_explicit_auth_strategies() {
     assert_eq!(opencode_go.family, ModelProviderFamily::OpenAiCompatible);
     assert_eq!(opencode_go.default_base_url, Some("https://opencode.ai/zen/go/v1"));
 
+    let copilot_proxy = registry
+        .provider("copilot-proxy")
+        .expect("copilot-proxy spec");
+    assert_eq!(
+        copilot_proxy.auth_kind,
+        liz_app_server::model::ProviderAuthKind::Local
+    );
+    assert_eq!(copilot_proxy.default_base_url, Some("http://localhost:3000/v1"));
+
     let sap_ai_core = registry.provider("sap-ai-core").expect("sap-ai-core spec");
     assert_eq!(
         sap_ai_core.auth_kind,
@@ -696,7 +705,7 @@ fn microsoft_foundry_env_resolution_uses_services_v1_base_url() {
 }
 
 #[test]
-fn openai_compatible_provider_without_builtin_base_url_still_runs() {
+fn local_openai_compatible_provider_with_builtin_base_url_still_runs() {
     let gateway = ModelGateway::from_config(ModelGatewayConfig {
         primary_provider: "copilot-proxy".to_owned(),
         overrides: BTreeMap::new(),

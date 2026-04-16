@@ -892,6 +892,54 @@ fn microsoft_foundry_live_request_uses_services_v1_path_and_api_key_header() {
 }
 
 #[test]
+fn copilot_proxy_live_request_uses_local_chat_completions_without_auth_header() {
+    let _guard = env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");
+
+    let capture = Arc::new(Mutex::new(String::new()));
+    let base_url = format!(
+        "{}/v1",
+        spawn_json_server(
+            capture.clone(),
+            r#"{"choices":[{"message":{"content":"hello from copilot proxy"}}]}"#,
+        )
+    );
+    let mut overrides = BTreeMap::new();
+    overrides.insert(
+        "copilot-proxy".to_owned(),
+        ProviderOverride {
+            base_url: Some(base_url),
+            api_key: None,
+            model_id: Some("gpt-4.1".to_owned()),
+            headers: BTreeMap::new(),
+            metadata: BTreeMap::new(),
+        },
+    );
+    let gateway = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "copilot-proxy".to_owned(),
+        overrides,
+    });
+    let summary = gateway
+        .run_turn(demo_request(), |_| {})
+        .expect("copilot proxy request should succeed");
+
+    let request = capture
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    assert!(request.contains("POST /v1/chat/completions HTTP/1.1"));
+    assert!(!request.to_ascii_lowercase().contains("authorization: bearer"));
+    assert_eq!(
+        summary.assistant_message.as_deref(),
+        Some("hello from copilot proxy")
+    );
+
+    std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
+}
+
+#[test]
 fn minimax_live_request_uses_anthropic_messages_with_bearer_auth() {
     let _guard = env_lock()
         .lock()
