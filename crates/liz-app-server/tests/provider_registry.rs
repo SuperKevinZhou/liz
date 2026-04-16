@@ -144,12 +144,12 @@ fn special_providers_expose_explicit_auth_strategies() {
     );
 
     let anthropic = registry.provider("anthropic").expect("anthropic spec");
-    assert!(
-        anthropic
-            .auth_strategies
-            .iter()
-            .any(|strategy| strategy.label == "setup-token")
+    assert_eq!(
+        anthropic.auth_kind,
+        liz_app_server::model::ProviderAuthKind::ApiKey
     );
+    assert_eq!(anthropic.auth_strategies.len(), 1);
+    assert_eq!(anthropic.auth_strategies[0].label, "api-key");
 
     let bedrock = registry
         .provider("amazon-bedrock")

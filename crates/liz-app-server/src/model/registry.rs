@@ -64,7 +64,7 @@ fn builtin_specs() -> Vec<ProviderSpec> {
             "anthropic",
             "Anthropic",
             ModelProviderFamily::AnthropicMessages,
-            ProviderAuthKind::Hybrid,
+            ProviderAuthKind::ApiKey,
             Some("https://api.anthropic.com"),
             "claude-sonnet-4-6",
             &["ANTHROPIC_API_KEY"],
@@ -76,22 +76,13 @@ fn builtin_specs() -> Vec<ProviderSpec> {
             ModelCapabilities::anthropic_messages(),
             &["Anthropic Messages family.", "Enables beta headers for streaming and tool use."],
         )
-        .with_auth_strategies(vec![
-            auth_strategy(
-                ProviderAuthKind::SetupToken,
-                "setup-token",
-                &[],
-                &[],
-                &["Supports a runtime setup-token flow."],
-            ),
-            auth_strategy(
-                ProviderAuthKind::ApiKey,
-                "api-key",
-                &["ANTHROPIC_API_KEY"],
-                &["models.providers.anthropic.baseUrl"],
-                &["Direct Anthropic API key path."],
-            ),
-        ]),
+        .with_auth_strategies(vec![auth_strategy(
+            ProviderAuthKind::ApiKey,
+            "api-key",
+            &["ANTHROPIC_API_KEY"],
+            &["models.providers.anthropic.baseUrl"],
+            &["Direct Anthropic API key path."],
+        )]),
         spec(
             "google",
             "Google",
