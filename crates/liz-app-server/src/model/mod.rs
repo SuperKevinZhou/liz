@@ -13,6 +13,12 @@ mod provider_spec;
 mod registry;
 
 pub use capabilities::ModelCapabilities;
+pub use auth::{
+    build_openai_codex_authorize_url, exchange_openai_codex_authorization_code,
+    normalize_openai_codex_authorize_url, refresh_openai_codex_token,
+    resolve_openai_codex_runtime_auth, resolve_openai_codex_stable_subject,
+    OpenAiCodexRuntimeAuth, OpenAiCodexRuntimeAuthRequest,
+};
 pub use config::{ModelGatewayConfig, ProviderOverride, ResolvedProvider};
 pub use family::ModelProviderFamily;
 pub use gateway::{ModelError, ModelGateway, ModelRunSummary, ModelTurnRequest};

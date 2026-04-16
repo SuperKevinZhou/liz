@@ -300,26 +300,30 @@ fn builtin_specs() -> Vec<ProviderSpec> {
             "openai-codex",
             "OpenAI Codex",
             ModelProviderFamily::OpenAiResponses,
-            ProviderAuthKind::ApiKey,
-            Some("https://api.openai.com"),
+            ProviderAuthKind::OAuth,
+            Some("https://chatgpt.com/backend-api"),
             "gpt-5.4",
-            &["OPENAI_API_KEY"],
+            &["OPENAI_CODEX_ACCESS_TOKEN"],
             &[],
             &[],
             ModelCapabilities::openai_streaming()
                 .with_prompt_caching(true)
                 .with_server_side_conversation_state(true),
             &[
-                "Temporary alias of the public OpenAI Responses path.",
-                "Does not imply native Codex OAuth support.",
+                "Native Codex OAuth-backed Responses route.",
+                "Uses ChatGPT/Codex OAuth tokens against chatgpt.com/backend-api/codex/responses.",
             ],
         )
         .with_auth_strategies(vec![auth_strategy(
-            ProviderAuthKind::ApiKey,
-            "api-key",
-            &["OPENAI_API_KEY"],
-            &["models.providers.openai-codex.baseUrl"],
-            &["Alias-only OpenAI API-key path until native Codex OAuth is implemented."],
+            ProviderAuthKind::OAuth,
+            "chatgpt-oauth",
+            &["OPENAI_CODEX_ACCESS_TOKEN", "OPENAI_CODEX_REFRESH_TOKEN"],
+            &[
+                "provider.openai-codex.oauth.refreshToken",
+                "provider.openai-codex.oauth.accountId",
+                "provider.openai-codex.oauth.expiresAtMs",
+            ],
+            &["Native ChatGPT/Codex OAuth path with refresh-token support."],
         )]),
         spec(
             "codex",

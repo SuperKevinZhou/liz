@@ -1,6 +1,9 @@
-//! Adapter for OpenAI-style, OpenAI-compatible, Copilot, and GitLab provider families.
+//! Adapter for OpenAI-style, OpenAI-compatible, Codex, Copilot, and GitLab provider families.
 
-use crate::model::auth::resolve_copilot_runtime_auth;
+use crate::model::auth::{
+    resolve_copilot_runtime_auth, resolve_openai_codex_runtime_auth,
+    OpenAiCodexRuntimeAuthRequest,
+};
 use crate::model::config::ResolvedProvider;
 use crate::model::family::ModelProviderFamily;
 use crate::model::gateway::{ModelError, ModelRunSummary, ModelTurnRequest};
@@ -70,14 +73,30 @@ impl OpenAiStyleAdapter {
         };
 
         let transport = match provider.spec.family {
-            ModelProviderFamily::OpenAiResponses => InvocationTransport::HttpJson {
-                method: "POST",
-                base_url: provider
-                    .base_url
-                    .clone()
-                    .unwrap_or_else(|| "https://api.openai.com".to_owned()),
-                path: "/v1/responses".to_owned(),
-            },
+            ModelProviderFamily::OpenAiResponses => {
+                let (base_url, path) = if provider.spec.id == "openai-codex" {
+                    (
+                        provider
+                            .base_url
+                            .clone()
+                            .unwrap_or_else(|| "https://chatgpt.com/backend-api".to_owned()),
+                        "/codex/responses".to_owned(),
+                    )
+                } else {
+                    (
+                        provider
+                            .base_url
+                            .clone()
+                            .unwrap_or_else(|| "https://api.openai.com".to_owned()),
+                        "/v1/responses".to_owned(),
+                    )
+                };
+                InvocationTransport::HttpJson {
+                    method: "POST",
+                    base_url,
+                    path,
+                }
+            }
             ModelProviderFamily::OpenAiCompatible => match provider.base_url.clone() {
                 Some(base_url) => InvocationTransport::HttpJson {
                     method: "POST",
@@ -158,7 +177,7 @@ fn execute_live_http(
             (
                 format!("{}{}", trim_trailing_slash(base_url), path),
                 body,
-                default_openai_style_headers(provider, plan),
+                default_openai_style_headers(provider, plan)?,
             )
         }
         InvocationTransport::ProviderOperation { .. } => match plan.family {
@@ -392,7 +411,12 @@ fn should_attempt_live_http(provider: &ResolvedProvider, plan: &ProviderInvocati
     }
 
     match plan.family {
-        ModelProviderFamily::OpenAiResponses => provider.api_key.is_some(),
+        ModelProviderFamily::OpenAiResponses => {
+            provider.api_key.is_some()
+                || provider
+                    .metadata
+                    .contains_key("openai_codex.refresh_token")
+        }
         ModelProviderFamily::OpenAiCompatible => provider.base_url.is_some() || provider.api_key.is_some(),
         ModelProviderFamily::GitHubCopilot => provider.api_key.is_some(),
         ModelProviderFamily::GitLabDuo => provider.api_key.is_some() && provider.base_url.is_some(),
@@ -403,8 +427,39 @@ fn should_attempt_live_http(provider: &ResolvedProvider, plan: &ProviderInvocati
 fn default_openai_style_headers(
     provider: &ResolvedProvider,
     plan: &ProviderInvocationPlan,
-) -> std::collections::BTreeMap<String, String> {
+) -> Result<std::collections::BTreeMap<String, String>, ModelError> {
     let mut headers = provider.headers.clone();
+    if provider.spec.id == "openai-codex" {
+        let expires_at_ms = provider
+            .metadata
+            .get("openai_codex.expires_at_ms")
+            .and_then(|value| value.parse::<u64>().ok());
+        let runtime = resolve_openai_codex_runtime_auth(OpenAiCodexRuntimeAuthRequest {
+            access_token: provider.api_key.as_deref(),
+            refresh_token: provider
+                .metadata
+                .get("openai_codex.refresh_token")
+                .map(String::as_str),
+            expires_at_ms,
+            account_id: provider
+                .metadata
+                .get("openai_codex.account_id")
+                .map(String::as_str),
+            token_url_override: provider
+                .metadata
+                .get("openai_codex.token_url")
+                .map(String::as_str),
+        })?;
+        headers.insert(
+            "Authorization".to_owned(),
+            format!("Bearer {}", runtime.access_token),
+        );
+        if let Some(account_id) = runtime.account_id {
+            headers.insert("ChatGPT-Account-Id".to_owned(), account_id);
+        }
+        return Ok(headers);
+    }
+
     if let Some(api_key) = provider.api_key.as_ref() {
         headers
             .entry("Authorization".to_owned())
@@ -415,7 +470,7 @@ fn default_openai_style_headers(
             .entry("Authorization".to_owned())
             .or_insert_with(|| format!("Bearer {}", provider.api_key.clone().unwrap_or_default()));
     }
-    headers
+    Ok(headers)
 }
 
 fn extract_openai_style_text(response: &serde_json::Value) -> Option<String> {

@@ -13,6 +13,7 @@ aws-credential-types = "0.55.3"
 aws-sigv4 = { version = "0.55.3", features = ["http"] }
 aws-smithy-runtime-api = "0.55.3"
 aws-types = "0.55.3"
+base64 = "0.21.7"
 http = "0.2.12"
 liz-protocol = { path = "../liz-protocol" }
 reqwest = { version = "0.12.24", default-features = false, features = ["blocking", "json", "rustls-tls"] }

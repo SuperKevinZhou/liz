@@ -185,6 +185,36 @@ impl ResolvedProvider {
                         .or_insert(client_id);
                 }
             }
+            "openai-codex" => {
+                api_key = override_config
+                    .and_then(|config| config.api_key.clone())
+                    .or_else(|| first_env(&["OPENAI_CODEX_ACCESS_TOKEN"]));
+                if let Some(refresh_token) = first_env(&["OPENAI_CODEX_REFRESH_TOKEN"]) {
+                    metadata
+                        .entry("openai_codex.refresh_token".to_owned())
+                        .or_insert(refresh_token);
+                }
+                if let Some(expires_at) = first_env(&["OPENAI_CODEX_EXPIRES_AT_MS"]) {
+                    metadata
+                        .entry("openai_codex.expires_at_ms".to_owned())
+                        .or_insert(expires_at);
+                }
+                if let Some(account_id) = first_env(&["OPENAI_CODEX_ACCOUNT_ID"]) {
+                    metadata
+                        .entry("openai_codex.account_id".to_owned())
+                        .or_insert(account_id);
+                }
+                if let Some(email) = first_env(&["OPENAI_CODEX_EMAIL"]) {
+                    metadata
+                        .entry("openai_codex.email".to_owned())
+                        .or_insert(email);
+                }
+                if let Some(token_url) = first_env(&["OPENAI_CODEX_TOKEN_URL"]) {
+                    metadata
+                        .entry("openai_codex.token_url".to_owned())
+                        .or_insert(token_url);
+                }
+            }
             "google-vertex" | "google-vertex-anthropic" | "anthropic-vertex" => {
                 if let Some(project) = first_env(&[
                     "GOOGLE_CLOUD_PROJECT",

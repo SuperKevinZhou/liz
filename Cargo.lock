@@ -1110,6 +1110,7 @@ dependencies = [
  "aws-sigv4",
  "aws-smithy-runtime-api",
  "aws-types",
+ "base64 0.21.7",
  "http 0.2.12",
  "liz-protocol",
  "reqwest",

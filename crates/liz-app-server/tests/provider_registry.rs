@@ -192,9 +192,9 @@ fn special_providers_expose_explicit_auth_strategies() {
     let openai_codex = registry
         .provider("openai-codex")
         .expect("openai-codex spec");
-    assert_eq!(openai_codex.auth_kind, liz_app_server::model::ProviderAuthKind::ApiKey);
+    assert_eq!(openai_codex.auth_kind, liz_app_server::model::ProviderAuthKind::OAuth);
     assert_eq!(openai_codex.auth_strategies.len(), 1);
-    assert_eq!(openai_codex.auth_strategies[0].label, "api-key");
+    assert_eq!(openai_codex.auth_strategies[0].label, "chatgpt-oauth");
 
     let codex = registry.provider("codex").expect("codex spec");
     assert_eq!(codex.auth_kind, liz_app_server::model::ProviderAuthKind::ApiKey);

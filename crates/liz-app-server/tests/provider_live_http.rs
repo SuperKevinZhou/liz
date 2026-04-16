@@ -64,6 +64,86 @@ fn openai_compatible_live_request_uses_chat_completions_shape() {
 }
 
 #[test]
+fn openai_codex_live_request_refreshes_oauth_and_uses_native_codex_endpoint() {
+    let _guard = env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");
+
+    let capture = Arc::new(Mutex::new(Vec::<String>::new()));
+    let base_url = spawn_json_server_sequence(
+        capture.clone(),
+        vec![
+            r#"{"access_token":"header.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiYWNjdC1jb2RleCJ9LCJodHRwczovL2FwaS5vcGVuYWkuY29tL3Byb2ZpbGUiOnsiZW1haWwiOiJ1c2VyQGV4YW1wbGUuY29tIn19.sig","refresh_token":"next-refresh-token","expires_in":3600}"#,
+            r#"{"output":[{"content":[{"text":"hello from codex oauth"}]}]}"#,
+        ],
+    );
+
+    let mut overrides = BTreeMap::new();
+    overrides.insert(
+        "openai-codex".to_owned(),
+        ProviderOverride {
+            base_url: Some(base_url.clone()),
+            api_key: Some("expired-access-token".to_owned()),
+            model_id: Some("gpt-5.4".to_owned()),
+            headers: BTreeMap::new(),
+            metadata: BTreeMap::from([
+                (
+                    String::from("openai_codex.refresh_token"),
+                    String::from("refresh-token"),
+                ),
+                (
+                    String::from("openai_codex.expires_at_ms"),
+                    String::from("1"),
+                ),
+                (
+                    String::from("openai_codex.token_url"),
+                    format!("{base_url}/oauth/token"),
+                ),
+            ]),
+        },
+    );
+
+    let gateway = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "openai-codex".to_owned(),
+        overrides,
+    });
+    let summary = gateway
+        .run_turn(demo_request(), |_| {})
+        .expect("openai-codex request should succeed");
+
+    let captures = capture
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    let refresh = captures.first().expect("refresh request");
+    let runtime = captures.get(1).expect("codex request");
+    let refresh_lower = refresh.to_ascii_lowercase();
+    let runtime_lower = runtime.to_ascii_lowercase();
+
+    assert!(refresh.contains("POST /oauth/token HTTP/1.1"));
+    assert!(refresh_lower.contains("content-type: application/x-www-form-urlencoded"));
+    assert!(refresh.contains("grant_type=refresh_token"));
+    assert!(refresh.contains("refresh_token=refresh-token"));
+    assert!(refresh.contains("client_id=app_EMoamEEZ73f0CkXaXp7hrann"));
+
+    assert!(runtime.contains("POST /codex/responses HTTP/1.1"));
+    assert!(runtime_lower.contains("authorization: bearer header."));
+    assert!(
+        runtime_lower.contains("chatgpt-account-id: acct-codex"),
+        "{runtime}"
+    );
+    assert!(runtime.contains(r#""model":"gpt-5.4""#));
+    assert!(runtime.contains(r#""input":"Run a patch tool command for this task""#));
+    assert_eq!(
+        summary.assistant_message.as_deref(),
+        Some("hello from codex oauth")
+    );
+
+    std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
+}
+
+#[test]
 fn anthropic_live_request_uses_messages_shape_and_headers() {
     let _guard = env_lock()
         .lock()
