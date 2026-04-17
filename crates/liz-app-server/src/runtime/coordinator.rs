@@ -618,7 +618,8 @@ impl RuntimeCoordinator {
             .get_thread(thread_id)?
             .ok_or_else(|| RuntimeError::not_found("thread_not_found", "thread does not exist"))?;
         let snapshot = self.stores.read_global_memory()?;
-        Ok(self.context_assembler.assemble(&snapshot, &thread, input))
+        let recent_entries = self.stores.read_turn_log(thread_id)?;
+        Ok(self.context_assembler.assemble(&snapshot, &thread, &recent_entries, input))
     }
 
     /// Evaluates policy for a turn input and assembled context.

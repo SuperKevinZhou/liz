@@ -10,7 +10,8 @@ mod thread_manager;
 mod turn_manager;
 
 pub use context_assembler::{
-    AssembledContext, ContextAssembler, RetrievalScope, TaskLocalRetrieval,
+    AssembledContext, ContextAssembler, ContextLayers, ExecutorBoundaryMetadata,
+    RecentConversationWakeup, RetrievalScope, TaskLocalRetrieval,
 };
 pub use coordinator::RuntimeCoordinator;
 pub use error::{RuntimeError, RuntimeResult};

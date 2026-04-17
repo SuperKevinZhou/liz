@@ -32,8 +32,62 @@ fn focused_change_requests_keep_context_narrow() {
 
     assert_eq!(context.scope, RetrievalScope::Focused);
     assert!(!context.retrieval.requires_full_repo_scan);
+    assert!(context.prompt.contains("resident_wakeup:"));
+    assert!(context.prompt.contains("recent_conversation_wakeup:"));
+    assert!(context.prompt.contains("executor_boundary:"));
+    assert_eq!(context.executor_boundary.memory_owner, "liz");
+    assert!(!context.executor_boundary.relationship_history_shared);
     assert_eq!(decision.scope, RetrievalScope::Focused);
     assert!(!decision.requires_approval);
+}
+
+#[test]
+fn context_assembly_surfaces_recent_conversation_wakeup_and_executor_boundary() {
+    let temp_dir = TempDir::new().expect("temp dir should be created");
+    let mut runtime =
+        RuntimeCoordinator::from_storage_paths(StoragePaths::new(temp_dir.path().join(".liz")));
+    let thread = runtime
+        .start_thread(ThreadStartRequest {
+            title: Some("Wake-up context".to_owned()),
+            initial_goal: Some("Carry recent conversation forward".to_owned()),
+            workspace_ref: None,
+        })
+        .expect("thread start should succeed")
+        .thread;
+
+    let turn = runtime
+        .start_turn(TurnStartRequest {
+            thread_id: thread.id.clone(),
+            input: "Patch the websocket transport retry logic".to_owned(),
+            input_kind: TurnInputKind::UserMessage,
+        })
+        .expect("turn start should succeed")
+        .turn;
+    runtime
+        .complete_turn(
+            &thread.id,
+            &turn.id,
+            "Patched websocket transport retry logic".to_owned(),
+        )
+        .expect("turn should complete");
+
+    let context = runtime
+        .assemble_context(&thread.id, "Continue the websocket follow-up")
+        .expect("context assembly should succeed");
+
+    assert!(context
+        .recent_conversation
+        .recent_summaries
+        .iter()
+        .any(|summary| summary.contains("websocket transport retry logic")));
+    assert!(context
+        .recent_conversation
+        .active_topics
+        .iter()
+        .any(|topic| topic == "websocket" || topic == "transport"));
+    assert!(context.layers.recent_conversation.contains("recent_summaries:"));
+    assert!(context.layers.executor_boundary.contains("memory_owner: liz"));
+    assert!(context.prompt.contains("controlled task executor"));
 }
 
 #[test]
