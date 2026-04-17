@@ -1,22 +1,23 @@
 //! TUI renderers for the CLI chat shell.
 
 use crate::view_model::{OverlayPanel, TranscriptEntryKind, ViewModel};
-use ratatui::layout::{Constraint, Direction, Layout, Margin, Rect};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::block::Title;
-use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
-const SHELL_BG: Color = Color::Rgb(245, 242, 235);
-const SURFACE_BG: Color = Color::Rgb(252, 250, 246);
-const PANEL_BG: Color = Color::Rgb(241, 235, 224);
-const BORDER_SOFT: Color = Color::Rgb(198, 187, 170);
-const TEXT_PRIMARY: Color = Color::Rgb(50, 44, 37);
-const TEXT_MUTED: Color = Color::Rgb(121, 109, 92);
-const BRAND: Color = Color::Rgb(173, 104, 66);
-const ACCENT: Color = Color::Rgb(79, 110, 138);
-const APPROVAL: Color = Color::Rgb(170, 115, 41);
+const BORDER_SOFT: Color = Color::Rgb(78, 82, 94);
+const TEXT_PRIMARY: Color = Color::Rgb(232, 234, 237);
+const TEXT_MUTED: Color = Color::Rgb(142, 146, 158);
+const BRAND: Color = Color::Rgb(222, 151, 92);
+const ACCENT: Color = Color::Rgb(120, 166, 255);
+const APPROVAL: Color = Color::Rgb(236, 190, 104);
+const RAIL_SELECTED: Color = Color::Rgb(184, 198, 255);
+const SYSTEM: Color = Color::Rgb(173, 179, 189);
+const HELP_RULE: &str =
+    "Esc close  Up/Down switch thread  Tab threads  /help commands  /memory recall";
 
 /// Minimal renderer metadata for banner and smoke surfaces.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,19 +34,20 @@ impl Default for RendererSkeleton {
 
 /// Draws the full CLI layout.
 pub fn render(frame: &mut Frame<'_>, view_model: &ViewModel, server_url: &str) {
-    frame.render_widget(
-        Block::default().style(Style::default().bg(SHELL_BG).fg(TEXT_PRIMARY)),
-        frame.area(),
-    );
-
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(10), Constraint::Length(5)])
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Length(1),
+            Constraint::Min(10),
+            Constraint::Length(5),
+        ])
         .split(frame.area());
 
     render_header(frame, layout[0], view_model, server_url);
-    render_body(frame, layout[1], view_model);
-    render_composer(frame, layout[2], view_model);
+    render_rule(frame, layout[1]);
+    render_body(frame, layout[2], view_model);
+    render_composer(frame, layout[3], view_model);
 
     if let Some(panel) = view_model.active_overlay {
         render_overlay(frame, panel, view_model);
@@ -65,22 +67,25 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel, serv
     let wakeup_badge =
         if view_model.has_wakeup_context() { " wake-up ready " } else { " no wake-up " };
     let header = Line::from(vec![
-        Span::styled(
-            " liz ",
-            Style::default().fg(SURFACE_BG).bg(BRAND).add_modifier(Modifier::BOLD),
-        ),
+        Span::styled("liz", Style::default().fg(BRAND).add_modifier(Modifier::BOLD)),
         Span::raw("  "),
         Span::styled(title, Style::default().fg(TEXT_PRIMARY).add_modifier(Modifier::BOLD)),
         Span::raw("  "),
-        Span::styled(approval_badge, Style::default().fg(APPROVAL).bg(PANEL_BG)),
-        Span::raw(" "),
-        Span::styled(wakeup_badge, Style::default().fg(ACCENT).bg(PANEL_BG)),
+        Span::styled(approval_badge, Style::default().fg(APPROVAL)),
+        Span::styled(wakeup_badge, Style::default().fg(ACCENT)),
         Span::raw("  "),
         Span::styled(server_url, Style::default().fg(TEXT_MUTED)),
     ]);
 
+    frame.render_widget(Paragraph::new(header).wrap(Wrap { trim: false }), area);
+}
+
+fn render_rule(frame: &mut Frame<'_>, area: Rect) {
     frame.render_widget(
-        Paragraph::new(header).block(shell_block("Conversation")).wrap(Wrap { trim: false }),
+        Paragraph::new(Line::from(Span::styled(
+            "─".repeat(area.width as usize),
+            Style::default().fg(BORDER_SOFT),
+        ))),
         area,
     );
 }
@@ -93,58 +98,72 @@ fn render_body(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
             .constraints([Constraint::Length(30), Constraint::Min(20)])
             .split(area);
         render_thread_rail(frame, columns[0], view_model);
+        render_vertical_rule(frame, columns[0].right(), area);
         render_transcript(frame, columns[1], view_model);
     } else {
         render_transcript(frame, area, view_model);
     }
 }
 
-fn render_thread_rail(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
-    let items = if view_model.threads.is_empty() {
-        vec![ListItem::new(Text::from("No threads yet. Start by typing a message."))]
-    } else {
-        view_model
-            .threads
-            .iter()
-            .enumerate()
-            .map(|(index, thread)| {
-                let marker = if index == view_model.selected_thread_index { "●" } else { "○" };
-                let summary = thread
-                    .active_summary
-                    .clone()
-                    .or_else(|| thread.active_goal.clone())
-                    .unwrap_or_else(|| "No active summary yet".to_owned());
-                ListItem::new(Text::from(vec![
-                    Line::from(vec![
-                        Span::styled(marker, Style::default().fg(BRAND)),
-                        Span::raw(" "),
-                        Span::styled(
-                            &thread.title,
-                            Style::default().fg(TEXT_PRIMARY).add_modifier(Modifier::BOLD),
-                        ),
-                    ]),
-                    Line::from(Span::styled(summary, Style::default().fg(TEXT_MUTED))),
-                ]))
-            })
-            .collect()
-    };
+fn render_vertical_rule(frame: &mut Frame<'_>, x: u16, area: Rect) {
+    if x >= area.right() {
+        return;
+    }
 
-    frame.render_widget(List::new(items).block(shell_block("Threads")), area);
+    let rule_area = Rect::new(x, area.y, 1, area.height);
+    let lines = (0..area.height)
+        .map(|_| Line::from(Span::styled("│", Style::default().fg(BORDER_SOFT))))
+        .collect::<Vec<_>>();
+    frame.render_widget(Paragraph::new(Text::from(lines)), rule_area);
+}
+
+fn render_thread_rail(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
+    let mut lines = vec![Line::from(Span::styled(
+        "Threads",
+        Style::default().fg(TEXT_MUTED).add_modifier(Modifier::BOLD),
+    ))];
+
+    if view_model.threads.is_empty() {
+        lines.push(Line::default());
+        lines.push(Line::from(Span::styled(
+            "No threads yet. Start by typing a message.",
+            Style::default().fg(TEXT_MUTED),
+        )));
+    } else {
+        for (index, thread) in view_model.threads.iter().enumerate() {
+            let marker = if index == view_model.selected_thread_index { "›" } else { " " };
+            let title_style = if index == view_model.selected_thread_index {
+                Style::default().fg(RAIL_SELECTED).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(TEXT_PRIMARY)
+            };
+            let summary = thread
+                .active_summary
+                .clone()
+                .or_else(|| thread.active_goal.clone())
+                .unwrap_or_else(|| "No active summary yet".to_owned());
+            lines.push(Line::default());
+            lines.push(Line::from(vec![
+                Span::styled(marker, Style::default().fg(BRAND)),
+                Span::raw(" "),
+                Span::styled(thread.title.clone(), title_style),
+            ]));
+            lines.push(Line::from(Span::styled(summary, Style::default().fg(TEXT_MUTED))));
+        }
+    }
+
+    frame.render_widget(Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }), area);
 }
 
 fn render_transcript(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
-    let block = shell_block("Chat");
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
     let mut lines = build_transcript_lines(view_model);
-    let visible = tail_lines(&lines, inner.height.saturating_sub(1) as usize);
+    let visible = tail_lines(&lines, area.height.saturating_sub(1) as usize);
     lines.clear();
     frame.render_widget(
         Paragraph::new(Text::from(visible))
             .wrap(Wrap { trim: false })
-            .style(Style::default().fg(TEXT_PRIMARY).bg(SURFACE_BG)),
-        inner,
+            .style(Style::default().fg(TEXT_PRIMARY)),
+        area,
     );
 }
 
@@ -169,7 +188,7 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
         Paragraph::new(body)
             .wrap(Wrap { trim: false })
             .block(composer_block(title))
-            .style(Style::default().fg(TEXT_PRIMARY).bg(SURFACE_BG)),
+            .style(Style::default().fg(TEXT_PRIMARY)),
         area,
     );
 }
@@ -188,7 +207,7 @@ fn render_overlay(frame: &mut Frame<'_>, panel: OverlayPanel, view_model: &ViewM
         Paragraph::new(body)
             .wrap(Wrap { trim: false })
             .block(shell_block(title))
-            .style(Style::default().fg(TEXT_PRIMARY).bg(PANEL_BG)),
+            .style(Style::default().fg(TEXT_PRIMARY)),
         popup,
     );
 }
@@ -198,7 +217,7 @@ fn build_transcript_lines(view_model: &ViewModel) -> Vec<Line<'static>> {
 
     if let Some(capsule) = wakeup_capsule(view_model) {
         lines.push(Line::from(vec![
-            Span::styled(" resume ", Style::default().fg(ACCENT).bg(PANEL_BG)),
+            Span::styled("resume", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
             Span::raw(" "),
             Span::styled(capsule, Style::default().fg(TEXT_MUTED)),
         ]));
@@ -215,27 +234,24 @@ fn build_transcript_lines(view_model: &ViewModel) -> Vec<Line<'static>> {
 
     for entry in &view_model.transcript_entries {
         let label_style = match entry.kind {
-            TranscriptEntryKind::User => {
-                Style::default().fg(SURFACE_BG).bg(ACCENT).add_modifier(Modifier::BOLD)
-            }
+            TranscriptEntryKind::User => Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
             TranscriptEntryKind::Assistant => {
-                Style::default().fg(SURFACE_BG).bg(BRAND).add_modifier(Modifier::BOLD)
+                Style::default().fg(BRAND).add_modifier(Modifier::BOLD)
             }
-            TranscriptEntryKind::Tool => Style::default().fg(TEXT_PRIMARY).bg(PANEL_BG),
+            TranscriptEntryKind::Tool => Style::default().fg(TEXT_MUTED),
             TranscriptEntryKind::Approval => {
-                Style::default().fg(TEXT_PRIMARY).bg(Color::Rgb(239, 224, 194))
+                Style::default().fg(APPROVAL).add_modifier(Modifier::BOLD)
             }
-            TranscriptEntryKind::System => {
-                Style::default().fg(TEXT_PRIMARY).bg(Color::Rgb(226, 228, 230))
-            }
+            TranscriptEntryKind::System => Style::default().fg(SYSTEM),
         };
         lines.push(Line::from(vec![
-            Span::styled(format!(" {} ", entry.kind.label()), label_style),
+            Span::styled(entry.kind.label(), label_style),
             Span::raw(" "),
+            Span::styled("·", Style::default().fg(BORDER_SOFT)),
         ]));
         for body_line in entry.body.lines() {
             lines.push(Line::from(vec![
-                Span::raw("   "),
+                Span::raw("  "),
                 Span::styled(body_line.to_owned(), Style::default().fg(TEXT_PRIMARY)),
             ]));
         }
@@ -244,15 +260,12 @@ fn build_transcript_lines(view_model: &ViewModel) -> Vec<Line<'static>> {
 
     if let Some(streaming) = view_model.streaming_preview() {
         lines.push(Line::from(vec![
-            Span::styled(
-                " liz ",
-                Style::default().fg(SURFACE_BG).bg(BRAND).add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(" "),
+            Span::styled("liz", Style::default().fg(BRAND).add_modifier(Modifier::BOLD)),
+            Span::raw(" ·"),
         ]));
         for body_line in streaming.lines() {
             lines.push(Line::from(vec![
-                Span::raw("   "),
+                Span::raw("  "),
                 Span::styled(body_line.to_owned(), Style::default().fg(TEXT_PRIMARY)),
             ]));
         }
@@ -309,8 +322,8 @@ fn help_overlay_text() -> Text<'static> {
         Line::from("/refresh            reload the thread list"),
         Line::default(),
         Line::from(Span::styled("Keys", Style::default().fg(BRAND).add_modifier(Modifier::BOLD))),
-        Line::from("Enter send    Shift+Enter newline    Up/Down switch thread"),
-        Line::from("Tab toggle thread rail    Esc close overlay or clear input    Ctrl+C quit"),
+        Line::from("Enter send    Shift+Enter newline"),
+        Line::from(HELP_RULE),
     ])
 }
 
@@ -431,7 +444,6 @@ where
         .borders(Borders::ALL)
         .border_type(BorderType::Plain)
         .border_style(Style::default().fg(BORDER_SOFT))
-        .style(Style::default().bg(SURFACE_BG))
 }
 
 fn composer_block<'a, T>(title: T) -> Block<'a>
@@ -443,7 +455,6 @@ where
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(BORDER_SOFT))
-        .style(Style::default().bg(SURFACE_BG))
 }
 
 fn centered_rect(area: Rect, width_percent: u16, height_percent: u16) -> Rect {
@@ -463,7 +474,7 @@ fn centered_rect(area: Rect, width_percent: u16, height_percent: u16) -> Rect {
             Constraint::Percentage((100 - width_percent) / 2),
         ])
         .split(vertical[1]);
-    horizontal[1].inner(Margin { vertical: 0, horizontal: 0 })
+    horizontal[1]
 }
 
 fn tail_lines(lines: &[Line<'static>], limit: usize) -> Vec<Line<'static>> {
