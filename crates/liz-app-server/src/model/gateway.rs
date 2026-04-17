@@ -206,7 +206,7 @@ impl ModelGateway {
         };
         if !self.simulate && !spec.is_runtime_ready() {
             return Err(ModelError::UnsupportedProvider(format!(
-                "provider {} is not yet implemented for live runtime use; see PROVIDER_SUPPORT.md",
+                "provider {} is not yet implemented for live runtime use",
                 spec.id
             )));
         }
