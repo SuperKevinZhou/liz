@@ -154,8 +154,7 @@ fn mistral_live_request_uses_mistral_openai_base_url_by_default() {
         primary_provider: "mistral".to_owned(),
         overrides,
     });
-    let summary =
-        gateway.run_turn(demo_request(), |_| {}).expect("mistral request should succeed");
+    let summary = gateway.run_turn(demo_request(), |_| {}).expect("mistral request should succeed");
 
     let request = capture.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
     assert!(request.contains("POST /v1/chat/completions HTTP/1.1"));
