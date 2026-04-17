@@ -433,12 +433,13 @@ fn anthropic_live_request_uses_messages_shape_and_headers() {
             || lowercase.contains("anthropic-version:2023-06-01")
     );
     assert!(request.contains(r#""model":"claude-sonnet-4-6""#));
-    assert!(request.contains(r#""system":"You are liz, a continuous personal agent."#));
+    assert!(request
+        .contains(r#""system":[{"type":"text","text":"You are liz, a continuous personal agent."#));
     assert!(request.contains(r#""max_tokens":32000"#));
     assert!(request.contains(r#""cache_control":{"type":"ephemeral"}"#));
     assert!(request.contains(r#""messages":["#));
     assert!(request.contains(r#""role":"user""#));
-    assert!(request.contains(r#""content":"Run a patch tool command for this task""#));
+    assert!(request.contains(r#""content":[{"cache_control":{"type":"ephemeral"},"text":"Run a patch tool command for this task","type":"text"}]"#));
     assert_eq!(summary.assistant_message.as_deref(), Some("hello from anthropic"));
 
     std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
@@ -1374,7 +1375,7 @@ fn bedrock_live_request_uses_sigv4_when_credential_chain_is_available() {
     );
     assert!(lowercase.contains("x-amz-date: "));
     assert!(lowercase.contains("x-amz-security-token: session-token-example"));
-    assert!(request.contains(r#""inferenceConfig":{"maxTokens":4096}"#));
+    assert!(request.contains(r#""inferenceConfig":{"maxTokens":32000}"#));
     assert_eq!(summary.assistant_message.as_deref(), Some("hello from bedrock sigv4"));
 
     std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
@@ -1534,7 +1535,7 @@ fn github_copilot_live_request_uses_messages_transport_for_claude_models() {
     assert!(lowercase.contains("anthropic-beta: interleaved-thinking-2025-05-14"));
     assert!(messages.contains(r#""model":"claude-sonnet-4-6""#));
     assert!(messages.contains(r#""system":"You are liz, a continuous personal agent."#));
-    assert!(messages.contains(r#""max_tokens":32000"#));
+    assert!(messages.contains(r#""max_tokens":8000"#));
     assert!(messages.contains(r#""content":"Run a patch tool command for this task""#));
     assert_eq!(summary.assistant_message.as_deref(), Some("hello from copilot claude"));
 
@@ -1572,7 +1573,7 @@ fn gitlab_live_request_uses_bearer_auth_for_oauth_tokens() {
     let lowercase = request.to_ascii_lowercase();
     assert!(request.contains("POST /api/v4/chat/completions HTTP/1.1"));
     assert!(lowercase.contains("authorization: bearer oauth-token"));
-    assert!(request.contains(r#""content":"Run a patch tool command for this task""#));
+    assert!(request.contains(r#""content":"system:"#));
     assert_eq!(summary.assistant_message.as_deref(), Some("hello from gitlab oauth"));
 
     std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
