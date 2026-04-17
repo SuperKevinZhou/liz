@@ -11,6 +11,7 @@ use crate::model::gateway::{ModelError, ModelRunSummary, ModelTurnRequest};
 use crate::model::http::{build_client, post_json};
 use crate::model::invocation::{InvocationTransport, ProviderInvocationPlan};
 use crate::model::normalized_stream::{NormalizedTurnEvent, UsageDelta};
+use crate::model::OutputBudget;
 use serde_json::json;
 
 /// Provider-family adapter for OpenAI-style runtimes.
@@ -158,6 +159,7 @@ fn execute_live_http(
     sink: &mut dyn FnMut(NormalizedTurnEvent),
 ) -> Result<ModelRunSummary, ModelError> {
     let instruction_prompt = request.instruction_prompt();
+    let output_budget = OutputBudget::for_provider(provider);
     let (url, body, headers) = match &plan.transport {
         InvocationTransport::HttpJson { base_url, path, .. } => {
             let body = match plan.family {
@@ -165,10 +167,12 @@ fn execute_live_http(
                     "model": provider.model_id,
                     "instructions": instruction_prompt,
                     "input": request.user_prompt,
+                    "max_output_tokens": output_budget.max_output_tokens,
                     "stream": false,
                 }),
                 _ => json!({
                     "model": provider.model_id,
+                    "max_tokens": output_budget.max_output_tokens,
                     "messages": [
                         {"role": "system", "content": instruction_prompt},
                         {"role": "user", "content": request.user_prompt}
@@ -225,7 +229,7 @@ fn execute_live_http(
                         json!({
                             "model": provider.model_id,
                             "system": instruction_prompt,
-                            "max_tokens": 4096,
+                            "max_tokens": output_budget.max_output_tokens,
                             "messages": [{"role": "user", "content": request.user_prompt}],
                             "stream": false,
                         }),
@@ -238,6 +242,7 @@ fn execute_live_http(
                             "model": provider.model_id,
                             "instructions": instruction_prompt,
                             "input": request.user_prompt,
+                            "max_output_tokens": output_budget.max_output_tokens,
                             "stream": false,
                         }),
                         headers,
@@ -247,6 +252,7 @@ fn execute_live_http(
                         format!("{}/v1/chat/completions", trim_trailing_slash(&runtime.base_url)),
                         json!({
                             "model": provider.model_id,
+                            "max_tokens": output_budget.max_output_tokens,
                             "messages": [
                                 {"role": "system", "content": instruction_prompt},
                                 {"role": "user", "content": request.user_prompt}

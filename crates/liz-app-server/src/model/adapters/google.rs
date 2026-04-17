@@ -7,6 +7,7 @@ use crate::model::gateway::{ModelError, ModelRunSummary, ModelTurnRequest};
 use crate::model::http::{build_client, post_json};
 use crate::model::invocation::{InvocationTransport, ProviderInvocationPlan};
 use crate::model::normalized_stream::{NormalizedTurnEvent, UsageDelta};
+use crate::model::OutputBudget;
 use serde_json::json;
 
 /// Google-family adapter for direct Gemini and Vertex providers.
@@ -107,6 +108,7 @@ fn execute_live_http(
     sink: &mut dyn FnMut(NormalizedTurnEvent),
 ) -> Result<ModelRunSummary, ModelError> {
     let instruction_prompt = request.instruction_prompt();
+    let output_budget = OutputBudget::for_provider(provider);
     let (url, body, headers) = match plan.family {
         ModelProviderFamily::GoogleGenerativeAi => {
             let api_key = provider.api_key.clone().ok_or_else(|| {
@@ -128,6 +130,7 @@ fn execute_live_http(
                 json!({
                     "system_instruction": {"parts": [{"text": instruction_prompt}]},
                     "contents": [{"role": "user", "parts": [{"text": request.user_prompt}]}],
+                    "generationConfig": {"maxOutputTokens": output_budget.max_output_tokens},
                 }),
                 provider.headers.clone(),
             )
@@ -147,6 +150,7 @@ fn execute_live_http(
                 json!({
                     "system_instruction": {"parts": [{"text": instruction_prompt}]},
                     "contents": [{"role": "user", "parts": [{"text": request.user_prompt}]}],
+                    "generationConfig": {"maxOutputTokens": output_budget.max_output_tokens},
                 }),
                 headers,
             )
@@ -167,7 +171,7 @@ fn execute_live_http(
                     "anthropic_version": "vertex-2023-10-16",
                     "system": instruction_prompt,
                     "messages": [{"role": "user", "content": request.user_prompt}],
-                    "max_tokens": 4096,
+                    "max_tokens": output_budget.max_output_tokens,
                 }),
                 headers,
             )

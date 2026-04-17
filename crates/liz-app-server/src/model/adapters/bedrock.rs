@@ -6,6 +6,7 @@ use crate::model::gateway::{ModelError, ModelRunSummary, ModelTurnRequest};
 use crate::model::http::{build_client, post_json};
 use crate::model::invocation::{InvocationTransport, ProviderInvocationPlan};
 use crate::model::normalized_stream::{NormalizedTurnEvent, UsageDelta};
+use crate::model::OutputBudget;
 use reqwest::Url;
 use serde_json::json;
 
@@ -93,11 +94,12 @@ fn execute_live_http(
 
     let url = format!("{}{}", trim_trailing_slash(base_url), path);
     let instruction_prompt = request.instruction_prompt();
+    let output_budget = OutputBudget::for_provider(provider);
     let body = json!({
         "system": [{"text": instruction_prompt}],
         "messages": [{"role": "user", "content": [{"text": request.user_prompt}]}],
         "inferenceConfig": {
-            "maxTokens": 4096,
+            "maxTokens": output_budget.max_output_tokens,
         },
     });
     let body_text = serde_json::to_vec(&body).map_err(|error| {

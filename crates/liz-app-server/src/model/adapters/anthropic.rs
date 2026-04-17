@@ -6,6 +6,7 @@ use crate::model::gateway::{ModelError, ModelRunSummary, ModelTurnRequest};
 use crate::model::http::{build_client, post_json};
 use crate::model::invocation::{InvocationTransport, ProviderInvocationPlan};
 use crate::model::normalized_stream::{NormalizedTurnEvent, UsageDelta};
+use crate::model::OutputBudget;
 use serde_json::json;
 
 /// Anthropic family adapter.
@@ -22,6 +23,7 @@ impl AnthropicAdapter {
         sink: &mut dyn FnMut(NormalizedTurnEvent),
     ) -> Result<ModelRunSummary, ModelError> {
         let instruction_prompt = request.instruction_prompt();
+        let output_budget = OutputBudget::for_provider(provider);
         let base_url =
             provider.base_url.clone().unwrap_or_else(|| "https://api.anthropic.com".to_owned());
         let plan = ProviderInvocationPlan {
@@ -39,7 +41,7 @@ impl AnthropicAdapter {
             payload_preview: json!({
                 "model": provider.model_id,
                 "system": instruction_prompt,
-                "max_tokens": 4096,
+                "max_tokens": output_budget.max_output_tokens,
                 "messages": [{"role": "user", "content": request.user_prompt}],
                 "stream": true,
             })
@@ -85,6 +87,7 @@ fn execute_live_http(
     sink: &mut dyn FnMut(NormalizedTurnEvent),
 ) -> Result<ModelRunSummary, ModelError> {
     let instruction_prompt = request.instruction_prompt();
+    let output_budget = OutputBudget::for_provider(provider);
     let InvocationTransport::HttpJson { base_url, path, .. } = &plan.transport else {
         return Err(ModelError::ProviderFailure(
             "anthropic transport must be HTTP JSON".to_owned(),
@@ -125,7 +128,7 @@ fn execute_live_http(
     let mut body = json!({
         "model": provider.model_id,
         "system": instruction_prompt,
-        "max_tokens": 4096,
+        "max_tokens": output_budget.max_output_tokens,
         "messages": [{"role": "user", "content": request.user_prompt}],
         "stream": false,
     });

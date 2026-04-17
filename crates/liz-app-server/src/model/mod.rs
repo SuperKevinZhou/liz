@@ -9,6 +9,7 @@ mod gateway;
 mod http;
 mod invocation;
 mod normalized_stream;
+mod output_budget;
 mod provider_spec;
 mod registry;
 
@@ -31,5 +32,6 @@ pub use family::ModelProviderFamily;
 pub use gateway::{ModelError, ModelGateway, ModelRunSummary, ModelTurnRequest};
 pub use invocation::{InvocationTransport, ProviderInvocationPlan};
 pub use normalized_stream::{NormalizedTurnEvent, UsageDelta};
+pub use output_budget::OutputBudget;
 pub use provider_spec::{ProviderAuthKind, ProviderSpec};
 pub use registry::ProviderRegistry;
