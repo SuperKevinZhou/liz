@@ -216,3 +216,61 @@ fn foreground_memory_marks_superseded_commitments_as_invalidated() {
         "resolved commitments should invalidate the stale commitment fact"
     );
 }
+
+#[test]
+fn foreground_memory_can_emit_a_reflection_summary() {
+    let temp_dir = TempDir::new().expect("temp dir should be created");
+    let mut runtime =
+        RuntimeCoordinator::from_storage_paths(StoragePaths::new(temp_dir.path().join(".liz")));
+
+    let thread = runtime
+        .start_thread(ThreadStartRequest {
+            title: Some("Reflection thread".to_owned()),
+            initial_goal: Some("Capture compiled experience".to_owned()),
+            workspace_ref: None,
+        })
+        .expect("thread start should succeed")
+        .thread;
+
+    let turn = runtime
+        .start_turn(TurnStartRequest {
+            thread_id: thread.id.clone(),
+            input: "Read files then search text then apply patch".to_owned(),
+            input_kind: TurnInputKind::UserMessage,
+        })
+        .expect("turn start should succeed")
+        .turn;
+
+    runtime
+        .record_tool_execution(
+            &thread.id,
+            Some(&turn.id),
+            "workspace.read",
+            "Read protocol notes",
+            Vec::new(),
+        )
+        .expect("first tool execution should be recorded");
+    runtime
+        .record_tool_execution(
+            &thread.id,
+            Some(&turn.id),
+            "workspace.search",
+            "Search roadmap notes",
+            Vec::new(),
+        )
+        .expect("second tool execution should be recorded");
+    runtime
+        .complete_turn(&thread.id, &turn.id, "Compiled CLI recall surface".to_owned())
+        .expect("turn completion should succeed");
+
+    runtime
+        .compile_memory_now(MemoryCompileNowRequest { thread_id: thread.id.clone() })
+        .expect("memory compile should succeed");
+    let reflection = runtime
+        .summarize_thread_dreaming(&thread.id)
+        .expect("reflection summary should succeed")
+        .expect("reflection summary should exist");
+
+    assert!(reflection.contains("Reflection thread"));
+    assert!(reflection.contains("procedure candidate") || reflection.contains("active topics"));
+}

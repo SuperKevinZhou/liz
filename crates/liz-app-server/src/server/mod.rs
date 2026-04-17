@@ -12,9 +12,10 @@ use liz_protocol::{
     ApprovalDecision, ApprovalRequestedEvent, ArtifactCreatedEvent, AssistantChunkEvent,
     AssistantCompletedEvent, CheckpointCreatedEvent, ClientRequestEnvelope, DiffAvailableEvent,
     ExecutorOutputChunkEvent, ExecutorTaskId, MemoryCompilationAppliedEvent,
-    MemoryInvalidationAppliedEvent, ProviderAuthProfile, ProviderCredential, ServerEvent,
-    ServerEventPayload, ServerResponseEnvelope, ThreadId, ToolCallRequest, ToolCompletedEvent,
-    TurnCancelRequest, TurnCompletedEvent, TurnFailedEvent, TurnId,
+    MemoryDreamingCompletedEvent, MemoryInvalidationAppliedEvent, ProviderAuthProfile,
+    ProviderCredential, ServerEvent, ServerEventPayload, ServerResponseEnvelope, ThreadId,
+    ToolCallRequest, ToolCompletedEvent, TurnCancelRequest, TurnCompletedEvent, TurnFailedEvent,
+    TurnId,
 };
 use std::sync::mpsc::Receiver;
 
@@ -446,6 +447,15 @@ impl AppServer {
                 turn_id.cloned(),
                 ServerEventPayload::MemoryInvalidationApplied(MemoryInvalidationAppliedEvent {
                     compilation,
+                }),
+            ));
+        }
+        if let Ok(Some(summary)) = self.runtime.summarize_thread_dreaming(thread_id) {
+            self.event_bus.publish(crate::events::PendingEvent::new(
+                thread_id.clone(),
+                turn_id.cloned(),
+                ServerEventPayload::MemoryDreamingCompleted(MemoryDreamingCompletedEvent {
+                    summary,
                 }),
             ));
         }

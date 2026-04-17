@@ -178,6 +178,62 @@ impl ForegroundMemoryEngine {
         })
     }
 
+    /// Produces a lightweight reflection summary from the latest stored memory state.
+    pub fn summarize_dreaming(
+        &self,
+        stores: &RuntimeStores,
+        thread_id: &ThreadId,
+    ) -> RuntimeResult<Option<String>> {
+        let thread = stores
+            .get_thread(thread_id)?
+            .ok_or_else(|| RuntimeError::not_found("thread_not_found", "thread does not exist"))?;
+        let snapshot = stores.read_global_memory()?;
+        let thread_topics = snapshot
+            .topic_index
+            .iter()
+            .filter(|topic| topic.related_thread_ids.contains(&thread.id))
+            .take(3)
+            .map(|topic| topic.name.clone())
+            .collect::<Vec<_>>();
+        let procedures = snapshot
+            .facts
+            .iter()
+            .filter(|fact| {
+                fact.kind == MemoryFactKind::ProcedureCandidate
+                    && fact.invalidated_at.is_none()
+                    && fact.related_thread_ids.contains(&thread.id)
+            })
+            .take(2)
+            .map(|fact| fact.value.clone())
+            .collect::<Vec<_>>();
+        let open_commitments = thread.pending_commitments.iter().take(2).cloned().collect::<Vec<_>>();
+
+        if thread_topics.is_empty() && procedures.is_empty() && open_commitments.is_empty() {
+            return Ok(None);
+        }
+
+        let topic_summary = if thread_topics.is_empty() {
+            "no dominant topic cluster".to_owned()
+        } else {
+            format!("active topics: {}", thread_topics.join(", "))
+        };
+        let procedure_summary = if procedures.is_empty() {
+            "no reusable procedure surfaced yet".to_owned()
+        } else {
+            format!("procedure candidate: {}", procedures.join(" | "))
+        };
+        let commitment_summary = if open_commitments.is_empty() {
+            "no open commitments remain".to_owned()
+        } else {
+            format!("carry forward: {}", open_commitments.join(" | "))
+        };
+
+        Ok(Some(format!(
+            "Reflection for {}: {}; {}; {}",
+            thread.title, topic_summary, procedure_summary, commitment_summary
+        )))
+    }
+
     /// Lists topic summaries from the topic index.
     pub fn list_topics(
         &self,

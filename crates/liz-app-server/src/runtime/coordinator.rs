@@ -713,6 +713,14 @@ impl RuntimeCoordinator {
         self.memory_engine.compile_thread(&self.stores, &self.ids, thread_id)
     }
 
+    /// Produces a lightweight reflection summary from the currently compiled memory state.
+    pub fn summarize_thread_dreaming(
+        &self,
+        thread_id: &ThreadId,
+    ) -> RuntimeResult<Option<String>> {
+        self.memory_engine.summarize_dreaming(&self.stores, thread_id)
+    }
+
     /// Evaluates policy for a turn input and assembled context.
     pub fn evaluate_policy(&self, input: &str, context: &AssembledContext) -> PolicyDecision {
         self.policy_engine.evaluate(input, context)

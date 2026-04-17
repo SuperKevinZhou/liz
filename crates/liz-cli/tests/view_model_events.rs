@@ -2,8 +2,8 @@
 
 use liz_cli::view_model::ViewModel;
 use liz_protocol::events::{
-    MemoryCompilationAppliedEvent, MemoryWakeupLoadedEvent, ThreadStartedEvent, TurnCancelledEvent,
-    TurnStartedEvent,
+    MemoryCompilationAppliedEvent, MemoryDreamingCompletedEvent, MemoryWakeupLoadedEvent,
+    ThreadStartedEvent, TurnCancelledEvent, TurnStartedEvent,
 };
 use liz_protocol::{
     EventId, MemoryCompilationSummary, MemoryWakeup, ServerEvent, ServerEventPayload, Thread,
@@ -96,14 +96,25 @@ fn view_model_projects_thread_and_turn_events() {
             },
         }),
     });
+    view_model.apply_event(&ServerEvent {
+        event_id: EventId::new("event_06"),
+        thread_id: ThreadId::new("thread_01"),
+        turn_id: None,
+        created_at: Timestamp::new("2026-04-13T20:00:05Z"),
+        payload: ServerEventPayload::MemoryDreamingCompleted(MemoryDreamingCompletedEvent {
+            summary: "Reflection for Phase 4: active topics: websocket".to_owned(),
+        }),
+    });
 
     assert_eq!(
         view_model.thread_statuses.get(&ThreadId::new("thread_01")),
         Some(&ThreadStatus::Active)
     );
-    assert_eq!(view_model.transcript_lines.len(), 4);
+    assert_eq!(view_model.transcript_lines.len(), 5);
     assert!(view_model.transcript_lines[0].contains("turn started"));
     assert!(view_model.transcript_lines[1].contains("turn interrupted"));
     assert!(view_model.transcript_lines[2].contains("wake-up loaded"));
     assert!(view_model.transcript_lines[3].contains("memory compiled"));
+    assert!(view_model.transcript_lines[4].contains("dreaming"));
+    assert_eq!(view_model.dreaming_summaries.len(), 1);
 }

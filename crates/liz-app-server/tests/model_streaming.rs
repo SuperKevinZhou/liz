@@ -128,10 +128,11 @@ fn turn_start_executes_committed_shell_tool_calls() {
     let mut saw_executor_output = false;
     let mut saw_artifact = false;
     let mut saw_turn_completed = false;
+    let mut saw_memory_dreaming = false;
     let mut seen_events = Vec::new();
     let mut committed_summary = None;
 
-    for _ in 0..16 {
+    for _ in 0..20 {
         let Ok(event) = client.recv_event_timeout(Duration::from_secs(5)) else {
             break;
         };
@@ -144,11 +145,14 @@ fn turn_start_executes_committed_shell_tool_calls() {
             ServerEventPayload::ToolCompleted(_) => saw_tool_completed = true,
             ServerEventPayload::ExecutorOutputChunk(_) => saw_executor_output = true,
             ServerEventPayload::ArtifactCreated(_) => saw_artifact = true,
+            ServerEventPayload::MemoryDreamingCompleted(_) => saw_memory_dreaming = true,
             ServerEventPayload::TurnCompleted(_) => {
                 saw_turn_completed = true;
-                break;
             }
             _ => {}
+        }
+        if saw_turn_completed && saw_memory_dreaming {
+            break;
         }
     }
 
@@ -157,6 +161,7 @@ fn turn_start_executes_committed_shell_tool_calls() {
     assert!(saw_executor_output, "seen events: {seen_events:?}");
     assert!(saw_artifact, "seen events: {seen_events:?}");
     assert!(saw_turn_completed, "seen events: {seen_events:?}");
+    assert!(saw_memory_dreaming, "seen events: {seen_events:?}");
 
     let response = client.recv_response().expect("turn response should eventually arrive");
     assert!(matches!(response, ServerResponseEnvelope::Success(_)));
