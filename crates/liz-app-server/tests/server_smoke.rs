@@ -24,3 +24,24 @@ fn app_server_binary_prints_workspace_banner() {
         "app-server banner should surface websocket wiring: {stdout}"
     );
 }
+
+/// Verifies that the app-server binary documents its serve mode.
+#[test]
+fn app_server_binary_prints_help_for_serve_mode() {
+    let output = Command::new(env!("CARGO_BIN_EXE_liz-app-server"))
+        .arg("--help")
+        .output()
+        .expect("app-server help should be executable in smoke tests");
+
+    assert!(
+        output.status.success(),
+        "app-server help should exit successfully: {:?}",
+        output.status
+    );
+
+    let stdout =
+        String::from_utf8(output.stdout).expect("app-server help output should be valid UTF-8");
+
+    assert!(stdout.contains("--serve"), "serve flag should be documented: {stdout}");
+    assert!(stdout.contains("--bind"), "bind flag should be documented: {stdout}");
+}
