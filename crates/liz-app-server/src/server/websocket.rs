@@ -184,12 +184,23 @@ fn accept_loop(listener: TcpListener, server: Arc<Mutex<AppServer>>, shutdown_rx
                     let _ = serve_connection(server, stream);
                 });
             }
-            Err(error) if error.kind() == ErrorKind::WouldBlock => {
+            Err(error) if is_transient_accept_error(error.kind()) => {
                 thread::sleep(READ_POLL_INTERVAL);
             }
             Err(_) => break,
         }
     }
+}
+
+fn is_transient_accept_error(kind: ErrorKind) -> bool {
+    matches!(
+        kind,
+        ErrorKind::WouldBlock
+            | ErrorKind::TimedOut
+            | ErrorKind::Interrupted
+            | ErrorKind::ConnectionAborted
+            | ErrorKind::ConnectionReset
+    )
 }
 
 fn serve_connection(
