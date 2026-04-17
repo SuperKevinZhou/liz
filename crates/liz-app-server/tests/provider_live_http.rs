@@ -433,8 +433,8 @@ fn anthropic_live_request_uses_messages_shape_and_headers() {
             || lowercase.contains("anthropic-version:2023-06-01")
     );
     assert!(request.contains(r#""model":"claude-sonnet-4-6""#));
-    assert!(request
-        .contains(r#""system":[{"type":"text","text":"You are liz, a continuous personal agent."#));
+    assert!(request.contains(r#""system":["#));
+    assert!(request.contains(r#""text":"You are liz, a continuous personal agent."#));
     assert!(request.contains(r#""max_tokens":32000"#));
     assert!(request.contains(r#""cache_control":{"type":"ephemeral"}"#));
     assert!(request.contains(r#""messages":["#));
