@@ -566,7 +566,8 @@ fn local_openai_compatible_provider_with_builtin_base_url_still_runs() {
     let gateway = ModelGateway::from_config(ModelGatewayConfig {
         primary_provider: "copilot-proxy".to_owned(),
         overrides: BTreeMap::new(),
-    });
+    })
+    .with_simulation(true);
     let request = demo_request();
     let mut events = Vec::new();
     let summary = gateway
@@ -584,7 +585,8 @@ fn gitlab_events_do_not_emit_patch_updates_when_capability_disables_patching() {
     let gateway = ModelGateway::from_config(ModelGatewayConfig {
         primary_provider: "gitlab".to_owned(),
         overrides: BTreeMap::new(),
-    });
+    })
+    .with_simulation(true);
     let request = demo_request();
     let mut events = Vec::new();
     gateway.run_turn(request, |event| events.push(event)).expect("gitlab provider should run");
