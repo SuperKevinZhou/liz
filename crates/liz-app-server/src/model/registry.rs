@@ -2,7 +2,9 @@
 
 use crate::model::capabilities::ModelCapabilities;
 use crate::model::family::ModelProviderFamily;
-use crate::model::provider_spec::{ProviderAuthKind, ProviderAuthStrategy, ProviderSpec};
+use crate::model::provider_spec::{
+    ProviderAuthKind, ProviderAuthStrategy, ProviderImplementationStatus, ProviderSpec,
+};
 use std::collections::BTreeMap;
 
 /// The builtin provider registry used by the liz backend.
@@ -941,6 +943,7 @@ fn spec(
         required_envs,
         default_headers,
         capabilities,
+        implementation_status: ProviderImplementationStatus::Ready,
         notes,
     }
 }
@@ -1061,10 +1064,43 @@ fn openai_compatible_alias_spec(
     display_name: &'static str,
     default_model: &'static str,
 ) -> ProviderSpec {
-    openai_compatible_spec(id, display_name, default_model).with_notes(&[
-        "Compatibility alias routed through the generic OpenAI-compatible adapter.",
-        "Does not claim provider-native auth, model discovery, or custom transport behavior beyond the compatibility API surface.",
-    ])
+    let spec = openai_compatible_spec(id, display_name, default_model);
+    if is_unimplemented_openai_compatible_alias(id) {
+        spec.with_implementation_status(ProviderImplementationStatus::Unimplemented).with_notes(&[
+            "Compatibility alias reserved for a later implementation pass.",
+            "Selecting this provider should fail fast until liz ships a verified live endpoint or provider-specific routing metadata.",
+        ])
+    } else {
+        spec.with_notes(&[
+            "Compatibility alias routed through the generic OpenAI-compatible adapter.",
+            "Does not claim provider-native auth, model discovery, or custom transport behavior beyond the compatibility API surface.",
+        ])
+    }
+}
+
+fn is_unimplemented_openai_compatible_alias(id: &str) -> bool {
+    matches!(
+        id,
+        "arcee"
+            | "baseten"
+            | "cerebras"
+            | "chutes"
+            | "deepinfra"
+            | "fireworks"
+            | "fireworks-ai"
+            | "firmware"
+            | "huggingface"
+            | "kilo"
+            | "kilocode"
+            | "litellm"
+            | "nvidia"
+            | "poe"
+            | "qianfan"
+            | "synthetic"
+            | "venice"
+            | "xiaomi"
+            | "zenmux"
+    )
 }
 
 fn auth_strategy(

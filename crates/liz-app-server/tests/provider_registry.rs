@@ -581,6 +581,18 @@ fn local_openai_compatible_provider_with_builtin_base_url_still_runs() {
 }
 
 #[test]
+fn unimplemented_provider_fails_fast_in_live_runtime() {
+    let error = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "synthetic".to_owned(),
+        overrides: BTreeMap::new(),
+    })
+    .resolved_primary_provider()
+    .expect_err("synthetic should be marked unavailable in live runtime");
+
+    assert!(error.to_string().contains("not yet implemented"), "{error}");
+}
+
+#[test]
 fn gitlab_events_do_not_emit_patch_updates_when_capability_disables_patching() {
     let gateway = ModelGateway::from_config(ModelGatewayConfig {
         primary_provider: "gitlab".to_owned(),

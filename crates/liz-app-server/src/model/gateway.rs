@@ -204,6 +204,12 @@ impl ModelGateway {
         let Some(spec) = self.registry.provider(self.primary_provider_id()) else {
             return Err(ModelError::UnsupportedProvider(self.primary_provider_id().to_owned()));
         };
+        if !self.simulate && !spec.is_runtime_ready() {
+            return Err(ModelError::UnsupportedProvider(format!(
+                "provider {} is not yet implemented for live runtime use; see PROVIDER_SUPPORT.md",
+                spec.id
+            )));
+        }
 
         Ok(ResolvedProvider::from_spec(spec, self.config.overrides.get(self.primary_provider_id())))
     }

@@ -4,6 +4,15 @@ use crate::model::capabilities::ModelCapabilities;
 use crate::model::family::ModelProviderFamily;
 use std::collections::BTreeMap;
 
+/// The implementation readiness of a provider in the current runtime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ProviderImplementationStatus {
+    /// The provider has a live-connectable runtime path.
+    Ready,
+    /// The provider remains listed for planning but cannot be used yet.
+    Unimplemented,
+}
+
 /// The primary auth mode exposed by a provider.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub enum ProviderAuthKind {
@@ -93,6 +102,8 @@ pub struct ProviderSpec {
     pub default_headers: &'static [(&'static str, &'static str)],
     /// The provider capability matrix used by the runtime.
     pub capabilities: ModelCapabilities,
+    /// Whether the current runtime can connect to the provider without extra implementation work.
+    pub implementation_status: ProviderImplementationStatus,
     /// Lightweight implementation notes that describe provider-specific behavior.
     pub notes: &'static [&'static str],
 }
@@ -116,6 +127,20 @@ impl ProviderSpec {
     pub fn with_notes(mut self, notes: &'static [&'static str]) -> Self {
         self.notes = notes;
         self
+    }
+
+    /// Marks the runtime implementation readiness for this provider.
+    pub fn with_implementation_status(
+        mut self,
+        implementation_status: ProviderImplementationStatus,
+    ) -> Self {
+        self.implementation_status = implementation_status;
+        self
+    }
+
+    /// Returns whether the provider is ready for live runtime usage.
+    pub const fn is_runtime_ready(&self) -> bool {
+        matches!(self.implementation_status, ProviderImplementationStatus::Ready)
     }
 
     /// Returns every env key mentioned by the provider's auth strategies.
