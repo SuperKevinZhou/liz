@@ -21,6 +21,7 @@ impl AnthropicAdapter {
         simulate: bool,
         sink: &mut dyn FnMut(NormalizedTurnEvent),
     ) -> Result<ModelRunSummary, ModelError> {
+        let instruction_prompt = request.instruction_prompt();
         let base_url =
             provider.base_url.clone().unwrap_or_else(|| "https://api.anthropic.com".to_owned());
         let plan = ProviderInvocationPlan {
@@ -37,8 +38,9 @@ impl AnthropicAdapter {
             headers: provider.headers.clone(),
             payload_preview: json!({
                 "model": provider.model_id,
+                "system": instruction_prompt,
                 "max_tokens": 4096,
-                "messages": [{"role": "user", "content": request.prompt}],
+                "messages": [{"role": "user", "content": request.user_prompt}],
                 "stream": true,
             })
             .to_string(),
@@ -82,6 +84,7 @@ fn execute_live_http(
     request: ModelTurnRequest,
     sink: &mut dyn FnMut(NormalizedTurnEvent),
 ) -> Result<ModelRunSummary, ModelError> {
+    let instruction_prompt = request.instruction_prompt();
     let InvocationTransport::HttpJson { base_url, path, .. } = &plan.transport else {
         return Err(ModelError::ProviderFailure(
             "anthropic transport must be HTTP JSON".to_owned(),
@@ -121,8 +124,9 @@ fn execute_live_http(
 
     let mut body = json!({
         "model": provider.model_id,
+        "system": instruction_prompt,
         "max_tokens": 4096,
-        "messages": [{"role": "user", "content": request.prompt}],
+        "messages": [{"role": "user", "content": request.user_prompt}],
         "stream": false,
     });
     if provider.spec.id == "minimax" || provider.spec.id == "minimax-portal" {

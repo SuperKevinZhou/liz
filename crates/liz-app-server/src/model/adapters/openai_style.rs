@@ -39,16 +39,19 @@ impl OpenAiStyleAdapter {
         provider: &ResolvedProvider,
         request: &ModelTurnRequest,
     ) -> Result<ProviderInvocationPlan, ModelError> {
+        let instruction_prompt = request.instruction_prompt();
         let payload_preview = match provider.spec.family {
             ModelProviderFamily::OpenAiResponses => json!({
                 "model": provider.model_id,
-                "input": request.prompt,
+                "instructions": instruction_prompt,
+                "input": request.user_prompt,
                 "stream": true,
             })
             .to_string(),
             ModelProviderFamily::GitHubCopilot => json!({
                 "model": provider.model_id,
-                "input": request.prompt,
+                "instructions": instruction_prompt,
+                "input": request.user_prompt,
                 "mode": if copilot_uses_anthropic_messages_model(&provider.model_id) {
                     "messages"
                 } else if should_use_copilot_responses_api(&provider.model_id) {
@@ -67,7 +70,8 @@ impl OpenAiStyleAdapter {
             _ => json!({
                 "model": provider.model_id,
                 "messages": [
-                    {"role": "user", "content": request.prompt}
+                    {"role": "system", "content": instruction_prompt},
+                    {"role": "user", "content": request.user_prompt}
                 ],
                 "stream": true,
             })
@@ -153,17 +157,22 @@ fn execute_live_http(
     request: ModelTurnRequest,
     sink: &mut dyn FnMut(NormalizedTurnEvent),
 ) -> Result<ModelRunSummary, ModelError> {
+    let instruction_prompt = request.instruction_prompt();
     let (url, body, headers) = match &plan.transport {
         InvocationTransport::HttpJson { base_url, path, .. } => {
             let body = match plan.family {
                 ModelProviderFamily::OpenAiResponses => json!({
                     "model": provider.model_id,
-                    "input": request.prompt,
+                    "instructions": instruction_prompt,
+                    "input": request.user_prompt,
                     "stream": false,
                 }),
                 _ => json!({
                     "model": provider.model_id,
-                    "messages": [{"role": "user", "content": request.prompt}],
+                    "messages": [
+                        {"role": "system", "content": instruction_prompt},
+                        {"role": "user", "content": request.user_prompt}
+                    ],
                     "stream": false,
                 }),
             };
@@ -215,8 +224,9 @@ fn execute_live_http(
                         format!("{}/v1/messages", trim_trailing_slash(&runtime.base_url)),
                         json!({
                             "model": provider.model_id,
+                            "system": instruction_prompt,
                             "max_tokens": 4096,
-                            "messages": [{"role": "user", "content": request.prompt}],
+                            "messages": [{"role": "user", "content": request.user_prompt}],
                             "stream": false,
                         }),
                         headers,
@@ -226,7 +236,8 @@ fn execute_live_http(
                         format!("{}/v1/responses", trim_trailing_slash(&runtime.base_url)),
                         json!({
                             "model": provider.model_id,
-                            "input": request.prompt,
+                            "instructions": instruction_prompt,
+                            "input": request.user_prompt,
                             "stream": false,
                         }),
                         headers,
@@ -236,7 +247,10 @@ fn execute_live_http(
                         format!("{}/v1/chat/completions", trim_trailing_slash(&runtime.base_url)),
                         json!({
                             "model": provider.model_id,
-                            "messages": [{"role": "user", "content": request.prompt}],
+                            "messages": [
+                                {"role": "system", "content": instruction_prompt},
+                                {"role": "user", "content": request.user_prompt}
+                            ],
                             "stream": false,
                         }),
                         headers,
@@ -342,8 +356,8 @@ fn simulate_stream(
     sink(NormalizedTurnEvent::AssistantDelta { chunk: first_chunk });
     sink(NormalizedTurnEvent::AssistantDelta { chunk: second_chunk });
 
-    if needs_tool_call(&request.prompt) {
-        let tool_name = infer_tool_name(&request.prompt);
+    if needs_tool_call(&request.user_prompt) {
+        let tool_name = infer_tool_name(&request.user_prompt);
         sink(NormalizedTurnEvent::ToolCallStarted {
             call_id: "call_01".to_owned(),
             tool_name: tool_name.clone(),
@@ -356,7 +370,7 @@ fn simulate_stream(
                 delta_summary: "arguments patched".to_owned(),
                 preview: Some(format!(
                     "{{\"goal\":\"{}\",\"provider\":\"{}\"",
-                    truncate_preview(&request.prompt),
+                    truncate_preview(&request.user_prompt),
                     plan.provider_id
                 )),
             });
@@ -365,7 +379,7 @@ fn simulate_stream(
             call_id: "call_01".to_owned(),
             tool_name,
             arguments: synthesize_tool_arguments(
-                &request.prompt,
+                &request.user_prompt,
                 request.thread.id.as_str(),
                 &plan.provider_id,
             ),
@@ -378,7 +392,7 @@ fn simulate_stream(
 
     let usage = UsageDelta {
         input_tokens: estimate_tokens(&request.prompt),
-        output_tokens: estimate_tokens(&request.prompt) + 12,
+        output_tokens: estimate_tokens(&request.user_prompt) + 12,
         reasoning_tokens: if supports_reasoning_accounting(&plan.family) { 6 } else { 0 },
         cache_hit_tokens: 0,
         cache_write_tokens: 0,

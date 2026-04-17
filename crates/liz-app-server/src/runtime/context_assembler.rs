@@ -78,7 +78,13 @@ pub struct AssembledContext {
     pub layers: ContextLayers,
     /// Boundary metadata that keeps the executor subordinate to `liz`.
     pub executor_boundary: ExecutorBoundaryMetadata,
-    /// The final prompt string handed to the model gateway.
+    /// The stable system prompt for `liz`'s single-self runtime.
+    pub system_prompt: String,
+    /// The dynamic runtime-owned operating context for the current turn.
+    pub developer_prompt: String,
+    /// The user-authored turn input.
+    pub user_prompt: String,
+    /// The flattened prompt string handed to fallback and diagnostics paths.
     pub prompt: String,
 }
 
@@ -187,13 +193,23 @@ impl ContextAssembler {
                 executor_boundary.relationship_history_shared
             ),
         };
-        let prompt = format!(
-            "resident_wakeup:\n{}\n\nrecent_conversation_wakeup:\n{}\n\nthread_projection:\n{}\n\ntask_local:\n{}\n\nexecutor_boundary:\n{}",
-            layers.resident,
+        let system_prompt = format!(
+            "liz_identity:\n{}\n\nresident_wakeup:\n{}",
+            liz_system_constitution(),
+            layers.resident
+        );
+        let developer_prompt = format!(
+            "turn_operating_contract:\n{}\n\nrecent_conversation_wakeup:\n{}\n\nthread_projection:\n{}\n\ntask_local:\n{}\n\nexecutor_boundary:\n{}",
+            liz_turn_operating_contract(),
             layers.recent_conversation,
             layers.thread_projection,
             layers.task_local,
             layers.executor_boundary
+        );
+        let user_prompt = input.to_owned();
+        let prompt = format!(
+            "system:\n{}\n\ndeveloper:\n{}\n\nuser:\n{}",
+            system_prompt, developer_prompt, user_prompt
         );
 
         AssembledContext {
@@ -204,9 +220,38 @@ impl ContextAssembler {
             scope,
             layers,
             executor_boundary,
+            system_prompt,
+            developer_prompt,
+            user_prompt,
             prompt,
         }
     }
+}
+
+fn liz_system_constitution() -> &'static str {
+    concat!(
+        "You are liz, a coding-first general-purpose personal agent.",
+        "\n",
+        "Stay one continuous self across planning, execution, and supportive conversation.",
+        "\n",
+        "Advance the user's real work while preserving continuity, commitments, and trust.",
+        "\n",
+        "Use the smallest reliable action, prefer minimal diffs, and never invent work you did not complete or observe.",
+        "\n",
+        "Tools and external executors are subordinate runtimes. liz keeps memory, approvals, and final responsibility."
+    )
+}
+
+fn liz_turn_operating_contract() -> &'static str {
+    concat!(
+        "Treat resident wake-up, recent conversation, thread state, and task-local retrieval as runtime-owned context.",
+        "\n",
+        "Use them to preserve continuity without turning the turn into a mode switch or a second persona.",
+        "\n",
+        "Keep exploration proportional to the retrieval scope and stay narrow when the request is small or specific.",
+        "\n",
+        "Maintain clear executor boundaries, surface uncertainty briefly, and preserve pending commitments when they matter."
+    )
 }
 
 fn classify_scope(input: &str) -> RetrievalScope {

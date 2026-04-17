@@ -22,6 +22,7 @@ impl GoogleAdapter {
         simulate: bool,
         sink: &mut dyn FnMut(NormalizedTurnEvent),
     ) -> Result<ModelRunSummary, ModelError> {
+        let instruction_prompt = request.instruction_prompt();
         let transport = match provider.spec.family {
             ModelProviderFamily::GoogleGenerativeAi => InvocationTransport::ProviderOperation {
                 operation: "google.generate_content",
@@ -53,7 +54,8 @@ impl GoogleAdapter {
             headers: provider.headers.clone(),
             payload_preview: json!({
                 "model": provider.model_id,
-                "contents": [{"role": "user", "parts": [{"text": request.prompt}]}],
+                "system_instruction": {"parts": [{"text": instruction_prompt}]},
+                "contents": [{"role": "user", "parts": [{"text": request.user_prompt}]}],
             })
             .to_string(),
             notes: provider.spec.notes.iter().map(|note| (*note).to_owned()).collect(),
@@ -104,6 +106,7 @@ fn execute_live_http(
     request: ModelTurnRequest,
     sink: &mut dyn FnMut(NormalizedTurnEvent),
 ) -> Result<ModelRunSummary, ModelError> {
+    let instruction_prompt = request.instruction_prompt();
     let (url, body, headers) = match plan.family {
         ModelProviderFamily::GoogleGenerativeAi => {
             let api_key = provider.api_key.clone().ok_or_else(|| {
@@ -123,7 +126,8 @@ fn execute_live_http(
                     api_key
                 ),
                 json!({
-                    "contents": [{"role": "user", "parts": [{"text": request.prompt}]}],
+                    "system_instruction": {"parts": [{"text": instruction_prompt}]},
+                    "contents": [{"role": "user", "parts": [{"text": request.user_prompt}]}],
                 }),
                 provider.headers.clone(),
             )
@@ -141,7 +145,8 @@ fn execute_live_http(
                     provider.model_id
                 ),
                 json!({
-                    "contents": [{"role": "user", "parts": [{"text": request.prompt}]}],
+                    "system_instruction": {"parts": [{"text": instruction_prompt}]},
+                    "contents": [{"role": "user", "parts": [{"text": request.user_prompt}]}],
                 }),
                 headers,
             )
@@ -160,7 +165,8 @@ fn execute_live_http(
                 ),
                 json!({
                     "anthropic_version": "vertex-2023-10-16",
-                    "messages": [{"role": "user", "content": request.prompt}],
+                    "system": instruction_prompt,
+                    "messages": [{"role": "user", "content": request.user_prompt}],
                     "max_tokens": 4096,
                 }),
                 headers,

@@ -610,8 +610,8 @@ fn gitlab_events_do_not_emit_patch_updates_when_capability_disables_patching() {
 }
 
 fn demo_request() -> ModelTurnRequest {
-    ModelTurnRequest {
-        thread: Thread {
+    ModelTurnRequest::from_prompt_parts(
+        Thread {
             id: ThreadId::new("thread_test"),
             title: "Provider demo".to_owned(),
             status: ThreadStatus::Active,
@@ -625,7 +625,7 @@ fn demo_request() -> ModelTurnRequest {
             latest_checkpoint_id: None,
             parent_thread_id: None,
         },
-        turn: Turn {
+        Turn {
             id: TurnId::new("turn_test"),
             thread_id: ThreadId::new("thread_test"),
             kind: TurnKind::User,
@@ -637,8 +637,10 @@ fn demo_request() -> ModelTurnRequest {
             checkpoint_before: None,
             checkpoint_after: None,
         },
-        prompt: "Run a patch tool command for this task".to_owned(),
-    }
+        "You are liz, a continuous personal agent.".to_owned(),
+        "Use runtime context, stay disciplined, and prefer minimal diffs.".to_owned(),
+        "Run a patch tool command for this task".to_owned(),
+    )
 }
 
 fn env_lock() -> &'static Mutex<()> {

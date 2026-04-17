@@ -43,8 +43,10 @@ fn openai_compatible_live_request_uses_chat_completions_shape() {
     assert!(request.to_ascii_lowercase().contains("authorization: bearer sk-test"));
     assert!(request.contains(r#""model":"openai/gpt-4.1-mini""#));
     assert!(request.contains(r#""messages":["#));
+    assert!(request.contains(r#""role":"system""#));
     assert!(request.contains(r#""role":"user""#));
     assert!(request.contains(r#""content":"Run a patch tool command for this task""#));
+    assert!(request.contains(r#""You are liz, a continuous personal agent."#));
     assert_eq!(summary.assistant_message.as_deref(), Some("hello from openai-compatible"));
 
     std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
@@ -252,6 +254,7 @@ fn openai_codex_live_request_refreshes_oauth_and_uses_native_codex_endpoint() {
     assert!(runtime_lower.contains("authorization: bearer header."));
     assert!(runtime_lower.contains("chatgpt-account-id: acct-codex"), "{runtime}");
     assert!(runtime.contains(r#""model":"gpt-5.4""#));
+    assert!(runtime.contains(r#""instructions":"You are liz, a continuous personal agent."#));
     assert!(runtime.contains(r#""input":"Run a patch tool command for this task""#));
     assert_eq!(summary.assistant_message.as_deref(), Some("hello from codex oauth"));
 
@@ -380,6 +383,7 @@ fn anthropic_live_request_uses_messages_shape_and_headers() {
             || lowercase.contains("anthropic-version:2023-06-01")
     );
     assert!(request.contains(r#""model":"claude-sonnet-4-6""#));
+    assert!(request.contains(r#""system":"You are liz, a continuous personal agent."#));
     assert!(request.contains(r#""messages":["#));
     assert!(request.contains(r#""role":"user""#));
     assert!(request.contains(r#""content":"Run a patch tool command for this task""#));
@@ -420,6 +424,9 @@ fn google_live_request_uses_generate_content_shape() {
     let request = capture.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
     assert!(request
         .contains("POST /v1beta/models/gemini-3.1-pro:generateContent?key=google-test HTTP/1.1"));
+    assert!(request.contains(
+        r#""system_instruction":{"parts":[{"text":"You are liz, a continuous personal agent."#
+    ));
     assert!(request.contains(r#""contents":["#));
     assert!(request.contains(r#""role":"user""#));
     assert!(request.contains(r#""parts":["#));
@@ -467,6 +474,9 @@ fn google_vertex_live_request_uses_vertex_generate_content_path_and_bearer_auth(
         "POST /v1/projects/demo-project/locations/us-central1/publishers/google/models/gemini-3.1-pro:generateContent HTTP/1.1"
     ));
     assert!(request.to_ascii_lowercase().contains("authorization: bearer vertex-test"));
+    assert!(request.contains(
+        r#""system_instruction":{"parts":[{"text":"You are liz, a continuous personal agent."#
+    ));
     assert!(request.contains(r#""contents":["#));
     assert!(request.contains(r#""role":"user""#));
     assert!(request.contains(r#""text":"Run a patch tool command for this task""#));
@@ -515,6 +525,7 @@ fn google_vertex_anthropic_live_request_uses_raw_predict_shape() {
     ));
     assert!(request.to_ascii_lowercase().contains("authorization: bearer vertex-anthropic-test"));
     assert!(request.contains(r#""anthropic_version":"vertex-2023-10-16""#));
+    assert!(request.contains(r#""system":"You are liz, a continuous personal agent."#));
     assert!(request.contains(r#""messages":["#));
     assert!(request.contains(r#""role":"user""#));
     assert!(request.contains(r#""content":"Run a patch tool command for this task""#));
@@ -556,6 +567,7 @@ fn bedrock_live_request_uses_bearer_auth_and_converse_path() {
     let request = capture.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
     assert!(request.contains("POST /model/anthropic.claude-sonnet-4-6-v1:0/converse HTTP/1.1"));
     assert!(request.to_ascii_lowercase().contains("authorization: bearer bedrock-bearer-test"));
+    assert!(request.contains(r#""system":[{"text":"You are liz, a continuous personal agent."#));
     assert!(request.contains(r#""messages":["#));
     assert!(request.contains(r#""role":"user""#));
     assert!(request.contains(r#""text":"Run a patch tool command for this task""#));
@@ -1424,6 +1436,7 @@ fn github_copilot_live_request_uses_messages_transport_for_claude_models() {
     assert!(lowercase.contains("anthropic-version: 2023-06-01"));
     assert!(lowercase.contains("anthropic-beta: interleaved-thinking-2025-05-14"));
     assert!(messages.contains(r#""model":"claude-sonnet-4-6""#));
+    assert!(messages.contains(r#""system":"You are liz, a continuous personal agent."#));
     assert!(messages.contains(r#""content":"Run a patch tool command for this task""#));
     assert_eq!(summary.assistant_message.as_deref(), Some("hello from copilot claude"));
 
@@ -1551,8 +1564,8 @@ fn spawn_json_server_sequence(
 }
 
 fn demo_request() -> ModelTurnRequest {
-    ModelTurnRequest {
-        thread: Thread {
+    ModelTurnRequest::from_prompt_parts(
+        Thread {
             id: ThreadId::new("thread_http"),
             title: "HTTP demo".to_owned(),
             status: ThreadStatus::Active,
@@ -1566,7 +1579,7 @@ fn demo_request() -> ModelTurnRequest {
             latest_checkpoint_id: None,
             parent_thread_id: None,
         },
-        turn: Turn {
+        Turn {
             id: TurnId::new("turn_http"),
             thread_id: ThreadId::new("thread_http"),
             kind: TurnKind::User,
@@ -1578,8 +1591,10 @@ fn demo_request() -> ModelTurnRequest {
             checkpoint_before: None,
             checkpoint_after: None,
         },
-        prompt: "Run a patch tool command for this task".to_owned(),
-    }
+        "You are liz, a continuous personal agent.".to_owned(),
+        "Use runtime context, stay disciplined, and prefer minimal diffs.".to_owned(),
+        "Run a patch tool command for this task".to_owned(),
+    )
 }
 
 fn env_lock() -> &'static Mutex<()> {

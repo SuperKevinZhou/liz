@@ -20,8 +20,33 @@ pub struct ModelTurnRequest {
     pub thread: Thread,
     /// The turn being executed.
     pub turn: Turn,
-    /// The final assembled prompt or context envelope rendered into text.
+    /// The stable system-level instructions for `liz`.
+    pub system_prompt: String,
+    /// The dynamic runtime-owned operating context for the current turn.
+    pub developer_prompt: String,
+    /// The user-authored input for the current turn.
+    pub user_prompt: String,
+    /// The flattened prompt transcript used by fallback and simulation paths.
     pub prompt: String,
+}
+
+impl ModelTurnRequest {
+    /// Builds a request from structured prompt parts and keeps a flattened fallback transcript.
+    pub fn from_prompt_parts(
+        thread: Thread,
+        turn: Turn,
+        system_prompt: String,
+        developer_prompt: String,
+        user_prompt: String,
+    ) -> Self {
+        let prompt = render_flattened_prompt(&system_prompt, &developer_prompt, &user_prompt);
+        Self { thread, turn, system_prompt, developer_prompt, user_prompt, prompt }
+    }
+
+    /// Returns the instruction block that should stay above user input at transport time.
+    pub fn instruction_prompt(&self) -> String {
+        render_instruction_prompt(&self.system_prompt, &self.developer_prompt)
+    }
 }
 
 /// A normalized summary of a completed provider run.
@@ -54,6 +79,32 @@ impl fmt::Display for ModelError {
 }
 
 impl Error for ModelError {}
+
+fn render_instruction_prompt(system_prompt: &str, developer_prompt: &str) -> String {
+    let system_prompt = system_prompt.trim();
+    let developer_prompt = developer_prompt.trim();
+    match (system_prompt.is_empty(), developer_prompt.is_empty()) {
+        (true, true) => String::new(),
+        (false, true) => system_prompt.to_owned(),
+        (true, false) => developer_prompt.to_owned(),
+        (false, false) => format!("{system_prompt}\n\n{developer_prompt}"),
+    }
+}
+
+fn render_flattened_prompt(
+    system_prompt: &str,
+    developer_prompt: &str,
+    user_prompt: &str,
+) -> String {
+    let instruction_prompt = render_instruction_prompt(system_prompt, developer_prompt);
+    let user_prompt = user_prompt.trim();
+    match (instruction_prompt.is_empty(), user_prompt.is_empty()) {
+        (true, true) => String::new(),
+        (false, true) => format!("system:\n{instruction_prompt}"),
+        (true, false) => format!("user:\n{user_prompt}"),
+        (false, false) => format!("system:\n{instruction_prompt}\n\nuser:\n{user_prompt}"),
+    }
+}
 
 /// The model gateway mediates between the runtime and concrete provider families.
 #[derive(Debug, Clone)]

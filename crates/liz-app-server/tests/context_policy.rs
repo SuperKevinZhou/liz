@@ -32,9 +32,13 @@ fn focused_change_requests_keep_context_narrow() {
 
     assert_eq!(context.scope, RetrievalScope::Focused);
     assert!(!context.retrieval.requires_full_repo_scan);
+    assert!(context.system_prompt.contains("liz_identity:"));
+    assert!(context.system_prompt.contains("resident_wakeup:"));
+    assert!(context.developer_prompt.contains("turn_operating_contract:"));
     assert!(context.prompt.contains("resident_wakeup:"));
     assert!(context.prompt.contains("recent_conversation_wakeup:"));
     assert!(context.prompt.contains("executor_boundary:"));
+    assert_eq!(context.user_prompt, "Only change one line in src/lib.rs");
     assert_eq!(context.executor_boundary.memory_owner, "liz");
     assert!(!context.executor_boundary.relationship_history_shared);
     assert_eq!(decision.scope, RetrievalScope::Focused);
@@ -81,7 +85,9 @@ fn context_assembly_surfaces_recent_conversation_wakeup_and_executor_boundary() 
         .active_topics
         .iter()
         .any(|topic| topic == "websocket" || topic == "transport"));
+    assert!(context.system_prompt.contains("coding-first general-purpose personal agent"));
     assert!(context.layers.recent_conversation.contains("recent_summaries:"));
+    assert!(context.developer_prompt.contains("thread_projection:"));
     assert!(context.layers.executor_boundary.contains("memory_owner: liz"));
     assert!(context.prompt.contains("controlled task executor"));
 }

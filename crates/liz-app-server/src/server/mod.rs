@@ -152,7 +152,13 @@ impl AppServer {
             return;
         }
 
-        self.stream_model_turn(thread, turn, context.prompt);
+        self.stream_model_turn(
+            thread,
+            turn,
+            context.system_prompt,
+            context.developer_prompt,
+            context.user_prompt,
+        );
     }
 
     fn continue_after_approval(
@@ -186,7 +192,13 @@ impl AppServer {
                 let Ok(context) = self.runtime.assemble_context(&thread.id, &input) else {
                     return;
                 };
-                self.stream_model_turn(thread, turn, context.prompt);
+                self.stream_model_turn(
+                    thread,
+                    turn,
+                    context.system_prompt,
+                    context.developer_prompt,
+                    context.user_prompt,
+                );
             }
             ApprovalDecision::Deny => {
                 if let Ok(response) = self.runtime.cancel_turn(TurnCancelRequest {
@@ -220,16 +232,23 @@ impl AppServer {
         &mut self,
         thread: liz_protocol::Thread,
         turn: liz_protocol::Turn,
-        prompt: String,
+        system_prompt: String,
+        developer_prompt: String,
+        user_prompt: String,
     ) {
         let thread_id = thread.id.clone();
         let turn_id = turn.id.clone();
         let model_gateway = self.gateway_with_provider_auth_profiles();
 
+        let request = ModelTurnRequest::from_prompt_parts(
+            thread,
+            turn,
+            system_prompt,
+            developer_prompt,
+            user_prompt,
+        );
         let run_result = model_gateway
-            .run_turn(ModelTurnRequest { thread, turn, prompt }, |event| {
-                self.handle_model_event(&thread_id, &turn_id, event)
-            });
+            .run_turn(request, |event| self.handle_model_event(&thread_id, &turn_id, event));
 
         match run_result {
             Ok(summary) => {

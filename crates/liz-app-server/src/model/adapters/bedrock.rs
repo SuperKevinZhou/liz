@@ -22,6 +22,7 @@ impl AwsBedrockAdapter {
         simulate: bool,
         sink: &mut dyn FnMut(NormalizedTurnEvent),
     ) -> Result<ModelRunSummary, ModelError> {
+        let instruction_prompt = request.instruction_prompt();
         let resolved_model = normalize_bedrock_model_id(&provider.model_id);
         let region = resolve_bedrock_region(provider);
         let base_url = resolve_bedrock_base_url(provider, &region);
@@ -39,7 +40,8 @@ impl AwsBedrockAdapter {
             headers: provider.headers.clone(),
             payload_preview: json!({
                 "modelId": resolved_model,
-                "messages": [{"role": "user", "content": [{"text": request.prompt}]}],
+                "system": [{"text": instruction_prompt}],
+                "messages": [{"role": "user", "content": [{"text": request.user_prompt}]}],
             })
             .to_string(),
             notes: provider.spec.notes.iter().map(|note| (*note).to_owned()).collect(),
@@ -90,8 +92,10 @@ fn execute_live_http(
     };
 
     let url = format!("{}{}", trim_trailing_slash(base_url), path);
+    let instruction_prompt = request.instruction_prompt();
     let body = json!({
-        "messages": [{"role": "user", "content": [{"text": request.prompt}]}],
+        "system": [{"text": instruction_prompt}],
+        "messages": [{"role": "user", "content": [{"text": request.user_prompt}]}],
         "inferenceConfig": {
             "maxTokens": 4096,
         },
