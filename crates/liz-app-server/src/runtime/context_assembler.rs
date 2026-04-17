@@ -29,6 +29,8 @@ pub struct RecentConversationWakeup {
     pub recent_summaries: Vec<String>,
     /// Lightweight topic keywords derived from recent conversation summaries.
     pub active_topics: Vec<String>,
+    /// Lightweight lexical keywords derived from the same summaries.
+    pub recent_keywords: Vec<String>,
 }
 
 /// Explicit metadata that keeps executor delegation inside `liz`'s boundary.
@@ -100,19 +102,47 @@ impl ContextAssembler {
         };
         let wakeup = MemoryWakeup {
             identity_summary: snapshot.identity_summary.clone(),
-            active_state: thread.active_summary.clone(),
+            active_state: snapshot
+                .active_state_summary
+                .clone()
+                .or_else(|| thread.active_summary.clone()),
             relevant_facts: snapshot
                 .facts
                 .iter()
+                .filter(|fact| fact.invalidated_at.is_none())
                 .take(3)
                 .map(|fact| format!("{}: {}", fact.subject, fact.value))
                 .collect(),
             open_commitments: thread.pending_commitments.clone(),
-            citation_fact_ids: snapshot.facts.iter().take(3).map(|fact| fact.id.clone()).collect(),
+            recent_topics: if snapshot.recent_topics.is_empty() {
+                Vec::new()
+            } else {
+                snapshot.recent_topics.clone()
+            },
+            recent_keywords: if snapshot.recent_keywords.is_empty() {
+                Vec::new()
+            } else {
+                snapshot.recent_keywords.clone()
+            },
+            citation_fact_ids: snapshot
+                .facts
+                .iter()
+                .filter(|fact| fact.invalidated_at.is_none())
+                .take(3)
+                .map(|fact| fact.id.clone())
+                .collect(),
+            citations: snapshot
+                .facts
+                .iter()
+                .filter(|fact| fact.invalidated_at.is_none())
+                .flat_map(|fact| fact.citations.iter().cloned())
+                .take(3)
+                .collect(),
         };
         let recent_summaries = collect_recent_summaries(recent_entries);
         let recent_conversation = RecentConversationWakeup {
             active_topics: derive_recent_topics(&recent_summaries),
+            recent_keywords: derive_recent_keywords(&recent_summaries),
             recent_summaries,
         };
         let thread_projection = format!(
@@ -136,9 +166,10 @@ impl ContextAssembler {
                 wakeup.open_commitments.join(" | ")
             ),
             recent_conversation: format!(
-                "recent_summaries: {}\nactive_topics: {}",
+                "recent_summaries: {}\nactive_topics: {}\nrecent_keywords: {}",
                 recent_conversation.recent_summaries.join(" | "),
-                recent_conversation.active_topics.join(", ")
+                recent_conversation.active_topics.join(", "),
+                recent_conversation.recent_keywords.join(", ")
             ),
             thread_projection: thread_projection.clone(),
             task_local: format!(
@@ -236,4 +267,24 @@ fn derive_recent_topics(summaries: &[String]) -> Vec<String> {
         }
     }
     topics
+}
+
+fn derive_recent_keywords(summaries: &[String]) -> Vec<String> {
+    use std::collections::BTreeMap;
+
+    let mut counts = BTreeMap::new();
+    for summary in summaries {
+        for token in summary.split(|character: char| !character.is_alphanumeric() && character != '_')
+        {
+            let token = token.to_ascii_lowercase();
+            if token.len() < 3 {
+                continue;
+            }
+            *counts.entry(token).or_insert(0_u32) += 1;
+        }
+    }
+
+    let mut ranked = counts.into_iter().collect::<Vec<_>>();
+    ranked.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+    ranked.into_iter().take(8).map(|(token, _)| token).collect()
 }

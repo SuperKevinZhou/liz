@@ -4,6 +4,7 @@ mod context_assembler;
 mod coordinator;
 mod error;
 mod ids;
+mod memory;
 mod policy_engine;
 mod stores;
 mod thread_manager;

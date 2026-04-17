@@ -38,12 +38,19 @@ pub use ids::{
     ApprovalId, ArtifactId, CheckpointId, EventId, ExecutorTaskId, MemoryFactId, RequestId,
     ThreadId, TurnId,
 };
-pub use memory::{MemoryCompilationSummary, MemoryWakeup, ResumeSummary};
+pub use memory::{
+    MemoryCitationRef, MemoryCompilationSummary, MemoryEvidenceView, MemoryFactKind,
+    MemorySearchHit, MemorySearchHitKind, MemorySearchMode, MemorySessionEntry,
+    MemorySessionView, MemoryTopicStatus, MemoryTopicSummary, MemoryWakeup,
+    RecentConversationWakeupView, ResumeSummary,
+};
 pub use primitives::{ProtocolVersion, RiskLevel, Timestamp};
 pub use requests::{
     ApprovalRespondRequest, ClientRequest, ClientRequestEnvelope, GitHubCopilotDevicePollRequest,
     GitHubCopilotDeviceStartRequest, GitLabOAuthCompleteRequest, GitLabOAuthStartRequest,
-    GitLabPatSaveRequest, OpenAiCodexOAuthCompleteRequest, OpenAiCodexOAuthStartRequest,
+    GitLabPatSaveRequest, MemoryCompileNowRequest, MemoryListTopicsRequest,
+    MemoryOpenEvidenceRequest, MemoryOpenSessionRequest, MemoryReadWakeupRequest,
+    MemorySearchRequest, OpenAiCodexOAuthCompleteRequest, OpenAiCodexOAuthStartRequest,
     ProviderAuthDeleteRequest, ProviderAuthListRequest, ProviderAuthUpsertRequest,
     ThreadForkRequest, ThreadResumeRequest, ThreadRollbackRequest, ThreadStartRequest,
     TurnCancelRequest, TurnInputKind, TurnStartRequest,
@@ -51,11 +58,13 @@ pub use requests::{
 pub use responses::{
     ApprovalRespondResponse, ErrorResponseEnvelope, GitHubCopilotDevicePollResponse,
     GitHubCopilotDeviceStartResponse, GitLabOAuthCompleteResponse, GitLabOAuthStartResponse,
-    GitLabPatSaveResponse, MemoryCompileNowResponse, OpenAiCodexOAuthCompleteResponse,
-    OpenAiCodexOAuthStartResponse, ProviderAuthDeleteResponse, ProviderAuthListResponse,
-    ProviderAuthUpsertResponse, ResponseError, ResponsePayload, ServerResponseEnvelope,
-    SuccessResponseEnvelope, ThreadForkResponse, ThreadResumeResponse, ThreadRollbackResponse,
-    ThreadStartResponse, TurnCancelResponse, TurnStartResponse,
+    GitLabPatSaveResponse, MemoryCompileNowResponse, MemoryListTopicsResponse,
+    MemoryOpenEvidenceResponse, MemoryOpenSessionResponse, MemoryReadWakeupResponse,
+    MemorySearchResponse, OpenAiCodexOAuthCompleteResponse, OpenAiCodexOAuthStartResponse,
+    ProviderAuthDeleteResponse, ProviderAuthListResponse, ProviderAuthUpsertResponse,
+    ResponseError, ResponsePayload, ServerResponseEnvelope, SuccessResponseEnvelope,
+    ThreadForkResponse, ThreadResumeResponse, ThreadRollbackResponse, ThreadStartResponse,
+    TurnCancelResponse, TurnStartResponse,
 };
 pub use sandbox::{
     SandboxBackendKind, SandboxMode, SandboxNetworkAccess, ShellSandboxRequest, ShellSandboxSummary,

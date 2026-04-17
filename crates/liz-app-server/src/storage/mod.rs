@@ -16,6 +16,7 @@ pub use checkpoint_store::{CheckpointStore, FsCheckpointStore};
 pub use error::{StorageError, StorageResult};
 pub use global_memory_store::{
     FsGlobalMemoryStore, GlobalMemorySnapshot, GlobalMemoryStore, StoredMemoryFact,
+    StoredTopicRecord,
 };
 pub use paths::StoragePaths;
 pub use thread_store::{FsThreadStore, ThreadStore};

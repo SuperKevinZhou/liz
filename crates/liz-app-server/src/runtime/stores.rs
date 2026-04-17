@@ -54,6 +54,11 @@ impl RuntimeStores {
         self.thread_store.get_thread(thread_id)
     }
 
+    /// Lists all persisted thread projections.
+    pub fn list_threads(&self) -> StorageResult<Vec<Thread>> {
+        self.thread_store.list_threads()
+    }
+
     /// Appends a turn-log entry.
     pub fn append_turn_log(&self, entry: &TurnLogEntry) -> StorageResult<()> {
         self.turn_log.append_entry(entry)

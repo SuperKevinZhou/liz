@@ -7,7 +7,11 @@ use crate::auth::{
 };
 use crate::checkpoint::{Checkpoint, CheckpointScope};
 use crate::ids::{RequestId, ThreadId};
-use crate::memory::{MemoryCompilationSummary, ResumeSummary};
+use crate::memory::{
+    MemoryCompilationSummary, MemoryEvidenceView, MemorySearchHit, MemorySearchMode,
+    MemorySessionView, MemoryTopicSummary, MemoryWakeup, RecentConversationWakeupView,
+    ResumeSummary,
+};
 use crate::thread::Thread;
 use crate::tool::ToolCallResponse;
 use crate::turn::Turn;
@@ -121,9 +125,24 @@ pub enum ResponsePayload {
     /// Acknowledges `thread/rollback`.
     #[serde(rename = "thread/rollback")]
     ThreadRollback(ThreadRollbackResponse),
+    /// Acknowledges `memory/read_wakeup`.
+    #[serde(rename = "memory/read_wakeup")]
+    MemoryReadWakeup(MemoryReadWakeupResponse),
     /// Acknowledges `memory/compile_now`.
     #[serde(rename = "memory/compile_now")]
     MemoryCompileNow(MemoryCompileNowResponse),
+    /// Acknowledges `memory/list_topics`.
+    #[serde(rename = "memory/list_topics")]
+    MemoryListTopics(MemoryListTopicsResponse),
+    /// Acknowledges `memory/search`.
+    #[serde(rename = "memory/search")]
+    MemorySearch(MemorySearchResponse),
+    /// Acknowledges `memory/open_session`.
+    #[serde(rename = "memory/open_session")]
+    MemoryOpenSession(MemoryOpenSessionResponse),
+    /// Acknowledges `memory/open_evidence`.
+    #[serde(rename = "memory/open_evidence")]
+    MemoryOpenEvidence(MemoryOpenEvidenceResponse),
 }
 
 /// The response payload for `provider_auth/openai_codex_oauth_start`.
@@ -273,6 +292,17 @@ pub struct ThreadRollbackResponse {
     pub rollback_scope: CheckpointScope,
 }
 
+/// The response payload for `memory/read_wakeup`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryReadWakeupResponse {
+    /// The thread whose wake-up payload was read.
+    pub thread_id: ThreadId,
+    /// The resident wake-up slice for that thread.
+    pub wakeup: MemoryWakeup,
+    /// The recent-conversation wake-up view for that thread.
+    pub recent_conversation: RecentConversationWakeupView,
+}
+
 /// The response payload for `memory/compile_now`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemoryCompileNowResponse {
@@ -280,4 +310,36 @@ pub struct MemoryCompileNowResponse {
     pub thread_id: ThreadId,
     /// The summary of the compilation result.
     pub compilation: MemoryCompilationSummary,
+}
+
+/// The response payload for `memory/list_topics`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryListTopicsResponse {
+    /// Topics returned from the topic index.
+    pub topics: Vec<MemoryTopicSummary>,
+}
+
+/// The response payload for `memory/search`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemorySearchResponse {
+    /// The query that was executed.
+    pub query: String,
+    /// The recall mode used for the search.
+    pub mode: MemorySearchMode,
+    /// The ordered hits returned by the search.
+    pub hits: Vec<MemorySearchHit>,
+}
+
+/// The response payload for `memory/open_session`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryOpenSessionResponse {
+    /// The expanded session view.
+    pub session: MemorySessionView,
+}
+
+/// The response payload for `memory/open_evidence`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryOpenEvidenceResponse {
+    /// The expanded evidence view.
+    pub evidence: MemoryEvidenceView,
 }

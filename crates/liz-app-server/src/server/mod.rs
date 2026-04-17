@@ -11,7 +11,8 @@ use crate::storage::StoragePaths;
 use liz_protocol::{
     ApprovalDecision, ApprovalRequestedEvent, ArtifactCreatedEvent, AssistantChunkEvent,
     AssistantCompletedEvent, CheckpointCreatedEvent, ClientRequestEnvelope, DiffAvailableEvent,
-    ExecutorOutputChunkEvent, ExecutorTaskId, ProviderAuthProfile, ProviderCredential, ServerEvent,
+    ExecutorOutputChunkEvent, ExecutorTaskId, MemoryCompilationAppliedEvent,
+    MemoryInvalidationAppliedEvent, ProviderAuthProfile, ProviderCredential, ServerEvent,
     ServerEventPayload, ServerResponseEnvelope, ThreadId, ToolCallRequest, ToolCompletedEvent,
     TurnCancelRequest, TurnCompletedEvent, TurnFailedEvent, TurnId,
 };
@@ -73,6 +74,9 @@ impl AppServer {
         match request {
             liz_protocol::ClientRequest::TurnStart(request) => {
                 self.continue_turn_after_policy(&handled.response, request.input);
+            }
+            liz_protocol::ClientRequest::TurnCancel(request) => {
+                self.compile_memory_after_boundary(&handled.response, &request.thread_id, None);
             }
             liz_protocol::ClientRequest::ApprovalRespond(request) => {
                 self.continue_after_approval(&handled.response, request.decision);
@@ -196,6 +200,7 @@ impl AppServer {
                             ),
                         ));
                     }
+                    self.compile_memory_for_thread(&approval.thread_id, Some(&turn.id));
                 }
             }
         }
@@ -226,6 +231,7 @@ impl AppServer {
                         Some(turn.id.clone()),
                         ServerEventPayload::TurnCompleted(TurnCompletedEvent { turn }),
                     ));
+                    self.compile_memory_for_thread(&thread_id, Some(&turn_id));
                 }
             }
             Err(error) => {
@@ -238,6 +244,7 @@ impl AppServer {
                             message: error.to_string(),
                         }),
                     ));
+                    self.compile_memory_for_thread(&thread_id, Some(&turn_id));
                 }
             }
         }
@@ -379,6 +386,40 @@ impl AppServer {
                 artifact_ids: artifact_refs.iter().map(|artifact| artifact.id.clone()).collect(),
             }),
         ));
+    }
+
+    fn compile_memory_after_boundary(
+        &mut self,
+        response: &ServerResponseEnvelope,
+        thread_id: &ThreadId,
+        turn_id: Option<&TurnId>,
+    ) {
+        if matches!(response, ServerResponseEnvelope::Success(_)) {
+            self.compile_memory_for_thread(thread_id, turn_id);
+        }
+    }
+
+    fn compile_memory_for_thread(&mut self, thread_id: &ThreadId, turn_id: Option<&TurnId>) {
+        let Ok(compilation) = self.runtime.compile_thread_memory(thread_id) else {
+            return;
+        };
+
+        self.event_bus.publish(crate::events::PendingEvent::new(
+            thread_id.clone(),
+            turn_id.cloned(),
+            ServerEventPayload::MemoryCompilationApplied(MemoryCompilationAppliedEvent {
+                compilation: compilation.clone(),
+            }),
+        ));
+        if !compilation.invalidated_fact_ids.is_empty() {
+            self.event_bus.publish(crate::events::PendingEvent::new(
+                thread_id.clone(),
+                turn_id.cloned(),
+                ServerEventPayload::MemoryInvalidationApplied(MemoryInvalidationAppliedEvent {
+                    compilation,
+                }),
+            ));
+        }
     }
 
     fn gateway_with_provider_auth_profiles(&self) -> ModelGateway {

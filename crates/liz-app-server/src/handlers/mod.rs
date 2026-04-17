@@ -5,6 +5,7 @@ use crate::executor::ExecutorGateway;
 use crate::runtime::{RuntimeCoordinator, RuntimeError};
 use liz_protocol::events::{
     ApprovalResolvedEvent, ArtifactCreatedEvent, DiffAvailableEvent, ExecutorOutputChunkEvent,
+    MemoryCompilationAppliedEvent, MemoryInvalidationAppliedEvent, MemoryWakeupLoadedEvent,
     ThreadForkedEvent, ThreadInterruptedEvent, ThreadResumedEvent, ThreadStartedEvent,
     ThreadUpdatedEvent, ToolCompletedEvent, TurnCancelledEvent, TurnStartedEvent,
 };
@@ -82,14 +83,25 @@ pub fn handle_request(
         }),
         ClientRequest::ThreadResume(request) => runtime.resume_thread(request).map(|response| {
             let thread = response.thread.clone();
-            (
-                ResponsePayload::ThreadResume(response),
-                vec![PendingEvent::new(
+            let mut events = vec![PendingEvent::new(
+                thread.id.clone(),
+                None,
+                ServerEventPayload::ThreadResumed(ThreadResumedEvent { thread: thread.clone() }),
+            )];
+            if let Ok(memory) =
+                runtime.read_memory_wakeup(liz_protocol::MemoryReadWakeupRequest {
+                    thread_id: thread.id.clone(),
+                })
+            {
+                events.push(PendingEvent::new(
                     thread.id.clone(),
                     None,
-                    ServerEventPayload::ThreadResumed(ThreadResumedEvent { thread }),
-                )],
-            )
+                    ServerEventPayload::MemoryWakeupLoaded(MemoryWakeupLoadedEvent {
+                        wakeup: memory.wakeup,
+                    }),
+                ));
+            }
+            (ResponsePayload::ThreadResume(response), events)
         }),
         ClientRequest::ThreadFork(request) => runtime.fork_thread(request).map(|response| {
             let thread = response.thread.clone();
@@ -224,6 +236,56 @@ pub fn handle_request(
             "rollback_not_ready",
             "rollback handling is implemented in a later phase",
         )),
+        ClientRequest::MemoryReadWakeup(request) => runtime.read_memory_wakeup(request).map(
+            |response| {
+                let thread_id = response.thread_id.clone();
+                let wakeup = response.wakeup.clone();
+                (
+                    ResponsePayload::MemoryReadWakeup(response),
+                    vec![PendingEvent::new(
+                        thread_id,
+                        None,
+                        ServerEventPayload::MemoryWakeupLoaded(MemoryWakeupLoadedEvent { wakeup }),
+                    )],
+                )
+            },
+        ),
+        ClientRequest::MemoryCompileNow(request) => runtime.compile_memory_now(request).map(
+            |response| {
+                let thread_id = response.thread_id.clone();
+                let mut events = vec![PendingEvent::new(
+                    thread_id.clone(),
+                    None,
+                    ServerEventPayload::MemoryCompilationApplied(MemoryCompilationAppliedEvent {
+                        compilation: response.compilation.clone(),
+                    }),
+                )];
+                if !response.compilation.invalidated_fact_ids.is_empty() {
+                    events.push(PendingEvent::new(
+                        thread_id,
+                        None,
+                        ServerEventPayload::MemoryInvalidationApplied(
+                            MemoryInvalidationAppliedEvent {
+                                compilation: response.compilation.clone(),
+                            },
+                        ),
+                    ));
+                }
+                (ResponsePayload::MemoryCompileNow(response), events)
+            },
+        ),
+        ClientRequest::MemoryListTopics(request) => runtime
+            .list_memory_topics(request)
+            .map(|response| (ResponsePayload::MemoryListTopics(response), Vec::new())),
+        ClientRequest::MemorySearch(request) => runtime
+            .search_memory(request)
+            .map(|response| (ResponsePayload::MemorySearch(response), Vec::new())),
+        ClientRequest::MemoryOpenSession(request) => runtime
+            .open_memory_session(request)
+            .map(|response| (ResponsePayload::MemoryOpenSession(response), Vec::new())),
+        ClientRequest::MemoryOpenEvidence(request) => runtime
+            .open_memory_evidence(request)
+            .map(|response| (ResponsePayload::MemoryOpenEvidence(response), Vec::new())),
     };
 
     match response {

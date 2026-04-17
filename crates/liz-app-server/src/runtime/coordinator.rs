@@ -10,6 +10,7 @@ use crate::model::{
 use crate::runtime::context_assembler::{AssembledContext, ContextAssembler};
 use crate::runtime::error::{RuntimeError, RuntimeResult};
 use crate::runtime::ids::IdGenerator;
+use crate::runtime::memory::ForegroundMemoryEngine;
 use crate::runtime::policy_engine::{PolicyDecision, PolicyEngine};
 use crate::runtime::stores::RuntimeStores;
 use crate::runtime::thread_manager::ThreadManager;
@@ -19,6 +20,8 @@ use liz_protocol::memory::ResumeSummary;
 use liz_protocol::requests::{
     ApprovalRespondRequest, GitHubCopilotDevicePollRequest, GitHubCopilotDeviceStartRequest,
     GitLabOAuthCompleteRequest, GitLabOAuthStartRequest, GitLabPatSaveRequest,
+    MemoryCompileNowRequest, MemoryListTopicsRequest, MemoryOpenEvidenceRequest,
+    MemoryOpenSessionRequest, MemoryReadWakeupRequest, MemorySearchRequest,
     MiniMaxOAuthPollRequest, MiniMaxOAuthStartRequest, OpenAiCodexOAuthCompleteRequest,
     OpenAiCodexOAuthStartRequest, ProviderAuthDeleteRequest, ProviderAuthListRequest,
     ProviderAuthUpsertRequest, ThreadForkRequest, ThreadResumeRequest, ThreadStartRequest,
@@ -27,6 +30,8 @@ use liz_protocol::requests::{
 use liz_protocol::responses::{
     ApprovalRespondResponse, GitHubCopilotDevicePollResponse, GitHubCopilotDeviceStartResponse,
     GitLabOAuthCompleteResponse, GitLabOAuthStartResponse, GitLabPatSaveResponse,
+    MemoryCompileNowResponse, MemoryListTopicsResponse, MemoryOpenEvidenceResponse,
+    MemoryOpenSessionResponse, MemoryReadWakeupResponse, MemorySearchResponse,
     MiniMaxOAuthPollResponse, MiniMaxOAuthStartResponse, OpenAiCodexOAuthCompleteResponse,
     OpenAiCodexOAuthStartResponse, ProviderAuthDeleteResponse, ProviderAuthListResponse,
     ProviderAuthUpsertResponse, ThreadForkResponse, ThreadResumeResponse, ThreadStartResponse,
@@ -48,6 +53,7 @@ pub struct RuntimeCoordinator {
     thread_manager: ThreadManager,
     turn_manager: TurnManager,
     context_assembler: ContextAssembler,
+    memory_engine: ForegroundMemoryEngine,
     policy_engine: PolicyEngine,
     approvals: HashMap<liz_protocol::ApprovalId, ApprovalRequest>,
 }
@@ -61,6 +67,7 @@ impl RuntimeCoordinator {
             thread_manager: ThreadManager::default(),
             turn_manager: TurnManager::default(),
             context_assembler: ContextAssembler::default(),
+            memory_engine: ForegroundMemoryEngine::default(),
             policy_engine: PolicyEngine::default(),
             approvals: HashMap::new(),
         }
@@ -471,6 +478,75 @@ impl RuntimeCoordinator {
         Ok(ThreadResumeResponse { thread, resume_summary })
     }
 
+    /// Reads the current foreground memory wake-up for a thread.
+    pub fn read_memory_wakeup(
+        &self,
+        request: MemoryReadWakeupRequest,
+    ) -> RuntimeResult<MemoryReadWakeupResponse> {
+        let (wakeup, recent_conversation) =
+            self.memory_engine.read_wakeup(&self.stores, &request.thread_id)?;
+        Ok(MemoryReadWakeupResponse {
+            thread_id: request.thread_id,
+            wakeup,
+            recent_conversation,
+        })
+    }
+
+    /// Forces a foreground memory compilation pass for a thread.
+    pub fn compile_memory_now(
+        &self,
+        request: MemoryCompileNowRequest,
+    ) -> RuntimeResult<MemoryCompileNowResponse> {
+        let compilation =
+            self.memory_engine.compile_thread(&self.stores, &self.ids, &request.thread_id)?;
+        Ok(MemoryCompileNowResponse { thread_id: request.thread_id, compilation })
+    }
+
+    /// Lists topic summaries from the memory topic index.
+    pub fn list_memory_topics(
+        &self,
+        request: MemoryListTopicsRequest,
+    ) -> RuntimeResult<MemoryListTopicsResponse> {
+        let topics =
+            self.memory_engine.list_topics(&self.stores, request.status, request.limit)?;
+        Ok(MemoryListTopicsResponse { topics })
+    }
+
+    /// Searches memory using the requested recall mode.
+    pub fn search_memory(
+        &self,
+        request: MemorySearchRequest,
+    ) -> RuntimeResult<MemorySearchResponse> {
+        let hits = self
+            .memory_engine
+            .search(&self.stores, &request.query, request.mode, request.limit)?;
+        Ok(MemorySearchResponse { query: request.query, mode: request.mode, hits })
+    }
+
+    /// Expands a session into recent evidence and artifacts.
+    pub fn open_memory_session(
+        &self,
+        request: MemoryOpenSessionRequest,
+    ) -> RuntimeResult<MemoryOpenSessionResponse> {
+        let session = self.memory_engine.open_session(&self.stores, &request.thread_id)?;
+        Ok(MemoryOpenSessionResponse { session })
+    }
+
+    /// Expands a fact or artifact citation into raw evidence.
+    pub fn open_memory_evidence(
+        &self,
+        request: MemoryOpenEvidenceRequest,
+    ) -> RuntimeResult<MemoryOpenEvidenceResponse> {
+        let evidence = self.memory_engine.open_evidence(
+            &self.stores,
+            &request.thread_id,
+            request.turn_id.as_ref(),
+            request.artifact_id.as_ref(),
+            request.fact_id.as_ref(),
+        )?;
+        Ok(MemoryOpenEvidenceResponse { evidence })
+    }
+
     /// Forks a thread into a new line of work.
     pub fn fork_thread(&mut self, request: ThreadForkRequest) -> RuntimeResult<ThreadForkResponse> {
         let thread = self.thread_manager.fork_thread(&self.stores, &mut self.ids, request)?;
@@ -620,6 +696,14 @@ impl RuntimeCoordinator {
         let snapshot = self.stores.read_global_memory()?;
         let recent_entries = self.stores.read_turn_log(thread_id)?;
         Ok(self.context_assembler.assemble(&snapshot, &thread, &recent_entries, input))
+    }
+
+    /// Runs the same foreground compilation helper used by runtime lifecycle boundaries.
+    pub fn compile_thread_memory(
+        &self,
+        thread_id: &ThreadId,
+    ) -> RuntimeResult<liz_protocol::MemoryCompilationSummary> {
+        self.memory_engine.compile_thread(&self.stores, &self.ids, thread_id)
     }
 
     /// Evaluates policy for a turn input and assembled context.

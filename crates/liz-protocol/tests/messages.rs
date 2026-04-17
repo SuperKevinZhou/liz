@@ -153,6 +153,9 @@ fn protocol_messages_cover_approval_and_memory_shapes() {
                 delta_summary: "Updated active summary".to_owned(),
                 updated_fact_ids: vec![],
                 invalidated_fact_ids: vec![],
+                recent_topics: vec!["runtime".to_owned()],
+                recent_keywords: vec!["summary".to_owned()],
+                candidate_procedures: vec![],
             },
         }),
     };

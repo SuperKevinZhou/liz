@@ -3,7 +3,10 @@
 use crate::approval::ApprovalDecision;
 use crate::auth::ProviderAuthProfile;
 use crate::checkpoint::CheckpointScope;
-use crate::ids::{ApprovalId, CheckpointId, RequestId, ThreadId, TurnId};
+use crate::ids::{
+    ApprovalId, ArtifactId, CheckpointId, MemoryFactId, RequestId, ThreadId, TurnId,
+};
+use crate::memory::{MemorySearchMode, MemoryTopicStatus};
 use crate::tool::ToolCallRequest;
 use serde::{Deserialize, Serialize};
 
@@ -93,6 +96,24 @@ pub enum ClientRequest {
     /// Rolls back a thread to a prior checkpoint.
     #[serde(rename = "thread/rollback")]
     ThreadRollback(ThreadRollbackRequest),
+    /// Reads the current foreground memory wake-up for a thread.
+    #[serde(rename = "memory/read_wakeup")]
+    MemoryReadWakeup(MemoryReadWakeupRequest),
+    /// Forces a foreground compilation pass for a thread.
+    #[serde(rename = "memory/compile_now")]
+    MemoryCompileNow(MemoryCompileNowRequest),
+    /// Lists topics from the foreground memory topic index.
+    #[serde(rename = "memory/list_topics")]
+    MemoryListTopics(MemoryListTopicsRequest),
+    /// Searches foreground and recent memory using a recall mode.
+    #[serde(rename = "memory/search")]
+    MemorySearch(MemorySearchRequest),
+    /// Expands a thread session into recent evidence and artifacts.
+    #[serde(rename = "memory/open_session")]
+    MemoryOpenSession(MemoryOpenSessionRequest),
+    /// Expands one fact or artifact citation into raw evidence.
+    #[serde(rename = "memory/open_evidence")]
+    MemoryOpenEvidence(MemoryOpenEvidenceRequest),
 }
 
 /// Starts an OpenAI Codex OAuth login flow.
@@ -294,4 +315,58 @@ pub struct ThreadRollbackRequest {
     pub target_checkpoint_id: Option<CheckpointId>,
     /// The restore scope for the rollback.
     pub rollback_scope: CheckpointScope,
+}
+
+/// Reads the current wake-up payload for a thread.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryReadWakeupRequest {
+    /// The thread whose wake-up payload should be read.
+    pub thread_id: ThreadId,
+}
+
+/// Forces a foreground compilation pass for a thread.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryCompileNowRequest {
+    /// The thread whose memory should be compiled.
+    pub thread_id: ThreadId,
+}
+
+/// Lists topics from the topic index.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryListTopicsRequest {
+    /// Optional topic status filter.
+    pub status: Option<MemoryTopicStatus>,
+    /// Optional result limit.
+    pub limit: Option<usize>,
+}
+
+/// Searches memory using a specific recall mode.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemorySearchRequest {
+    /// The query to search for.
+    pub query: String,
+    /// The recall mode used for ranking.
+    pub mode: MemorySearchMode,
+    /// Optional result limit.
+    pub limit: Option<usize>,
+}
+
+/// Expands one session into recent log entries and artifacts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryOpenSessionRequest {
+    /// The thread to expand.
+    pub thread_id: ThreadId,
+}
+
+/// Expands one fact or artifact citation into raw evidence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryOpenEvidenceRequest {
+    /// The thread that owns the evidence.
+    pub thread_id: ThreadId,
+    /// The turn associated with the evidence, if any.
+    pub turn_id: Option<TurnId>,
+    /// The artifact to expand, if any.
+    pub artifact_id: Option<ArtifactId>,
+    /// The compiled fact to expand, if any.
+    pub fact_id: Option<MemoryFactId>,
 }

@@ -1,7 +1,7 @@
 //! Runtime-scoped identifier and timestamp helpers.
 
 use liz_protocol::primitives::Timestamp;
-use liz_protocol::{ApprovalId, ArtifactId, CheckpointId, ThreadId, TurnId};
+use liz_protocol::{ApprovalId, ArtifactId, CheckpointId, MemoryFactId, ThreadId, TurnId};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -35,6 +35,11 @@ impl IdGenerator {
     /// Creates an artifact identifier.
     pub fn next_artifact_id(&self) -> ArtifactId {
         ArtifactId::new(self.next_value("artifact"))
+    }
+
+    /// Creates a compiled memory fact identifier.
+    pub fn next_memory_fact_id(&self) -> MemoryFactId {
+        MemoryFactId::new(self.next_value("fact"))
     }
 
     /// Produces a serialized timestamp string for persisted protocol resources.
