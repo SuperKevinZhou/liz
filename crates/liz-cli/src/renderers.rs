@@ -1,378 +1,472 @@
-//! TUI renderers for the CLI reference client.
+//! TUI renderers for the CLI chat shell.
 
-use crate::view_model::{ComposerMode, ViewModel};
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use crate::view_model::{OverlayPanel, TranscriptEntryKind, ViewModel};
+use ratatui::layout::{Constraint, Direction, Layout, Margin, Rect};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::block::Title;
+use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
+
+const SHELL_BG: Color = Color::Rgb(245, 242, 235);
+const SURFACE_BG: Color = Color::Rgb(252, 250, 246);
+const PANEL_BG: Color = Color::Rgb(241, 235, 224);
+const BORDER_SOFT: Color = Color::Rgb(198, 187, 170);
+const TEXT_PRIMARY: Color = Color::Rgb(50, 44, 37);
+const TEXT_MUTED: Color = Color::Rgb(121, 109, 92);
+const BRAND: Color = Color::Rgb(173, 104, 66);
+const ACCENT: Color = Color::Rgb(79, 110, 138);
+const APPROVAL: Color = Color::Rgb(170, 115, 41);
 
 /// Minimal renderer metadata for banner and smoke surfaces.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RendererSkeleton {
-    /// The renderer stack reserved for transcript and memory surfaces.
+    /// The renderer stack reserved for transcript-first chat surfaces.
     pub renderer_stack: &'static str,
 }
 
 impl Default for RendererSkeleton {
     fn default() -> Self {
-        Self { renderer_stack: "ratatui+transcript+memory+approvals" }
+        Self { renderer_stack: "ratatui+chat+overlay" }
     }
 }
 
 /// Draws the full CLI layout.
 pub fn render(frame: &mut Frame<'_>, view_model: &ViewModel, server_url: &str) {
+    frame.render_widget(
+        Block::default().style(Style::default().bg(SHELL_BG).fg(TEXT_PRIMARY)),
+        frame.area(),
+    );
+
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Min(12),
-            Constraint::Length(4),
-            Constraint::Length(2),
-        ])
+        .constraints([Constraint::Length(3), Constraint::Min(10), Constraint::Length(5)])
         .split(frame.area());
 
-    render_status_bar(frame, layout[0], view_model, server_url);
+    render_header(frame, layout[0], view_model, server_url);
     render_body(frame, layout[1], view_model);
-    render_input_box(frame, layout[2], view_model);
-    render_help_bar(frame, layout[3], view_model.composer_mode);
+    render_composer(frame, layout[2], view_model);
+
+    if let Some(panel) = view_model.active_overlay {
+        render_overlay(frame, panel, view_model);
+    }
 }
 
-fn render_status_bar(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel, server_url: &str) {
-    let thread_label = view_model
+fn render_header(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel, server_url: &str) {
+    let title = view_model
         .selected_thread()
-        .map(|thread| format!("thread {}", thread.title))
-        .unwrap_or_else(|| "no thread selected".to_owned());
-    let status = vec![Span::styled(
-        format!(" liz-cli  {}  |  {}  |  {} ", server_url, thread_label, view_model.status_line),
-        Style::default().fg(Color::Black).bg(Color::Rgb(203, 213, 225)),
-    )];
-    frame.render_widget(Paragraph::new(Line::from(status)), area);
+        .map(|thread| thread.title.as_str())
+        .unwrap_or("New conversation");
+    let approval_badge = if view_model.pending_approval_count() > 0 {
+        format!(" approvals {} ", view_model.pending_approval_count())
+    } else {
+        " clear ".to_owned()
+    };
+    let wakeup_badge =
+        if view_model.has_wakeup_context() { " wake-up ready " } else { " no wake-up " };
+    let header = Line::from(vec![
+        Span::styled(
+            " liz ",
+            Style::default().fg(SURFACE_BG).bg(BRAND).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("  "),
+        Span::styled(title, Style::default().fg(TEXT_PRIMARY).add_modifier(Modifier::BOLD)),
+        Span::raw("  "),
+        Span::styled(approval_badge, Style::default().fg(APPROVAL).bg(PANEL_BG)),
+        Span::raw(" "),
+        Span::styled(wakeup_badge, Style::default().fg(ACCENT).bg(PANEL_BG)),
+        Span::raw("  "),
+        Span::styled(server_url, Style::default().fg(TEXT_MUTED)),
+    ]);
+
+    frame.render_widget(
+        Paragraph::new(header).block(shell_block("Conversation")).wrap(Wrap { trim: false }),
+        area,
+    );
 }
 
 fn render_body(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
-    let columns = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(26),
-            Constraint::Percentage(44),
-            Constraint::Percentage(30),
-        ])
-        .split(area);
-
-    render_sidebar(frame, columns[0], view_model);
-    render_transcript(frame, columns[1], view_model);
-    render_memory_stack(frame, columns[2], view_model);
+    let show_thread_rail = view_model.show_thread_rail && area.width >= 88;
+    if show_thread_rail {
+        let columns = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Length(30), Constraint::Min(20)])
+            .split(area);
+        render_thread_rail(frame, columns[0], view_model);
+        render_transcript(frame, columns[1], view_model);
+    } else {
+        render_transcript(frame, area, view_model);
+    }
 }
 
-fn render_sidebar(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
-    let sections = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(52), Constraint::Percentage(48)])
-        .split(area);
-
-    let thread_items = if view_model.threads.is_empty() {
-        vec![ListItem::new("No threads yet")]
+fn render_thread_rail(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
+    let items = if view_model.threads.is_empty() {
+        vec![ListItem::new(Text::from("No threads yet. Start by typing a message."))]
     } else {
         view_model
             .threads
             .iter()
             .enumerate()
             .map(|(index, thread)| {
-                let status = format!("{:?}", thread.status).to_ascii_lowercase();
-                let marker = if index == view_model.selected_thread_index { ">" } else { " " };
+                let marker = if index == view_model.selected_thread_index { "●" } else { "○" };
                 let summary = thread
                     .active_summary
                     .clone()
                     .or_else(|| thread.active_goal.clone())
                     .unwrap_or_else(|| "No active summary yet".to_owned());
-                ListItem::new(Line::from(vec![
-                    Span::styled(marker, Style::default().fg(Color::Cyan)),
-                    Span::raw(" "),
-                    Span::styled(&thread.title, Style::default().add_modifier(Modifier::BOLD)),
-                    Span::raw(" "),
-                    Span::styled(format!("[{status}]"), Style::default().fg(Color::Yellow)),
-                    Span::raw(format!("  {summary}")),
+                ListItem::new(Text::from(vec![
+                    Line::from(vec![
+                        Span::styled(marker, Style::default().fg(BRAND)),
+                        Span::raw(" "),
+                        Span::styled(
+                            &thread.title,
+                            Style::default().fg(TEXT_PRIMARY).add_modifier(Modifier::BOLD),
+                        ),
+                    ]),
+                    Line::from(Span::styled(summary, Style::default().fg(TEXT_MUTED))),
                 ]))
             })
             .collect()
     };
-    frame.render_widget(
-        List::new(thread_items).block(
-            Block::default()
-                .title("Threads")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Blue)),
-        ),
-        sections[0],
-    );
 
-    let topic_items = if view_model.topics.is_empty() {
-        vec![ListItem::new("No recalled topics yet")]
-    } else {
-        view_model
-            .topics
-            .iter()
-            .take(8)
-            .map(|topic| {
-                ListItem::new(Line::from(vec![
-                    Span::styled(&topic.name, Style::default().fg(Color::Green)),
-                    Span::raw(" "),
-                    Span::raw(format!("{}  ", topic.summary)),
-                    Span::styled(
-                        format!("{:?}", topic.status).to_ascii_lowercase(),
-                        Style::default().fg(Color::Yellow),
-                    ),
-                ]))
-            })
-            .collect()
-    };
-    frame.render_widget(
-        List::new(topic_items).block(
-            Block::default()
-                .title("Topics")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Blue)),
-        ),
-        sections[1],
-    );
+    frame.render_widget(List::new(items).block(shell_block("Threads")), area);
 }
 
 fn render_transcript(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
-    let mut lines = view_model.transcript_lines.clone();
+    let block = shell_block("Chat");
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let mut lines = build_transcript_lines(view_model);
+    let visible = tail_lines(&lines, inner.height.saturating_sub(1) as usize);
+    lines.clear();
+    frame.render_widget(
+        Paragraph::new(Text::from(visible))
+            .wrap(Wrap { trim: false })
+            .style(Style::default().fg(TEXT_PRIMARY).bg(SURFACE_BG)),
+        inner,
+    );
+}
+
+fn render_composer(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
+    let placeholder = "Message liz...  /help for commands, /threads to browse conversations";
+    let body = if view_model.input_buffer.is_empty() {
+        Text::from(Line::from(Span::styled(placeholder, Style::default().fg(TEXT_MUTED))))
+    } else {
+        Text::from(view_model.input_buffer.clone())
+    };
+    let title = Line::from(vec![
+        Span::styled("Compose", Style::default().fg(BRAND).add_modifier(Modifier::BOLD)),
+        Span::raw("  "),
+        Span::styled("Enter send", Style::default().fg(TEXT_MUTED)),
+        Span::raw("  "),
+        Span::styled("Shift+Enter newline", Style::default().fg(TEXT_MUTED)),
+        Span::raw("  "),
+        Span::styled(view_model.status_line.as_str(), Style::default().fg(ACCENT)),
+    ]);
+
+    frame.render_widget(
+        Paragraph::new(body)
+            .wrap(Wrap { trim: false })
+            .block(composer_block(title))
+            .style(Style::default().fg(TEXT_PRIMARY).bg(SURFACE_BG)),
+        area,
+    );
+}
+
+fn render_overlay(frame: &mut Frame<'_>, panel: OverlayPanel, view_model: &ViewModel) {
+    let popup = centered_rect(frame.area(), 78, 68);
+    frame.render_widget(Clear, popup);
+
+    let (title, body) = match panel {
+        OverlayPanel::Help => ("Help", help_overlay_text()),
+        OverlayPanel::Search => ("Search", search_overlay_text(view_model)),
+        OverlayPanel::Memory => ("Memory", memory_overlay_text(view_model)),
+    };
+
+    frame.render_widget(
+        Paragraph::new(body)
+            .wrap(Wrap { trim: false })
+            .block(shell_block(title))
+            .style(Style::default().fg(TEXT_PRIMARY).bg(PANEL_BG)),
+        popup,
+    );
+}
+
+fn build_transcript_lines(view_model: &ViewModel) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+
+    if let Some(capsule) = wakeup_capsule(view_model) {
+        lines.push(Line::from(vec![
+            Span::styled(" resume ", Style::default().fg(ACCENT).bg(PANEL_BG)),
+            Span::raw(" "),
+            Span::styled(capsule, Style::default().fg(TEXT_MUTED)),
+        ]));
+        lines.push(Line::default());
+    }
+
+    if view_model.transcript_entries.is_empty() && view_model.streaming_preview().is_none() {
+        lines.push(Line::from(Span::styled(
+            "Start talking. liz will keep the chat front and center.",
+            Style::default().fg(TEXT_MUTED),
+        )));
+        return lines;
+    }
+
+    for entry in &view_model.transcript_entries {
+        let label_style = match entry.kind {
+            TranscriptEntryKind::User => {
+                Style::default().fg(SURFACE_BG).bg(ACCENT).add_modifier(Modifier::BOLD)
+            }
+            TranscriptEntryKind::Assistant => {
+                Style::default().fg(SURFACE_BG).bg(BRAND).add_modifier(Modifier::BOLD)
+            }
+            TranscriptEntryKind::Tool => Style::default().fg(TEXT_PRIMARY).bg(PANEL_BG),
+            TranscriptEntryKind::Approval => {
+                Style::default().fg(TEXT_PRIMARY).bg(Color::Rgb(239, 224, 194))
+            }
+            TranscriptEntryKind::System => {
+                Style::default().fg(TEXT_PRIMARY).bg(Color::Rgb(226, 228, 230))
+            }
+        };
+        lines.push(Line::from(vec![
+            Span::styled(format!(" {} ", entry.kind.label()), label_style),
+            Span::raw(" "),
+        ]));
+        for body_line in entry.body.lines() {
+            lines.push(Line::from(vec![
+                Span::raw("   "),
+                Span::styled(body_line.to_owned(), Style::default().fg(TEXT_PRIMARY)),
+            ]));
+        }
+        lines.push(Line::default());
+    }
+
     if let Some(streaming) = view_model.streaming_preview() {
-        lines.push(format!("[assistant] {streaming}"));
+        lines.push(Line::from(vec![
+            Span::styled(
+                " liz ",
+                Style::default().fg(SURFACE_BG).bg(BRAND).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+        ]));
+        for body_line in streaming.lines() {
+            lines.push(Line::from(vec![
+                Span::raw("   "),
+                Span::styled(body_line.to_owned(), Style::default().fg(TEXT_PRIMARY)),
+            ]));
+        }
     }
-    if lines.is_empty() {
-        lines.push("Transcript will appear here once a thread starts.".to_owned());
-    }
-    let visible = tail_lines(&lines, area.height.saturating_sub(2) as usize);
-    frame.render_widget(
-        Paragraph::new(visible.join("\n")).wrap(Wrap { trim: false }).block(
-            Block::default()
-                .title("Transcript")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Blue)),
-        ),
-        area,
-    );
+
+    lines
 }
 
-fn render_memory_stack(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
-    let sections = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(7),
-            Constraint::Length(9),
-            Constraint::Min(9),
-            Constraint::Length(9),
-        ])
-        .split(area);
+fn wakeup_capsule(view_model: &ViewModel) -> Option<String> {
+    let mut parts = Vec::new();
 
-    render_resume_and_approvals(frame, sections[0], view_model);
-    render_wakeup(frame, sections[1], view_model);
-    render_recall_and_evidence(frame, sections[2], view_model);
-    render_experience(frame, sections[3], view_model);
-}
-
-fn render_resume_and_approvals(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
-    let mut lines = Vec::new();
     if let Some(summary) = view_model.resume_summary.as_ref() {
-        lines.push(format!("resume: {}", summary.headline));
+        parts.push(summary.headline.clone());
         if let Some(active_summary) = summary.active_summary.as_ref() {
-            lines.push(format!("active: {active_summary}"));
-        }
-        if !summary.pending_commitments.is_empty() {
-            lines.push(format!("commitments: {}", summary.pending_commitments.join(" | ")));
-        }
-    } else {
-        lines.push("resume: no resume summary loaded".to_owned());
-    }
-
-    if view_model.pending_approvals.is_empty() {
-        lines.push("approvals: clear".to_owned());
-    } else {
-        for approval in view_model.pending_approvals.iter().take(2) {
-            lines.push(format!("approval {}: {}", approval.id, approval.reason));
+            parts.push(active_summary.clone());
         }
     }
 
-    frame.render_widget(
-        Paragraph::new(lines.join("\n")).wrap(Wrap { trim: false }).block(
-            Block::default()
-                .title("Resume + Approval")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Blue)),
-        ),
-        area,
-    );
-}
-
-fn render_wakeup(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
-    let mut lines = Vec::new();
     if let Some(wakeup) = view_model.wakeup.as_ref() {
         if let Some(active_state) = wakeup.active_state.as_ref() {
-            lines.push(format!("active: {active_state}"));
+            parts.push(active_state.clone());
         }
         if !wakeup.open_commitments.is_empty() {
-            lines.push(format!("commitments: {}", wakeup.open_commitments.join(" | ")));
+            parts.push(format!("Open: {}", wakeup.open_commitments.join(", ")));
+        }
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("  •  "))
+    }
+}
+
+fn help_overlay_text() -> Text<'static> {
+    Text::from(vec![
+        Line::from(Span::styled(
+            "Chat first",
+            Style::default().fg(BRAND).add_modifier(Modifier::BOLD),
+        )),
+        Line::from("Type normally to continue the current conversation."),
+        Line::default(),
+        Line::from(Span::styled(
+            "Commands",
+            Style::default().fg(BRAND).add_modifier(Modifier::BOLD),
+        )),
+        Line::from("/new <message>      start a new conversation"),
+        Line::from("/search <query>     search memory and recent conversations"),
+        Line::from("/memory             inspect wake-up, recall, and compiled experience"),
+        Line::from("/resume             refresh the selected thread"),
+        Line::from("/approve            approve the first pending request"),
+        Line::from("/deny               deny the first pending request"),
+        Line::from("/threads            toggle the thread rail"),
+        Line::from("/refresh            reload the thread list"),
+        Line::default(),
+        Line::from(Span::styled("Keys", Style::default().fg(BRAND).add_modifier(Modifier::BOLD))),
+        Line::from("Enter send    Shift+Enter newline    Up/Down switch thread"),
+        Line::from("Tab toggle thread rail    Esc close overlay or clear input    Ctrl+C quit"),
+    ])
+}
+
+fn search_overlay_text(view_model: &ViewModel) -> Text<'static> {
+    if view_model.recall_hits.is_empty() {
+        return Text::from(vec![
+            Line::from(Span::styled("No search results yet.", Style::default().fg(TEXT_MUTED))),
+            Line::from("Use /search <query> to look through memory."),
+        ]);
+    }
+
+    let mut lines = vec![Line::from(Span::styled(
+        "Recent search results",
+        Style::default().fg(BRAND).add_modifier(Modifier::BOLD),
+    ))];
+    for hit in view_model.recall_hits.iter().take(8) {
+        lines.push(Line::default());
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{:?}", hit.kind),
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                hit.title.clone(),
+                Style::default().fg(TEXT_PRIMARY).add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        lines.push(Line::from(Span::styled(hit.summary.clone(), Style::default().fg(TEXT_MUTED))));
+    }
+    Text::from(lines)
+}
+
+fn memory_overlay_text(view_model: &ViewModel) -> Text<'static> {
+    let mut lines = Vec::new();
+
+    lines.push(Line::from(Span::styled(
+        "Wake-up",
+        Style::default().fg(BRAND).add_modifier(Modifier::BOLD),
+    )));
+    if let Some(wakeup) = view_model.wakeup.as_ref() {
+        if let Some(active_state) = wakeup.active_state.as_ref() {
+            lines.push(Line::from(format!("Active: {active_state}")));
+        }
+        if !wakeup.open_commitments.is_empty() {
+            lines.push(Line::from(format!("Commitments: {}", wakeup.open_commitments.join(", "))));
         }
         if !wakeup.recent_topics.is_empty() {
-            lines.push(format!("recent topics: {}", wakeup.recent_topics.join(", ")));
+            lines.push(Line::from(format!("Recent topics: {}", wakeup.recent_topics.join(", "))));
         }
-        if !wakeup.recent_keywords.is_empty() {
-            lines.push(format!("recent keywords: {}", wakeup.recent_keywords.join(", ")));
-        }
-    }
-    if let Some(recent) = view_model.recent_conversation.as_ref() {
-        if !recent.recent_summaries.is_empty() {
-            lines.push("recent conversation:".to_owned());
-            lines.extend(
-                recent.recent_summaries.iter().take(2).map(|summary| format!("- {summary}")),
-            );
-        }
-    }
-    if lines.is_empty() {
-        lines.push("No wake-up loaded yet".to_owned());
+    } else {
+        lines.push(Line::from(Span::styled("No wake-up loaded.", Style::default().fg(TEXT_MUTED))));
     }
 
-    frame.render_widget(
-        Paragraph::new(lines.join("\n")).wrap(Wrap { trim: false }).block(
-            Block::default()
-                .title("Wake-up")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Blue)),
-        ),
-        area,
-    );
-}
-
-fn render_recall_and_evidence(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
-    let mut lines = Vec::new();
-    if !view_model.recall_hits.is_empty() {
-        lines.push("recall hits:".to_owned());
-        lines.extend(
-            view_model
-                .recall_hits
-                .iter()
-                .take(3)
-                .map(|hit| format!("- {:?}: {} ({})", hit.kind, hit.title, hit.summary)),
-        );
+    lines.push(Line::default());
+    lines.push(Line::from(Span::styled(
+        "Topics",
+        Style::default().fg(BRAND).add_modifier(Modifier::BOLD),
+    )));
+    if view_model.topics.is_empty() {
+        lines.push(Line::from(Span::styled("No topics yet.", Style::default().fg(TEXT_MUTED))));
+    } else {
+        for topic in view_model.topics.iter().take(4) {
+            lines.push(Line::from(format!("{} — {}", topic.name, topic.summary)));
+        }
     }
+
+    lines.push(Line::default());
+    lines.push(Line::from(Span::styled(
+        "Session and evidence",
+        Style::default().fg(BRAND).add_modifier(Modifier::BOLD),
+    )));
     if let Some(session) = view_model.session_view.as_ref() {
-        lines.push(format!(
-            "session {} [{}]",
-            session.title,
-            format!("{:?}", session.status).to_ascii_lowercase()
-        ));
-        lines.extend(
-            session
-                .recent_entries
-                .iter()
-                .take(2)
-                .map(|entry| format!("• {} {}", entry.event, entry.summary)),
-        );
+        lines.push(Line::from(format!("Session: {}", session.title)));
+        for entry in session.recent_entries.iter().take(2) {
+            lines.push(Line::from(format!("{} {}", entry.event, entry.summary)));
+        }
+    } else {
+        lines.push(Line::from(Span::styled(
+            "No session expanded.",
+            Style::default().fg(TEXT_MUTED),
+        )));
     }
     if let Some(evidence) = view_model.evidence_view.as_ref() {
-        lines.push(format!("evidence: {}", evidence.citation.note));
-        if let Some(turn_summary) = evidence.turn_summary.as_ref() {
-            lines.push(format!("turn: {turn_summary}"));
-        }
-        if let Some(artifact_body) = evidence.artifact_body.as_ref() {
-            lines.push("artifact:".to_owned());
-            lines.extend(tail_lines(
-                &artifact_body.lines().map(|line| line.to_owned()).collect::<Vec<_>>(),
-                3,
-            ));
-        }
+        lines.push(Line::from(format!("Evidence: {}", evidence.citation.note)));
     }
     if let Some(diff_preview) = view_model.diff_preview.as_ref() {
-        lines.push("diff preview:".to_owned());
-        lines.extend(tail_lines(
-            &diff_preview.lines().map(|line| line.to_owned()).collect::<Vec<_>>(),
-            4,
-        ));
-    }
-    if lines.is_empty() {
-        lines.push("Search or open a session to inspect recall evidence".to_owned());
+        lines.push(Line::from(format!("Diff: {}", first_non_empty_line(diff_preview))));
     }
 
-    frame.render_widget(
-        Paragraph::new(lines.join("\n")).wrap(Wrap { trim: false }).block(
-            Block::default()
-                .title("Recall + Evidence")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Blue)),
-        ),
-        area,
-    );
+    if !view_model.candidate_procedures.is_empty() || !view_model.dreaming_summaries.is_empty() {
+        lines.push(Line::default());
+        lines.push(Line::from(Span::styled(
+            "Compiled experience",
+            Style::default().fg(BRAND).add_modifier(Modifier::BOLD),
+        )));
+        for candidate in view_model.candidate_procedures.iter().take(2) {
+            lines.push(Line::from(format!("Procedure: {candidate}")));
+        }
+        for summary in view_model.dreaming_summaries.iter().rev().take(2) {
+            lines.push(Line::from(format!("Reflection: {summary}")));
+        }
+    }
+
+    Text::from(lines)
 }
 
-fn render_experience(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
-    let mut lines = Vec::new();
-    if !view_model.candidate_procedures.is_empty() {
-        lines.push("compiled experience:".to_owned());
-        lines.extend(
-            view_model
-                .candidate_procedures
-                .iter()
-                .take(2)
-                .map(|candidate| format!("- {candidate}")),
-        );
-    }
-    if !view_model.dreaming_summaries.is_empty() {
-        lines.push("dreaming / reflection:".to_owned());
-        lines.extend(
-            view_model
-                .dreaming_summaries
-                .iter()
-                .rev()
-                .take(2)
-                .map(|summary| format!("- {summary}")),
-        );
-    }
-    if lines.is_empty() {
-        lines.push("No compiled experience or dreaming output yet".to_owned());
-    }
-
-    frame.render_widget(
-        Paragraph::new(lines.join("\n")).wrap(Wrap { trim: false }).block(
-            Block::default()
-                .title("Experience + Dreaming")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Blue)),
-        ),
-        area,
-    );
+fn first_non_empty_line(text: &str) -> String {
+    text.lines().find(|line| !line.trim().is_empty()).unwrap_or(text).to_owned()
 }
 
-fn render_input_box(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
-    let title = format!("Input [{}]", view_model.composer_mode.label());
-    let body = if view_model.input_buffer.is_empty() {
-        "Type here".to_owned()
-    } else {
-        view_model.input_buffer.clone()
-    };
-    frame.render_widget(
-        Paragraph::new(body).wrap(Wrap { trim: false }).block(
-            Block::default()
-                .title(title)
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Magenta)),
-        ),
-        area,
-    );
+fn shell_block<'a, T>(title: T) -> Block<'a>
+where
+    T: Into<Title<'a>>,
+{
+    Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_type(BorderType::Plain)
+        .border_style(Style::default().fg(BORDER_SOFT))
+        .style(Style::default().bg(SURFACE_BG))
 }
 
-fn render_help_bar(frame: &mut Frame<'_>, area: Rect, composer_mode: ComposerMode) {
-    let help = format!(
-        "Tab mode  Enter submit  Up/Down select thread  r resume  F1 refresh  F2 wake-up  F3 topics  F4 session  F5 compile  F6/F7 search  F8 approve  F9 deny  Esc clear  q quit  [{}]",
-        composer_mode.description()
-    );
-    frame.render_widget(Paragraph::new(help).style(Style::default().fg(Color::Gray)), area);
+fn composer_block<'a, T>(title: T) -> Block<'a>
+where
+    T: Into<Title<'a>>,
+{
+    Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(BORDER_SOFT))
+        .style(Style::default().bg(SURFACE_BG))
 }
 
-fn tail_lines(lines: &[String], limit: usize) -> Vec<String> {
+fn centered_rect(area: Rect, width_percent: u16, height_percent: u16) -> Rect {
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - height_percent) / 2),
+            Constraint::Percentage(height_percent),
+            Constraint::Percentage((100 - height_percent) / 2),
+        ])
+        .split(area);
+    let horizontal = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - width_percent) / 2),
+            Constraint::Percentage(width_percent),
+            Constraint::Percentage((100 - width_percent) / 2),
+        ])
+        .split(vertical[1]);
+    horizontal[1].inner(Margin { vertical: 0, horizontal: 0 })
+}
+
+fn tail_lines(lines: &[Line<'static>], limit: usize) -> Vec<Line<'static>> {
     if lines.len() <= limit {
         return lines.to_vec();
     }

@@ -1,6 +1,6 @@
 //! Event-driven CLI view-model coverage.
 
-use liz_cli::view_model::ViewModel;
+use liz_cli::view_model::{TranscriptEntryKind, ViewModel};
 use liz_protocol::events::{
     MemoryCompilationAppliedEvent, MemoryDreamingCompletedEvent, MemoryWakeupLoadedEvent,
     ThreadStartedEvent, TurnCancelledEvent, TurnStartedEvent,
@@ -110,11 +110,14 @@ fn view_model_projects_thread_and_turn_events() {
         view_model.thread_statuses.get(&ThreadId::new("thread_01")),
         Some(&ThreadStatus::Active)
     );
-    assert_eq!(view_model.transcript_lines.len(), 5);
-    assert!(view_model.transcript_lines[0].contains("turn started"));
-    assert!(view_model.transcript_lines[1].contains("turn interrupted"));
-    assert!(view_model.transcript_lines[2].contains("wake-up loaded"));
-    assert!(view_model.transcript_lines[3].contains("memory compiled"));
-    assert!(view_model.transcript_lines[4].contains("dreaming"));
+    assert_eq!(view_model.transcript_entries.len(), 2);
+    assert_eq!(view_model.transcript_entries[0].kind, TranscriptEntryKind::System);
+    assert!(view_model.transcript_entries[0].body.contains("Turn interrupted"));
+    assert_eq!(view_model.transcript_entries[1].kind, TranscriptEntryKind::System);
+    assert!(view_model.transcript_entries[1].body.contains("Memory updated"));
+    assert!(
+        view_model.status_line.contains("Reflection") || view_model.status_line.contains("updated")
+    );
+    assert!(view_model.wakeup.is_some());
     assert_eq!(view_model.dreaming_summaries.len(), 1);
 }

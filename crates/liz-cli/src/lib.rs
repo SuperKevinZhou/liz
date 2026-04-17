@@ -1,4 +1,4 @@
-//! CLI workspace skeleton for liz.
+//! CLI workspace for liz.
 
 pub mod app_client;
 pub mod renderers;
@@ -9,7 +9,7 @@ pub mod view_model;
 pub fn banner_line() -> String {
     format!(
         "{} [{} | {} | {}]",
-        "liz-cli reference client",
+        "liz-cli chat shell",
         app_client::WebSocketAppClient::transport_name(),
         view_model::ViewModel::primary_view(),
         renderers::RendererSkeleton::default().renderer_stack,

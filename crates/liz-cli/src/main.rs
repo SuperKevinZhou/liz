@@ -1,4 +1,4 @@
-//! Binary entrypoint for the liz CLI reference client.
+//! Binary entrypoint for the liz CLI chat shell.
 
 use liz_cli::tui::{run_tui, CliArgs};
 

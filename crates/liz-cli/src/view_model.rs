@@ -15,53 +15,45 @@ use liz_protocol::{
 };
 use std::collections::BTreeMap;
 
-/// The command family currently bound to the input box.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ComposerMode {
-    /// Send a normal turn to the selected thread.
-    #[default]
-    Turn,
-    /// Create a new thread from the typed input.
-    NewThread,
-    /// Search memory with keyword ranking.
-    SearchKeyword,
-    /// Search memory with semantic ranking.
-    SearchSemantic,
+/// Transcript entry categories surfaced by the chat shell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TranscriptEntryKind {
+    User,
+    Assistant,
+    Tool,
+    Approval,
+    System,
 }
 
-impl ComposerMode {
-    /// Returns the short label shown in the input title.
+impl TranscriptEntryKind {
+    /// Returns the label shown in the transcript for this entry kind.
     pub fn label(self) -> &'static str {
         match self {
-            Self::Turn => "turn",
-            Self::NewThread => "new-thread",
-            Self::SearchKeyword => "search-keyword",
-            Self::SearchSemantic => "search-semantic",
-        }
-    }
-
-    /// Returns a short hint for the active input mode.
-    pub fn description(self) -> &'static str {
-        match self {
-            Self::Turn => "send work to the selected thread",
-            Self::NewThread => "create a new thread from this input",
-            Self::SearchKeyword => "search memory by exact terms",
-            Self::SearchSemantic => "search memory by lightweight semantics",
-        }
-    }
-
-    /// Rotates to the next composer mode.
-    pub fn next(self) -> Self {
-        match self {
-            Self::Turn => Self::NewThread,
-            Self::NewThread => Self::SearchKeyword,
-            Self::SearchKeyword => Self::SearchSemantic,
-            Self::SearchSemantic => Self::Turn,
+            Self::User => "you",
+            Self::Assistant => "liz",
+            Self::Tool => "tool",
+            Self::Approval => "approval",
+            Self::System => "system",
         }
     }
 }
 
-/// Minimal event-projected view model for the reference CLI.
+/// A single transcript item rendered in the primary conversation flow.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TranscriptEntry {
+    pub kind: TranscriptEntryKind,
+    pub body: String,
+}
+
+/// Overlay surfaces that can temporarily take focus without replacing the transcript.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OverlayPanel {
+    Help,
+    Search,
+    Memory,
+}
+
+/// Minimal event-projected view model for the CLI.
 #[derive(Debug, Clone, Default)]
 pub struct ViewModel {
     /// The currently known thread statuses.
@@ -70,8 +62,8 @@ pub struct ViewModel {
     pub threads: Vec<Thread>,
     /// The selected thread index inside the picker.
     pub selected_thread_index: usize,
-    /// Human-readable transcript lines derived from the event stream.
-    pub transcript_lines: Vec<String>,
+    /// Transcript entries shown in the primary chat flow.
+    pub transcript_entries: Vec<TranscriptEntry>,
     /// Approvals currently waiting on user action.
     pub pending_approvals: Vec<ApprovalRequest>,
     /// The latest resume summary returned by the server.
@@ -80,7 +72,7 @@ pub struct ViewModel {
     pub wakeup: Option<MemoryWakeup>,
     /// The currently loaded recent conversation view.
     pub recent_conversation: Option<RecentConversationWakeupView>,
-    /// Topics loaded for the topic list surface.
+    /// Topics loaded for memory inspection.
     pub topics: Vec<MemoryTopicSummary>,
     /// Recall hits loaded from memory search.
     pub recall_hits: Vec<MemorySearchHit>,
@@ -98,8 +90,10 @@ pub struct ViewModel {
     pub status_line: String,
     /// The active input buffer.
     pub input_buffer: String,
-    /// The active input mode.
-    pub composer_mode: ComposerMode,
+    /// Whether the thread rail is visible.
+    pub show_thread_rail: bool,
+    /// The active overlay panel, if any.
+    pub active_overlay: Option<OverlayPanel>,
     assistant_streaming: Option<String>,
 }
 
@@ -124,6 +118,16 @@ impl ViewModel {
         self.assistant_streaming.as_deref()
     }
 
+    /// Returns the number of pending approvals.
+    pub fn pending_approval_count(&self) -> usize {
+        self.pending_approvals.len()
+    }
+
+    /// Returns whether the current thread has wake-up context to surface.
+    pub fn has_wakeup_context(&self) -> bool {
+        self.wakeup.is_some() || self.recent_conversation.is_some() || self.resume_summary.is_some()
+    }
+
     /// Moves the selection one thread upward.
     pub fn select_previous_thread(&mut self) {
         if self.threads.is_empty() {
@@ -146,18 +150,33 @@ impl ViewModel {
         self.selected_thread_index = (self.selected_thread_index + 1) % self.threads.len();
     }
 
+    /// Toggles the visibility of the thread rail.
+    pub fn toggle_thread_rail(&mut self) {
+        self.show_thread_rail = !self.show_thread_rail;
+    }
+
+    /// Opens an overlay panel.
+    pub fn open_overlay(&mut self, panel: OverlayPanel) {
+        self.active_overlay = Some(panel);
+    }
+
+    /// Closes the active overlay.
+    pub fn close_overlay(&mut self) {
+        self.active_overlay = None;
+    }
+
     /// Applies one server response to the current CLI projection.
     pub fn apply_response(&mut self, response: &ServerResponseEnvelope) {
         match response {
             ServerResponseEnvelope::Success(success) => match &success.response {
                 ResponsePayload::ThreadStart(response) => {
                     self.upsert_thread(response.thread.clone());
-                    self.status_line = format!("Started thread {}", response.thread.title);
+                    self.status_line = format!("Started {}", response.thread.title);
                 }
                 ResponsePayload::ThreadResume(response) => {
                     self.upsert_thread(response.thread.clone());
                     self.resume_summary = response.resume_summary.clone();
-                    self.status_line = format!("Resumed thread {}", response.thread.title);
+                    self.status_line = format!("Resumed {}", response.thread.title);
                 }
                 ResponsePayload::ThreadList(response) => {
                     let selected_thread_id = self.selected_thread_id();
@@ -172,32 +191,33 @@ impl ViewModel {
                             self.threads.iter().position(|thread| thread.id == selected_id)
                         })
                         .unwrap_or(0);
-                    self.status_line = format!("Loaded {} threads", self.threads.len());
+                    self.status_line = match self.threads.len() {
+                        0 => "No threads yet".to_owned(),
+                        1 => "Loaded 1 thread".to_owned(),
+                        count => format!("Loaded {count} threads"),
+                    };
                 }
                 ResponsePayload::ThreadFork(response) => {
                     self.upsert_thread(response.thread.clone());
-                    self.status_line = format!("Forked thread {}", response.thread.title);
+                    self.status_line = format!("Forked {}", response.thread.title);
                 }
                 ResponsePayload::MemoryReadWakeup(response) => {
                     self.wakeup = Some(response.wakeup.clone());
                     self.recent_conversation = Some(response.recent_conversation.clone());
-                    self.status_line = format!("Loaded wake-up for {}", response.thread_id);
+                    self.status_line = format!("Ready to continue {}", response.thread_id);
                 }
                 ResponsePayload::MemoryListTopics(response) => {
                     self.topics = response.topics.clone();
-                    self.status_line = format!("Loaded {} topics", self.topics.len());
+                    self.status_line = format!("Loaded {} memory topics", self.topics.len());
                 }
                 ResponsePayload::MemorySearch(response) => {
                     self.recall_hits = response.hits.clone();
-                    self.status_line = format!(
-                        "Search returned {} hits for {}",
-                        self.recall_hits.len(),
-                        response.query
-                    );
+                    self.active_overlay = Some(OverlayPanel::Search);
+                    self.status_line = format!("Search found {} result(s)", self.recall_hits.len());
                 }
                 ResponsePayload::MemoryOpenSession(response) => {
                     self.session_view = Some(response.session.clone());
-                    self.status_line = format!("Opened session {}", response.session.title);
+                    self.status_line = format!("Opened {}", response.session.title);
                 }
                 ResponsePayload::MemoryOpenEvidence(response) => {
                     self.diff_preview = response.evidence.artifact_body.clone().filter(|_body| {
@@ -210,7 +230,7 @@ impl ViewModel {
                     });
                     self.evidence_view = Some(response.evidence.clone());
                     self.status_line =
-                        format!("Expanded evidence {}", response.evidence.citation.note);
+                        format!("Opened evidence {}", response.evidence.citation.note);
                 }
                 ResponsePayload::MemoryCompileNow(response) => {
                     self.candidate_procedures = response.compilation.candidate_procedures.clone();
@@ -220,11 +240,11 @@ impl ViewModel {
                     self.pending_approvals.retain(|approval| approval.id != response.approval.id);
                     self.status_line = format!("Resolved approval {}", response.approval.id);
                 }
-                ResponsePayload::TurnStart(response) => {
-                    self.status_line = format!("Turn {} started", response.turn.id);
+                ResponsePayload::TurnStart(_) => {
+                    self.status_line = "Message sent".to_owned();
                 }
-                ResponsePayload::TurnCancel(response) => {
-                    self.status_line = format!("Turn {} cancelled", response.turn.id);
+                ResponsePayload::TurnCancel(_) => {
+                    self.status_line = "Turn cancelled".to_owned();
                 }
                 ResponsePayload::ToolCall(response) => {
                     self.status_line = response.summary.clone();
@@ -232,8 +252,7 @@ impl ViewModel {
                 _ => {}
             },
             ServerResponseEnvelope::Error(error) => {
-                self.transcript_lines
-                    .push(format!("[error] {}: {}", error.error.code, error.error.message));
+                self.push_entry(TranscriptEntryKind::System, error.error.message.clone());
                 self.status_line = error.error.message.clone();
             }
         }
@@ -251,44 +270,40 @@ impl ViewModel {
                 self.upsert_thread(thread.clone());
             }
             ServerEventPayload::TurnStarted(TurnStartedEvent { turn }) => {
-                self.transcript_lines.push(format!(
-                    "[{}] turn started: {}",
-                    turn.thread_id,
-                    turn.goal.clone().unwrap_or_default()
-                ));
+                self.status_line = turn
+                    .goal
+                    .clone()
+                    .map(|goal| format!("Working on {goal}"))
+                    .unwrap_or_else(|| "liz is working".to_owned());
             }
             ServerEventPayload::TurnCompleted(TurnCompletedEvent { turn }) => {
-                self.transcript_lines.push(format!(
-                    "[{}] turn completed: {}",
-                    turn.thread_id,
-                    turn.summary.clone().unwrap_or_default()
-                ));
+                self.status_line =
+                    turn.summary.clone().unwrap_or_else(|| "Turn completed".to_owned());
             }
-            ServerEventPayload::TurnFailed(TurnFailedEvent { turn, message }) => {
-                self.transcript_lines
-                    .push(format!("[{}] turn failed: {}", turn.thread_id, message));
+            ServerEventPayload::TurnFailed(TurnFailedEvent { message, .. }) => {
+                self.push_entry(TranscriptEntryKind::System, format!("Turn failed: {message}"));
+                self.status_line = message.clone();
             }
-            ServerEventPayload::TurnCancelled(TurnCancelledEvent { turn }) => {
-                self.transcript_lines.push(format!(
-                    "[{}] turn interrupted: {}",
-                    turn.thread_id,
-                    turn.goal.clone().unwrap_or_default()
-                ));
+            ServerEventPayload::TurnCancelled(TurnCancelledEvent { .. }) => {
+                self.push_entry(TranscriptEntryKind::System, "Turn interrupted".to_owned());
+                self.status_line = "Turn interrupted".to_owned();
             }
             ServerEventPayload::AssistantChunk(AssistantChunkEvent { chunk, .. }) => {
                 let preview = self.assistant_streaming.get_or_insert_with(String::new);
                 preview.push_str(chunk);
+                self.status_line = "liz is replying".to_owned();
             }
             ServerEventPayload::AssistantCompleted(AssistantCompletedEvent { message }) => {
                 self.assistant_streaming = None;
-                self.transcript_lines.push(format!("[assistant] {message}"));
+                self.push_entry(TranscriptEntryKind::Assistant, message.clone());
+                self.status_line = "Reply finished".to_owned();
             }
             ServerEventPayload::ToolCallStarted(ToolCallStartedEvent {
                 tool_name,
                 summary,
                 ..
             }) => {
-                self.transcript_lines.push(format!("[tool] {tool_name} starting: {summary}"));
+                self.status_line = format!("{tool_name}: {summary}");
             }
             ServerEventPayload::ToolCallUpdated(ToolCallUpdatedEvent {
                 tool_name,
@@ -296,69 +311,80 @@ impl ViewModel {
                 preview,
                 ..
             }) => {
-                self.transcript_lines.push(format!(
-                    "[tool] {tool_name} updating: {}{}",
+                self.status_line = format!(
+                    "{tool_name}: {}{}",
                     delta_summary,
                     preview.as_ref().map(|value| format!(" ({value})")).unwrap_or_default()
-                ));
+                );
             }
             ServerEventPayload::ToolCallCommitted(ToolCallCommittedEvent {
                 tool_name,
                 arguments_summary,
                 ..
             }) => {
-                self.transcript_lines
-                    .push(format!("[tool] {tool_name} committed: {arguments_summary}"));
+                self.status_line = format!("{tool_name}: {arguments_summary}");
             }
             ServerEventPayload::ToolCompleted(ToolCompletedEvent {
                 tool_name, summary, ..
             }) => {
-                self.transcript_lines.push(format!("[tool] {tool_name} completed: {summary}"));
+                self.push_entry(TranscriptEntryKind::Tool, format!("{tool_name}: {summary}"));
+                self.status_line = format!("{tool_name} finished");
             }
             ServerEventPayload::ToolFailed(ToolFailedEvent { tool_name, summary }) => {
-                self.transcript_lines.push(format!("[tool] {tool_name} failed: {summary}"));
+                self.push_entry(TranscriptEntryKind::Tool, format!("{tool_name}: {summary}"));
+                self.status_line = format!("{tool_name} failed");
             }
             ServerEventPayload::ApprovalRequested(ApprovalRequestedEvent { approval }) => {
                 self.pending_approvals.push(approval.clone());
-                self.transcript_lines.push(format!(
-                    "[approval] {} needs approval: {}",
-                    approval.id, approval.reason
-                ));
+                self.push_entry(
+                    TranscriptEntryKind::Approval,
+                    format!("{} needs approval: {}", approval.id, approval.reason),
+                );
+                self.status_line = "Approval needed".to_owned();
             }
             ServerEventPayload::ApprovalResolved(ApprovalResolvedEvent { approval, decision }) => {
                 self.pending_approvals.retain(|pending| pending.id != approval.id);
-                self.transcript_lines
-                    .push(format!("[approval] {} resolved as {:?}", approval.id, decision));
+                self.push_entry(
+                    TranscriptEntryKind::System,
+                    format!("Approval {} resolved as {:?}", approval.id, decision),
+                );
+                self.status_line = format!("Approval {} resolved", approval.id);
             }
             ServerEventPayload::DiffAvailable(DiffAvailableEvent { artifact }) => {
-                self.transcript_lines
-                    .push(format!("[diff] {} ready: {}", artifact.id, artifact.summary));
+                self.diff_preview = Some(artifact.summary.clone());
+                self.status_line = "Diff preview ready".to_owned();
             }
             ServerEventPayload::MemoryWakeupLoaded(MemoryWakeupLoadedEvent { wakeup }) => {
                 self.wakeup = Some(wakeup.clone());
-                self.transcript_lines.push(format!(
-                    "[{}] wake-up loaded: {}",
-                    event.thread_id,
-                    wakeup.recent_topics.join(", ")
-                ));
+                self.status_line = "Wake-up refreshed".to_owned();
             }
             ServerEventPayload::MemoryCompilationApplied(MemoryCompilationAppliedEvent {
                 compilation,
             }) => {
                 self.candidate_procedures = compilation.candidate_procedures.clone();
-                self.transcript_lines.push(format!(
-                    "[{}] memory compiled: {}",
-                    event.thread_id, compilation.delta_summary
-                ));
+                self.push_entry(
+                    TranscriptEntryKind::System,
+                    format!("Memory updated: {}", compilation.delta_summary),
+                );
+                self.status_line = compilation.delta_summary.clone();
             }
             ServerEventPayload::MemoryDreamingCompleted(MemoryDreamingCompletedEvent {
                 summary,
             }) => {
                 self.dreaming_summaries.push(summary.clone());
-                self.transcript_lines.push(format!("[{}] dreaming: {}", event.thread_id, summary));
+                self.status_line = "Reflection updated".to_owned();
             }
             _ => {}
         }
+    }
+
+    /// Adds a user message to the transcript.
+    pub fn push_user_message(&mut self, message: String) {
+        self.push_entry(TranscriptEntryKind::User, message);
+    }
+
+    fn push_entry(&mut self, kind: TranscriptEntryKind, body: String) {
+        self.transcript_entries.push(TranscriptEntry { kind, body });
     }
 
     fn upsert_thread(&mut self, thread: Thread) {

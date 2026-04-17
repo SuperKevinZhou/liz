@@ -1,8 +1,8 @@
-//! Interactive ratatui shell for the CLI reference client.
+//! Interactive ratatui shell for the CLI chat client.
 
 use crate::app_client::{AppClientError, WebSocketAppClient};
 use crate::renderers;
-use crate::view_model::{ComposerMode, ViewModel};
+use crate::view_model::{OverlayPanel, ViewModel};
 use crossterm::event::{self, Event as CEvent, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -106,7 +106,7 @@ struct CliApp {
 impl CliApp {
     fn new(client: WebSocketAppClient, server_url: String) -> Self {
         let mut view_model = ViewModel::default();
-        view_model.status_line = "Connected; loading threads".to_owned();
+        view_model.status_line = "Connected. Loading conversations...".to_owned();
         Self { client, view_model, server_url, next_request_number: 1, should_exit: false }
     }
 
@@ -121,20 +121,6 @@ impl CliApp {
         }
 
         match key.code {
-            KeyCode::Char('q') => self.should_exit = true,
-            KeyCode::Char('r') => {
-                self.resume_selected_thread()?;
-            }
-            KeyCode::Tab => {
-                self.view_model.composer_mode = self.view_model.composer_mode.next();
-                self.view_model.status_line =
-                    format!("Composer mode: {}", self.view_model.composer_mode.description());
-            }
-            KeyCode::Esc => {
-                self.view_model.input_buffer.clear();
-                self.view_model.composer_mode = ComposerMode::Turn;
-                self.view_model.status_line = "Cleared input".to_owned();
-            }
             KeyCode::Up => {
                 self.view_model.select_previous_thread();
                 self.load_selected_thread_surfaces()?;
@@ -143,40 +129,35 @@ impl CliApp {
                 self.view_model.select_next_thread();
                 self.load_selected_thread_surfaces()?;
             }
-            KeyCode::F(1) => {
-                self.refresh_threads()?;
+            KeyCode::Tab => {
+                self.view_model.toggle_thread_rail();
+                self.view_model.status_line = if self.view_model.show_thread_rail {
+                    "Thread rail opened".to_owned()
+                } else {
+                    "Thread rail hidden".to_owned()
+                };
             }
-            KeyCode::F(2) => {
-                self.request_selected_wakeup()?;
+            KeyCode::Esc => {
+                if self.view_model.active_overlay.is_some() {
+                    self.view_model.close_overlay();
+                    self.view_model.status_line = "Overlay closed".to_owned();
+                } else if !self.view_model.input_buffer.is_empty() {
+                    self.view_model.input_buffer.clear();
+                    self.view_model.status_line = "Composer cleared".to_owned();
+                }
             }
-            KeyCode::F(3) => {
-                self.list_topics()?;
-            }
-            KeyCode::F(4) => {
-                self.open_selected_session()?;
-            }
-            KeyCode::F(5) => {
-                self.compile_selected_thread_memory()?;
-            }
-            KeyCode::F(6) => {
-                self.view_model.composer_mode = ComposerMode::SearchKeyword;
-                self.view_model.status_line = "Search mode set to keyword".to_owned();
-            }
-            KeyCode::F(7) => {
-                self.view_model.composer_mode = ComposerMode::SearchSemantic;
-                self.view_model.status_line = "Search mode set to semantic".to_owned();
-            }
-            KeyCode::F(8) => {
-                self.respond_to_first_approval(liz_protocol::ApprovalDecision::ApproveOnce)?;
-            }
-            KeyCode::F(9) => {
-                self.respond_to_first_approval(liz_protocol::ApprovalDecision::Deny)?;
+            KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                self.view_model.input_buffer.push('\n');
             }
             KeyCode::Enter => {
                 self.submit_input()?;
             }
             KeyCode::Backspace => {
                 self.view_model.input_buffer.pop();
+            }
+            KeyCode::Char('?') if self.view_model.input_buffer.is_empty() => {
+                self.view_model.open_overlay(OverlayPanel::Help);
+                self.view_model.status_line = "Help opened".to_owned();
             }
             KeyCode::Char(character) => {
                 if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT {
@@ -192,53 +173,124 @@ impl CliApp {
     fn submit_input(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let input = self.view_model.input_buffer.trim().to_owned();
         if input.is_empty() {
-            self.view_model.status_line = "Input is empty".to_owned();
+            self.view_model.status_line = "Composer is empty".to_owned();
             return Ok(());
         }
         self.view_model.input_buffer.clear();
+        self.view_model.close_overlay();
 
-        match self.view_model.composer_mode {
-            ComposerMode::Turn => {
-                let Some(thread_id) = self.view_model.selected_thread_id() else {
-                    self.view_model.status_line =
-                        "Create or select a thread before sending a turn".to_owned();
-                    return Ok(());
+        if input.starts_with('/') {
+            self.handle_slash_command(&input)?;
+            return Ok(());
+        }
+
+        let Some(thread_id) = self.view_model.selected_thread_id() else {
+            self.view_model.status_line =
+                "Start a conversation with /new <message> before sending a reply".to_owned();
+            return Ok(());
+        };
+
+        self.view_model.push_user_message(input.clone());
+        self.send_request(ClientRequest::TurnStart(TurnStartRequest {
+            thread_id,
+            input,
+            input_kind: TurnInputKind::UserMessage,
+        }))?;
+        self.view_model.status_line = "Message sent".to_owned();
+        Ok(())
+    }
+
+    fn handle_slash_command(&mut self, input: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let trimmed = input.trim();
+        let mut parts = trimmed.splitn(2, char::is_whitespace);
+        let command = parts.next().unwrap_or_default();
+        let argument = parts.next().unwrap_or("").trim();
+
+        match command {
+            "/new" => self.start_new_thread(argument)?,
+            "/resume" => self.resume_selected_thread()?,
+            "/refresh" => {
+                self.refresh_threads()?;
+                self.view_model.status_line = "Refreshing conversations".to_owned();
+            }
+            "/threads" => {
+                self.view_model.toggle_thread_rail();
+                self.view_model.status_line = if self.view_model.show_thread_rail {
+                    "Thread rail opened".to_owned()
+                } else {
+                    "Thread rail hidden".to_owned()
                 };
-                self.view_model.transcript_lines.push(format!("[user] {input}"));
-                self.send_request(ClientRequest::TurnStart(TurnStartRequest {
-                    thread_id,
-                    input,
-                    input_kind: TurnInputKind::UserMessage,
-                }))?;
-                self.view_model.status_line = "Turn request sent".to_owned();
             }
-            ComposerMode::NewThread => {
-                let title = input.chars().take(48).collect::<String>();
-                self.send_request(ClientRequest::ThreadStart(ThreadStartRequest {
-                    title: Some(title),
-                    initial_goal: Some(input),
-                    workspace_ref: None,
-                }))?;
-                self.view_model.status_line = "Thread start request sent".to_owned();
+            "/help" => {
+                self.view_model.open_overlay(OverlayPanel::Help);
+                self.view_model.status_line = "Help opened".to_owned();
             }
-            ComposerMode::SearchKeyword => {
-                self.send_request(ClientRequest::MemorySearch(MemorySearchRequest {
-                    query: input,
-                    mode: MemorySearchMode::Keyword,
-                    limit: Some(8),
-                }))?;
-                self.view_model.status_line = "Keyword recall requested".to_owned();
+            "/memory" => {
+                self.open_memory_overlay()?;
             }
-            ComposerMode::SearchSemantic => {
-                self.send_request(ClientRequest::MemorySearch(MemorySearchRequest {
-                    query: input,
-                    mode: MemorySearchMode::Semantic,
-                    limit: Some(8),
-                }))?;
-                self.view_model.status_line = "Semantic recall requested".to_owned();
+            "/search" => {
+                self.search_memory(argument)?;
+            }
+            "/approve" => {
+                self.respond_to_first_approval(liz_protocol::ApprovalDecision::ApproveOnce)?;
+            }
+            "/deny" => {
+                self.respond_to_first_approval(liz_protocol::ApprovalDecision::Deny)?;
+            }
+            "/wakeup" => {
+                self.request_selected_wakeup()?;
+            }
+            "/compile" => {
+                self.compile_selected_thread_memory()?;
+            }
+            _ => {
+                self.view_model.status_line = format!("Unknown command {command}");
+                self.view_model.open_overlay(OverlayPanel::Help);
             }
         }
 
+        Ok(())
+    }
+
+    fn start_new_thread(&mut self, argument: &str) -> Result<(), Box<dyn std::error::Error>> {
+        if argument.is_empty() {
+            self.view_model.status_line = "Use /new <message> to start a conversation".to_owned();
+            return Ok(());
+        }
+
+        let title = argument.chars().take(48).collect::<String>();
+        self.view_model.push_user_message(argument.to_owned());
+        self.send_request(ClientRequest::ThreadStart(ThreadStartRequest {
+            title: Some(title),
+            initial_goal: Some(argument.to_owned()),
+            workspace_ref: None,
+        }))?;
+        self.view_model.status_line = "Starting new conversation".to_owned();
+        Ok(())
+    }
+
+    fn search_memory(&mut self, argument: &str) -> Result<(), Box<dyn std::error::Error>> {
+        if argument.is_empty() {
+            self.view_model.status_line = "Use /search <query>".to_owned();
+            return Ok(());
+        }
+        self.send_request(ClientRequest::MemorySearch(MemorySearchRequest {
+            query: argument.to_owned(),
+            mode: MemorySearchMode::Semantic,
+            limit: Some(8),
+        }))?;
+        self.view_model.status_line = "Searching memory".to_owned();
+        Ok(())
+    }
+
+    fn open_memory_overlay(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        self.list_topics()?;
+        if self.view_model.selected_thread_id().is_some() {
+            self.request_selected_wakeup()?;
+            self.open_selected_session()?;
+        }
+        self.view_model.open_overlay(OverlayPanel::Memory);
+        self.view_model.status_line = "Memory opened".to_owned();
         Ok(())
     }
 
@@ -306,6 +358,7 @@ impl CliApp {
                     artifact_id: Some(event.artifact.id.clone()),
                     fact_id: None,
                 }))?;
+                self.view_model.open_overlay(OverlayPanel::Memory);
             }
             ServerEventPayload::MemoryCompilationApplied(_) => {
                 self.list_topics()?;
@@ -338,43 +391,43 @@ impl CliApp {
 
     fn request_selected_wakeup(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let Some(thread_id) = self.view_model.selected_thread_id() else {
-            self.view_model.status_line = "No thread selected".to_owned();
+            self.view_model.status_line = "No conversation selected".to_owned();
             return Ok(());
         };
         self.send_request(ClientRequest::MemoryReadWakeup(MemoryReadWakeupRequest { thread_id }))?;
-        self.view_model.status_line = "Wake-up refresh requested".to_owned();
+        self.view_model.status_line = "Refreshing wake-up".to_owned();
         Ok(())
     }
 
     fn compile_selected_thread_memory(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let Some(thread_id) = self.view_model.selected_thread_id() else {
-            self.view_model.status_line = "No thread selected".to_owned();
+            self.view_model.status_line = "No conversation selected".to_owned();
             return Ok(());
         };
         self.send_request(ClientRequest::MemoryCompileNow(MemoryCompileNowRequest { thread_id }))?;
-        self.view_model.status_line = "Foreground compilation requested".to_owned();
+        self.view_model.status_line = "Compiling memory".to_owned();
         Ok(())
     }
 
     fn open_selected_session(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let Some(thread_id) = self.view_model.selected_thread_id() else {
-            self.view_model.status_line = "No thread selected".to_owned();
+            self.view_model.status_line = "No conversation selected".to_owned();
             return Ok(());
         };
         self.send_request(ClientRequest::MemoryOpenSession(MemoryOpenSessionRequest {
             thread_id,
         }))?;
-        self.view_model.status_line = "Session expansion requested".to_owned();
+        self.view_model.status_line = "Opening session".to_owned();
         Ok(())
     }
 
     fn resume_selected_thread(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let Some(thread_id) = self.view_model.selected_thread_id() else {
-            self.view_model.status_line = "No thread selected".to_owned();
+            self.view_model.status_line = "No conversation selected".to_owned();
             return Ok(());
         };
         self.send_request(ClientRequest::ThreadResume(ThreadResumeRequest { thread_id }))?;
-        self.view_model.status_line = "Thread resume requested".to_owned();
+        self.view_model.status_line = "Resuming conversation".to_owned();
         Ok(())
     }
 
