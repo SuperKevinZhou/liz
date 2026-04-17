@@ -88,7 +88,7 @@ fn turn_start_streams_assistant_and_tool_events_before_completion() {
 #[test]
 fn turn_start_executes_committed_shell_tool_calls() {
     let temp_dir = TempDir::new().expect("temp dir should be created");
-    let _windows_helper = WindowsSandboxHelperGuard::install(temp_dir.path());
+    let _sandbox_helper = SandboxHelperGuard::install(temp_dir.path());
     let server = AppServer::new(StoragePaths::new(temp_dir.path().join(".liz")));
     let client = spawn_loopback_websocket(server);
 
@@ -166,39 +166,62 @@ fn envelope(request_id: &str, request: ClientRequest) -> ClientRequestEnvelope {
     ClientRequestEnvelope { request_id: RequestId::new(request_id), request }
 }
 
-struct WindowsSandboxHelperGuard {
+struct SandboxHelperGuard {
+    key: &'static str,
     previous: Option<OsString>,
 }
 
-impl WindowsSandboxHelperGuard {
+impl SandboxHelperGuard {
     fn install(root: &std::path::Path) -> Option<Self> {
-        if !cfg!(target_os = "windows") {
-            return None;
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let helper_path = root.join("linux-sandbox-helper.sh");
+            fs::write(
+                &helper_path,
+                "#!/bin/sh\nwhile [ \"$#\" -gt 0 ]; do\n  if [ \"$1\" = \"--\" ]; then\n    shift\n    exec \"$@\"\n  fi\n  shift\ndone\nexit 1\n",
+            )
+            .expect("linux sandbox helper script should be written");
+            let mut permissions =
+                fs::metadata(&helper_path).expect("linux sandbox helper metadata").permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&helper_path, permissions)
+                .expect("linux sandbox helper should be executable");
+
+            let previous = std::env::var_os("LIZ_LINUX_SANDBOX_HELPER");
+            std::env::set_var("LIZ_LINUX_SANDBOX_HELPER", &helper_path);
+            return Some(Self { key: "LIZ_LINUX_SANDBOX_HELPER", previous });
         }
 
-        let helper_path = root.join("windows-sandbox-helper.cmd");
-        fs::write(
-            &helper_path,
-            "@echo off\r\nsetlocal\r\n:skip\r\nif \"%~1\"==\"\" exit /b 1\r\nif \"%~1\"==\"--\" goto run\r\nshift\r\ngoto skip\r\n:run\r\nshift\r\ncall %*\r\n",
-        )
-        .expect("windows sandbox helper script should be written");
+        #[cfg(target_os = "windows")]
+        {
+            let helper_path = root.join("windows-sandbox-helper.cmd");
+            fs::write(
+                &helper_path,
+                "@echo off\r\nsetlocal\r\n:skip\r\nif \"%~1\"==\"\" exit /b 1\r\nif \"%~1\"==\"--\" goto run\r\nshift\r\ngoto skip\r\n:run\r\nshift\r\ncall %*\r\n",
+            )
+            .expect("windows sandbox helper script should be written");
 
-        let previous = std::env::var_os("LIZ_WINDOWS_SANDBOX_USER_HELPER");
-        std::env::set_var("LIZ_WINDOWS_SANDBOX_USER_HELPER", &helper_path);
-        Some(Self { previous })
+            let previous = std::env::var_os("LIZ_WINDOWS_SANDBOX_USER_HELPER");
+            std::env::set_var("LIZ_WINDOWS_SANDBOX_USER_HELPER", &helper_path);
+            return Some(Self { key: "LIZ_WINDOWS_SANDBOX_USER_HELPER", previous });
+        }
+
+        #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+        {
+            let _ = root;
+            None
+        }
     }
 }
 
-impl Drop for WindowsSandboxHelperGuard {
+impl Drop for SandboxHelperGuard {
     fn drop(&mut self) {
-        if !cfg!(target_os = "windows") {
-            return;
-        }
-
         if let Some(previous) = self.previous.as_ref() {
-            std::env::set_var("LIZ_WINDOWS_SANDBOX_USER_HELPER", previous);
+            std::env::set_var(self.key, previous);
         } else {
-            std::env::remove_var("LIZ_WINDOWS_SANDBOX_USER_HELPER");
+            std::env::remove_var(self.key);
         }
     }
 }

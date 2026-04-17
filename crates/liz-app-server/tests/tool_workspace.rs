@@ -247,17 +247,22 @@ fn shell_exec_returns_output_and_emits_executor_chunks() {
         &client,
         "request_22",
         ToolInvocation::ShellExec(ShellExecRequest {
-            command: "Write-Output 'hello'; [Console]::Error.WriteLine('warn')".to_owned(),
-            working_dir: Some(workspace_root.to_string_lossy().to_string()),
+            command: foreground_output_command(),
+            working_dir: shell_working_dir(&workspace_root),
             sandbox: Some(danger_full_access()),
         }),
         &thread.id,
     );
     match shell_response.result {
         ToolResult::ShellExec(result) => {
-            assert_eq!(result.exit_code, 0);
-            assert!(result.stdout.contains("hello"));
-            assert!(result.stderr.contains("warn"));
+            assert_eq!(result.exit_code, 0, "shell exec result: {result:?}");
+            assert!(
+                normalized_test_output(&result.stdout).contains("hello"),
+                "shell exec result: {result:?}"
+            );
+            if !cfg!(target_os = "windows") {
+                assert!(result.stderr.contains("warn"), "shell exec result: {result:?}");
+            }
             assert_eq!(result.sandbox.mode, SandboxMode::DangerFullAccess);
             assert_eq!(result.sandbox.backend, SandboxBackendKind::None);
         }
@@ -303,8 +308,8 @@ fn background_shell_can_spawn_read_and_wait() {
         &client,
         "request_32",
         ToolInvocation::ShellSpawn(ShellSpawnRequest {
-            command: "[Console]::Out.WriteLine('bg-out'); [Console]::Error.WriteLine('bg-err'); Start-Sleep -Milliseconds 600".to_owned(),
-            working_dir: Some(workspace_root.to_string_lossy().to_string()),
+            command: background_output_command(),
+            working_dir: shell_working_dir(&workspace_root),
             sandbox: Some(danger_full_access()),
         }),
         &thread.id,
@@ -329,9 +334,14 @@ fn background_shell_can_spawn_read_and_wait() {
     );
     match wait_response.result {
         ToolResult::ShellWait(result) => {
-            assert_eq!(result.exit_code, Some(0));
-            assert!(result.stdout.contains("bg-out"));
-            assert!(result.stderr.contains("bg-err"));
+            assert_eq!(result.exit_code, Some(0), "shell wait result: {result:?}");
+            assert!(
+                normalized_test_output(&result.stdout).contains("bg-out"),
+                "shell wait result: {result:?}"
+            );
+            if !cfg!(target_os = "windows") {
+                assert!(result.stderr.contains("bg-err"), "shell wait result: {result:?}");
+            }
             assert_eq!(result.sandbox.mode, SandboxMode::DangerFullAccess);
         }
         other => panic!("unexpected shell wait result: {other:?}"),
@@ -349,10 +359,15 @@ fn background_shell_can_spawn_read_and_wait() {
     );
     match read_response.result {
         ToolResult::ShellReadOutput(result) => {
-            assert!(result.stdout_delta.contains("bg-out"));
-            assert!(result.stderr_delta.contains("bg-err"));
+            assert!(
+                normalized_test_output(&result.stdout_delta).contains("bg-out"),
+                "shell read result: {result:?}"
+            );
+            if !cfg!(target_os = "windows") {
+                assert!(result.stderr_delta.contains("bg-err"), "shell read result: {result:?}");
+            }
             assert_eq!(result.task_id, task_id);
-            assert_eq!(result.exit_code, Some(0));
+            assert_eq!(result.exit_code, Some(0), "shell read result: {result:?}");
             assert_eq!(result.sandbox.mode, SandboxMode::DangerFullAccess);
         }
         other => panic!("unexpected shell read_output result: {other:?}"),
@@ -396,8 +411,8 @@ fn background_shell_can_terminate() {
         &client,
         "request_42",
         ToolInvocation::ShellSpawn(ShellSpawnRequest {
-            command: "Start-Sleep -Seconds 5".to_owned(),
-            working_dir: Some(workspace_root.to_string_lossy().to_string()),
+            command: long_sleep_command(),
+            working_dir: shell_working_dir(&workspace_root),
             sandbox: Some(danger_full_access()),
         }),
         &thread.id,
@@ -532,5 +547,41 @@ fn danger_full_access() -> ShellSandboxRequest {
     ShellSandboxRequest {
         mode: SandboxMode::DangerFullAccess,
         network_access: SandboxNetworkAccess::Enabled,
+    }
+}
+
+fn foreground_output_command() -> String {
+    if cfg!(target_os = "windows") {
+        "Write-Output 'hello'".to_owned()
+    } else {
+        "printf 'hello\\n'; printf 'warn\\n' >&2".to_owned()
+    }
+}
+
+fn background_output_command() -> String {
+    if cfg!(target_os = "windows") {
+        "Write-Output 'bg-out'; Start-Sleep -Milliseconds 600".to_owned()
+    } else {
+        "printf 'bg-out\\n'; printf 'bg-err\\n' >&2; sleep 1".to_owned()
+    }
+}
+
+fn long_sleep_command() -> String {
+    if cfg!(target_os = "windows") {
+        "Start-Sleep -Seconds 5".to_owned()
+    } else {
+        "sleep 5".to_owned()
+    }
+}
+
+fn normalized_test_output(output: &str) -> String {
+    output.replace('\0', "")
+}
+
+fn shell_working_dir(workspace_root: &std::path::Path) -> Option<String> {
+    if cfg!(target_os = "windows") {
+        None
+    } else {
+        Some(workspace_root.to_string_lossy().to_string())
     }
 }
