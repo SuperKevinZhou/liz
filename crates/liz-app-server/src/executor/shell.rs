@@ -10,6 +10,7 @@ use liz_protocol::{
 };
 use std::collections::HashMap;
 use std::io::Read;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -406,8 +407,15 @@ fn helper_path_for_backend(backend: PlatformSandboxBackend) -> RuntimeResult<Str
             ))
         }
     };
-    std::env::var(env_key).map_err(|_| {
-        RuntimeError::invalid_state(error_code, format!("{description} is required in {env_key}"))
+    if let Ok(value) = std::env::var(env_key) {
+        return Ok(value);
+    }
+
+    resolve_default_helper_path(backend).ok_or_else(|| {
+        RuntimeError::invalid_state(
+            error_code,
+            format!("{description} is required in {env_key} or on the default helper search path"),
+        )
     })
 }
 
@@ -451,6 +459,52 @@ fn build_windows_helper_command(
     }
     command_process.arg("--").arg("powershell").arg("-NoProfile").arg("-Command").arg(command);
     command_process
+}
+
+fn resolve_default_helper_path(backend: PlatformSandboxBackend) -> Option<String> {
+    let names = helper_names_for_backend(backend)?;
+    let mut candidates = Vec::new();
+    if let Some(dir) = current_exe_dir() {
+        candidates.extend(helper_candidates_in_dir(&dir, names));
+    }
+    for dir in path_dirs() {
+        candidates.extend(helper_candidates_in_dir(&dir, names));
+    }
+    candidates
+        .into_iter()
+        .find(|candidate| candidate.is_file())
+        .map(|candidate| candidate.to_string_lossy().to_string())
+}
+
+fn helper_names_for_backend(backend: PlatformSandboxBackend) -> Option<&'static [&'static str]> {
+    match backend {
+        PlatformSandboxBackend::LinuxHelper => {
+            Some(&["liz-linux-sandbox", "liz-linux-sandbox-helper"])
+        }
+        PlatformSandboxBackend::WindowsRestrictedToken => Some(&[
+            "liz-windows-restricted-token.exe",
+            "liz-windows-restricted-token.cmd",
+        ]),
+        PlatformSandboxBackend::WindowsSandboxUser => Some(&[
+            "liz-windows-sandbox-user.exe",
+            "liz-windows-sandbox-user.cmd",
+        ]),
+        PlatformSandboxBackend::MacosSeatbelt | PlatformSandboxBackend::None => None,
+    }
+}
+
+fn helper_candidates_in_dir(dir: &Path, names: &'static [&'static str]) -> Vec<PathBuf> {
+    names.iter().map(|name| dir.join(name)).collect()
+}
+
+fn current_exe_dir() -> Option<PathBuf> {
+    std::env::current_exe().ok()?.parent().map(Path::to_path_buf)
+}
+
+fn path_dirs() -> impl Iterator<Item = PathBuf> {
+    std::env::var_os("PATH")
+        .into_iter()
+        .flat_map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
 }
 
 fn build_macos_policy(
@@ -567,10 +621,16 @@ fn wait_for_exit_code(child: &mut Child) -> RuntimeResult<Option<i32>> {
 mod tests {
     use super::{
         build_linux_helper_command, build_macos_policy, build_shell_command,
-        build_windows_helper_command, sandboxed_shell_command, EffectiveSandboxRequest,
+        build_windows_helper_command, helper_path_for_backend, sandboxed_shell_command,
+        EffectiveSandboxRequest,
     };
     use crate::executor::{PlatformSandboxBackend, SandboxConfig, WindowsSandboxBackend};
     use liz_protocol::{SandboxMode, SandboxNetworkAccess, ShellSandboxRequest};
+    use std::ffi::OsString;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::sync::{Mutex, OnceLock};
+    use tempfile::TempDir;
 
     #[test]
     fn direct_modes_use_plain_shell_command() {
@@ -665,5 +725,85 @@ mod tests {
         assert!(arguments.contains(&"powershell".to_owned()));
         assert!(arguments.contains(&"-Command".to_owned()));
         assert!(arguments.contains(&"Write-Output test".to_owned()));
+    }
+
+    #[test]
+    fn helper_path_resolution_falls_back_to_default_search_path() {
+        let _guard = env_lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let backend = if cfg!(target_os = "windows") {
+            PlatformSandboxBackend::WindowsSandboxUser
+        } else if cfg!(target_os = "linux") {
+            PlatformSandboxBackend::LinuxHelper
+        } else {
+            return;
+        };
+        let temp_dir = TempDir::new().expect("temp dir should be created");
+        let helper_name = if cfg!(target_os = "windows") {
+            "liz-windows-sandbox-user.cmd"
+        } else {
+            "liz-linux-sandbox"
+        };
+        let helper_path = temp_dir.path().join(helper_name);
+        fs::write(&helper_path, helper_stub_contents()).expect("helper stub should be written");
+
+        let previous_path = std::env::var_os("PATH");
+        let previous_override = helper_env_var_for_backend(backend).and_then(std::env::var_os);
+        prepend_path(temp_dir.path());
+        if let Some(env_key) = helper_env_var_for_backend(backend) {
+            std::env::remove_var(env_key);
+        }
+
+        let resolved = helper_path_for_backend(backend).expect("default helper path should resolve");
+        assert_eq!(PathBuf::from(resolved), helper_path);
+
+        restore_path(previous_path);
+        if let Some(env_key) = helper_env_var_for_backend(backend) {
+            restore_optional_var(env_key, previous_override);
+        }
+    }
+
+    fn helper_env_var_for_backend(backend: PlatformSandboxBackend) -> Option<&'static str> {
+        match backend {
+            PlatformSandboxBackend::LinuxHelper => Some("LIZ_LINUX_SANDBOX_HELPER"),
+            PlatformSandboxBackend::WindowsRestrictedToken => {
+                Some("LIZ_WINDOWS_RESTRICTED_TOKEN_HELPER")
+            }
+            PlatformSandboxBackend::WindowsSandboxUser => Some("LIZ_WINDOWS_SANDBOX_USER_HELPER"),
+            PlatformSandboxBackend::MacosSeatbelt | PlatformSandboxBackend::None => None,
+        }
+    }
+
+    fn helper_stub_contents() -> &'static str {
+        if cfg!(target_os = "windows") {
+            "@echo off\r\nexit /b 0\r\n"
+        } else {
+            "#!/bin/sh\nexit 0\n"
+        }
+    }
+
+    fn prepend_path(dir: &Path) {
+        let mut values = vec![dir.to_path_buf()];
+        if let Some(path) = std::env::var_os("PATH") {
+            values.extend(std::env::split_paths(&path).collect::<Vec<_>>());
+        }
+        let joined = std::env::join_paths(values).expect("PATH should join");
+        std::env::set_var("PATH", joined);
+    }
+
+    fn restore_path(value: Option<OsString>) {
+        restore_optional_var("PATH", value);
+    }
+
+    fn restore_optional_var(key: &str, value: Option<OsString>) {
+        if let Some(value) = value {
+            std::env::set_var(key, value);
+        } else {
+            std::env::remove_var(key);
+        }
+    }
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
     }
 }

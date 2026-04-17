@@ -1,7 +1,7 @@
 //! Tool-surface coverage for the read-only workspace slice.
 
 use liz_app_server::server::{spawn_loopback_websocket, AppServer};
-use liz_app_server::storage::StoragePaths;
+use liz_app_server::storage::{StoragePaths, StoredArtifact};
 use liz_protocol::requests::{ClientRequest, ClientRequestEnvelope, ThreadStartRequest};
 use liz_protocol::{
     RequestId, ResponsePayload, SandboxBackendKind, SandboxMode, SandboxNetworkAccess,
@@ -11,6 +11,8 @@ use liz_protocol::{
     WorkspaceReadRequest, WorkspaceSearchRequest, WorkspaceWriteTextRequest,
 };
 use std::fs;
+use std::path::Path;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use tempfile::TempDir;
 
@@ -276,6 +278,68 @@ fn shell_exec_returns_output_and_emits_executor_chunks() {
 }
 
 #[test]
+fn shell_exec_surfaces_external_sandbox_mode_in_trace_artifacts() {
+    let temp_dir = TempDir::new().expect("temp dir should be created");
+    let workspace_root = temp_dir.path().join("workspace");
+    fs::create_dir_all(&workspace_root).expect("workspace root should exist");
+
+    let server = AppServer::new(StoragePaths::new(temp_dir.path().join(".liz")));
+    let client = spawn_loopback_websocket(server);
+
+    client
+        .send_request(envelope(
+            "request_23",
+            ClientRequest::ThreadStart(ThreadStartRequest {
+                title: Some("External sandbox".to_owned()),
+                initial_goal: Some("Record externally sandboxed commands".to_owned()),
+                workspace_ref: Some(workspace_root.to_string_lossy().to_string()),
+            }),
+        ))
+        .expect("thread request should be sent");
+    let response = client.recv_response().expect("thread response should arrive");
+    let thread = match response {
+        ServerResponseEnvelope::Success(success) => match success.response {
+            ResponsePayload::ThreadStart(response) => response.thread,
+            other => panic!("unexpected response payload: {other:?}"),
+        },
+        other => panic!("unexpected response envelope: {other:?}"),
+    };
+    client.recv_event_timeout(Duration::from_secs(1)).expect("thread_started event should arrive");
+
+    let shell_response = send_tool(
+        &client,
+        "request_24",
+        ToolInvocation::ShellExec(ShellExecRequest {
+            command: foreground_output_command(),
+            working_dir: shell_working_dir(&workspace_root),
+            sandbox: Some(ShellSandboxRequest {
+                mode: SandboxMode::ExternalSandbox,
+                network_access: SandboxNetworkAccess::Restricted,
+            }),
+        }),
+        &thread.id,
+    );
+    let trace_locator = shell_response
+        .artifact_refs
+        .iter()
+        .find(|artifact| artifact.kind == liz_protocol::ArtifactKind::ToolTrace)
+        .map(|artifact| artifact.locator.clone())
+        .expect("tool trace should be recorded");
+    match shell_response.result {
+        ToolResult::ShellExec(result) => {
+            assert_eq!(result.sandbox.mode, SandboxMode::ExternalSandbox);
+            assert_eq!(result.sandbox.backend, SandboxBackendKind::None);
+        }
+        other => panic!("unexpected shell result: {other:?}"),
+    }
+
+    let trace_body = fs::read_to_string(Path::new(&trace_locator)).expect("trace should exist");
+    let trace_body = read_artifact_body(&trace_body);
+    assert!(trace_body.contains("\"mode\": \"external-sandbox\""), "{trace_body}");
+    assert!(trace_body.contains("\"backend\": \"none\""), "{trace_body}");
+}
+
+#[test]
 fn background_shell_can_spawn_read_and_wait() {
     let temp_dir = TempDir::new().expect("temp dir should be created");
     let workspace_root = temp_dir.path().join("workspace");
@@ -447,6 +511,7 @@ fn shell_exec_fails_closed_when_default_sandbox_backend_is_unavailable() {
     if !cfg!(target_os = "windows") {
         return;
     }
+    let _guard = env_lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
 
     let temp_dir = TempDir::new().expect("temp dir should be created");
     let workspace_root = temp_dir.path().join("workspace");
@@ -550,6 +615,71 @@ fn danger_full_access() -> ShellSandboxRequest {
     }
 }
 
+#[test]
+fn shell_exec_preserves_sandbox_denial_output_in_command_artifacts() {
+    let _guard = env_lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let temp_dir = TempDir::new().expect("temp dir should be created");
+    let workspace_root = temp_dir.path().join("workspace");
+    fs::create_dir_all(&workspace_root).expect("workspace root should exist");
+    let _helper_guard = SandboxHelperGuard::install_denied(temp_dir.path());
+
+    let server = AppServer::new(StoragePaths::new(temp_dir.path().join(".liz")));
+    let client = spawn_loopback_websocket(server);
+
+    client
+        .send_request(envelope(
+            "request_53",
+            ClientRequest::ThreadStart(ThreadStartRequest {
+                title: Some("Sandbox denied".to_owned()),
+                initial_goal: Some("Preserve denied sandbox evidence".to_owned()),
+                workspace_ref: Some(workspace_root.to_string_lossy().to_string()),
+            }),
+        ))
+        .expect("thread request should be sent");
+    let response = client.recv_response().expect("thread response should arrive");
+    let thread = match response {
+        ServerResponseEnvelope::Success(success) => match success.response {
+            ResponsePayload::ThreadStart(response) => response.thread,
+            other => panic!("unexpected response payload: {other:?}"),
+        },
+        other => panic!("unexpected response envelope: {other:?}"),
+    };
+    client.recv_event_timeout(Duration::from_secs(1)).expect("thread_started event should arrive");
+
+    let shell_response = send_tool(
+        &client,
+        "request_54",
+        ToolInvocation::ShellExec(ShellExecRequest {
+            command: foreground_output_command(),
+            working_dir: shell_working_dir(&workspace_root),
+            sandbox: Some(ShellSandboxRequest {
+                mode: SandboxMode::WorkspaceWrite,
+                network_access: SandboxNetworkAccess::Restricted,
+            }),
+        }),
+        &thread.id,
+    );
+    let command_output_locator = shell_response
+        .artifact_refs
+        .iter()
+        .find(|artifact| artifact.kind == liz_protocol::ArtifactKind::CommandOutput)
+        .map(|artifact| artifact.locator.clone())
+        .expect("command output artifact should exist");
+    match shell_response.result {
+        ToolResult::ShellExec(result) => {
+            assert_eq!(result.exit_code, 77, "shell exec result: {result:?}");
+            assert!(result.stderr.contains("sandbox denied"), "shell exec result: {result:?}");
+        }
+        other => panic!("unexpected shell result: {other:?}"),
+    }
+
+    let artifact_body =
+        fs::read_to_string(Path::new(&command_output_locator)).expect("artifact should exist");
+    let artifact_body = read_artifact_body(&artifact_body);
+    assert!(artifact_body.contains("\"mode\": \"workspace-write\""), "{artifact_body}");
+    assert!(artifact_body.contains("sandbox denied"), "{artifact_body}");
+}
+
 fn foreground_output_command() -> String {
     if cfg!(target_os = "windows") {
         "Write-Output 'hello'".to_owned()
@@ -584,4 +714,70 @@ fn shell_working_dir(workspace_root: &std::path::Path) -> Option<String> {
     } else {
         Some(workspace_root.to_string_lossy().to_string())
     }
+}
+
+struct SandboxHelperGuard {
+    key: &'static str,
+    previous: Option<std::ffi::OsString>,
+}
+
+impl SandboxHelperGuard {
+    fn install_denied(root: &Path) -> Option<Self> {
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let helper_path = root.join("linux-denied-sandbox.sh");
+            fs::write(&helper_path, "#!/bin/sh\necho sandbox denied >&2\nexit 77\n")
+                .expect("linux helper should be written");
+            let mut permissions =
+                fs::metadata(&helper_path).expect("linux helper metadata").permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&helper_path, permissions)
+                .expect("linux helper should be executable");
+
+            let previous = std::env::var_os("LIZ_LINUX_SANDBOX_HELPER");
+            std::env::set_var("LIZ_LINUX_SANDBOX_HELPER", &helper_path);
+            return Some(Self { key: "LIZ_LINUX_SANDBOX_HELPER", previous });
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            let helper_path = root.join("windows-denied-sandbox.cmd");
+            fs::write(
+                &helper_path,
+                "@echo off\r\necho sandbox denied 1>&2\r\nexit /b 77\r\n",
+            )
+            .expect("windows helper should be written");
+
+            let previous = std::env::var_os("LIZ_WINDOWS_SANDBOX_USER_HELPER");
+            std::env::set_var("LIZ_WINDOWS_SANDBOX_USER_HELPER", &helper_path);
+            return Some(Self { key: "LIZ_WINDOWS_SANDBOX_USER_HELPER", previous });
+        }
+
+        #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+        {
+            let _ = root;
+            None
+        }
+    }
+}
+
+impl Drop for SandboxHelperGuard {
+    fn drop(&mut self) {
+        if let Some(previous) = self.previous.as_ref() {
+            std::env::set_var(self.key, previous);
+        } else {
+            std::env::remove_var(self.key);
+        }
+    }
+}
+
+fn read_artifact_body(raw: &str) -> String {
+    serde_json::from_str::<StoredArtifact>(raw).expect("artifact should deserialize").body
+}
+
+fn env_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
 }

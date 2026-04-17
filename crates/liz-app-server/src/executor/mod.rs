@@ -6,7 +6,8 @@ mod workspace;
 
 use crate::runtime::RuntimeResult;
 use liz_protocol::{
-    ArtifactKind, ExecutorStream, ToolCallRequest, ToolInvocation, ToolName, ToolResult,
+    ArtifactKind, ExecutorStream, ShellSandboxSummary, ToolCallRequest, ToolInvocation, ToolName,
+    ToolResult,
 };
 pub use sandbox::{
     EffectiveSandboxRequest, LinuxSandboxVariant, PlatformSandboxBackend, SandboxConfig,
@@ -145,8 +146,11 @@ impl ExecutorGateway {
             ToolInvocation::ShellExec(input) => {
                 let execution = self.shell.exec(input)?;
                 let summary = format!(
-                    "Command exited with code {}: {}",
-                    execution.result.exit_code, execution.result.command
+                    "Command exited with code {} under {} via {}: {}",
+                    execution.result.exit_code,
+                    execution.result.sandbox.mode.as_str(),
+                    execution.result.sandbox.backend.as_str(),
+                    execution.result.command
                 );
                 Ok(executed_tool(
                     ToolName::ShellExec,
@@ -163,7 +167,12 @@ impl ExecutorGateway {
             }
             ToolInvocation::ShellSpawn(input) => {
                 let spawned = self.shell.spawn(input)?;
-                let summary = format!("Spawned background shell task {}", spawned.task_id);
+                let summary = format!(
+                    "Spawned background shell task {} under {} via {}",
+                    spawned.task_id,
+                    spawned.sandbox.mode.as_str(),
+                    spawned.sandbox.backend.as_str()
+                );
                 Ok(executed_tool(
                     ToolName::ShellSpawn,
                     summary,
@@ -175,7 +184,12 @@ impl ExecutorGateway {
             }
             ToolInvocation::ShellReadOutput(input) => {
                 let read = self.shell.read_output(input)?;
-                let summary = format!("Read background shell output for {}", read.result.task_id);
+                let summary = format!(
+                    "Read background shell output for {} under {} via {}",
+                    read.result.task_id,
+                    read.result.sandbox.mode.as_str(),
+                    read.result.sandbox.backend.as_str()
+                );
                 Ok(executed_tool(
                     ToolName::ShellReadOutput,
                     summary,
@@ -190,7 +204,12 @@ impl ExecutorGateway {
             }
             ToolInvocation::ShellWait(input) => {
                 let waited = self.shell.wait(input)?;
-                let summary = format!("Waited for background shell task {}", waited.result.task_id);
+                let summary = format!(
+                    "Waited for background shell task {} under {} via {}",
+                    waited.result.task_id,
+                    waited.result.sandbox.mode.as_str(),
+                    waited.result.sandbox.backend.as_str()
+                );
                 Ok(executed_tool(
                     ToolName::ShellWait,
                     summary,
@@ -206,7 +225,12 @@ impl ExecutorGateway {
             }
             ToolInvocation::ShellTerminate(input) => {
                 let terminated = self.shell.terminate(input)?;
-                let summary = format!("Terminated background shell task {}", terminated.task_id);
+                let summary = format!(
+                    "Terminated background shell task {} under {} via {}",
+                    terminated.task_id,
+                    terminated.sandbox.mode.as_str(),
+                    terminated.sandbox.backend.as_str()
+                );
                 Ok(executed_tool(
                     ToolName::ShellTerminate,
                     summary,
@@ -242,6 +266,7 @@ fn executed_tool(
     };
     let trace_body = serde_json::to_string_pretty(&ToolTraceArtifact {
         tool_name: tool_name.as_str().to_owned(),
+        sandbox: tool_result_sandbox_summary(&result).cloned(),
         invocation,
         summary: summary.clone(),
         result: &result,
@@ -274,6 +299,7 @@ fn serialize_snapshot<T: Serialize>(value: &T) -> String {
 #[derive(Debug, Serialize)]
 struct ToolTraceArtifact<'a> {
     tool_name: String,
+    sandbox: Option<ShellSandboxSummary>,
     invocation: &'a ToolInvocation,
     summary: String,
     result: &'a ToolResult,
@@ -308,7 +334,12 @@ fn render_diff(path: &str, before: &str, after: &str) -> String {
 fn command_output_artifact(result: &liz_protocol::ShellExecResult) -> PendingArtifact {
     PendingArtifact {
         kind: ArtifactKind::CommandOutput,
-        summary: format!("Command output for {}", result.command),
+        summary: format!(
+            "Command output for {} under {} via {}",
+            result.command,
+            result.sandbox.mode.as_str(),
+            result.sandbox.backend.as_str()
+        ),
         body: serde_json::to_string_pretty(result).expect("command output should serialize"),
     }
 }
@@ -316,7 +347,27 @@ fn command_output_artifact(result: &liz_protocol::ShellExecResult) -> PendingArt
 fn command_output_artifact_from_wait(result: &liz_protocol::ShellWaitResult) -> PendingArtifact {
     PendingArtifact {
         kind: ArtifactKind::CommandOutput,
-        summary: format!("Command output for {}", result.task_id),
+        summary: format!(
+            "Command output for {} under {} via {}",
+            result.task_id,
+            result.sandbox.mode.as_str(),
+            result.sandbox.backend.as_str()
+        ),
         body: serde_json::to_string_pretty(result).expect("command output should serialize"),
+    }
+}
+
+fn tool_result_sandbox_summary(result: &ToolResult) -> Option<&ShellSandboxSummary> {
+    match result {
+        ToolResult::ShellExec(output) => Some(&output.sandbox),
+        ToolResult::ShellSpawn(output) => Some(&output.sandbox),
+        ToolResult::ShellWait(output) => Some(&output.sandbox),
+        ToolResult::ShellReadOutput(output) => Some(&output.sandbox),
+        ToolResult::ShellTerminate(output) => Some(&output.sandbox),
+        ToolResult::WorkspaceList(_)
+        | ToolResult::WorkspaceSearch(_)
+        | ToolResult::WorkspaceRead(_)
+        | ToolResult::WorkspaceWriteText(_)
+        | ToolResult::WorkspaceApplyPatch(_) => None,
     }
 }
