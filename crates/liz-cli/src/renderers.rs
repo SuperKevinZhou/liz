@@ -16,6 +16,7 @@ const ACCENT: Color = Color::Rgb(120, 166, 255);
 const APPROVAL: Color = Color::Rgb(236, 190, 104);
 const RAIL_SELECTED: Color = Color::Rgb(184, 198, 255);
 const SYSTEM: Color = Color::Rgb(173, 179, 189);
+const COMPOSER_HINT: Color = Color::Rgb(118, 122, 136);
 const HELP_RULE: &str =
     "Esc close  Up/Down switch thread  Tab threads  /help commands  /memory recall";
 const OVERLAY_SHADOW: Color = Color::Rgb(22, 24, 31);
@@ -180,11 +181,11 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
         Text::from(view_model.input_buffer.clone())
     };
     let title = Line::from(vec![
-        Span::styled("Compose", Style::default().fg(BRAND).add_modifier(Modifier::BOLD)),
+        Span::styled("liz >", Style::default().fg(BRAND).add_modifier(Modifier::BOLD)),
         Span::raw("  "),
-        Span::styled("Enter send", Style::default().fg(TEXT_MUTED)),
+        Span::styled("Enter send", Style::default().fg(COMPOSER_HINT)),
         Span::raw("  "),
-        Span::styled("Shift+Enter newline", Style::default().fg(TEXT_MUTED)),
+        Span::styled("Shift+Enter newline", Style::default().fg(COMPOSER_HINT)),
         Span::raw("  "),
         Span::styled(view_model.status_line.as_str(), Style::default().fg(ACCENT)),
     ]);
@@ -242,6 +243,13 @@ fn build_transcript_lines(view_model: &ViewModel) -> Vec<Line<'static>> {
     }
 
     for entry in &view_model.transcript_entries {
+        let label = match entry.kind {
+            TranscriptEntryKind::User => "you",
+            TranscriptEntryKind::Assistant => "liz",
+            TranscriptEntryKind::Tool => "tool",
+            TranscriptEntryKind::Approval => "approval",
+            TranscriptEntryKind::System => "note",
+        };
         let label_style = match entry.kind {
             TranscriptEntryKind::User => Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
             TranscriptEntryKind::Assistant => {
@@ -254,13 +262,13 @@ fn build_transcript_lines(view_model: &ViewModel) -> Vec<Line<'static>> {
             TranscriptEntryKind::System => Style::default().fg(SYSTEM),
         };
         lines.push(Line::from(vec![
-            Span::styled(entry.kind.label(), label_style),
+            Span::styled(label, label_style),
             Span::raw(" "),
             Span::styled("·", Style::default().fg(BORDER_SOFT)),
         ]));
         for body_line in entry.body.lines() {
             lines.push(Line::from(vec![
-                Span::raw("  "),
+                Span::raw("    "),
                 Span::styled(body_line.to_owned(), Style::default().fg(TEXT_PRIMARY)),
             ]));
         }
@@ -274,7 +282,7 @@ fn build_transcript_lines(view_model: &ViewModel) -> Vec<Line<'static>> {
         ]));
         for body_line in streaming.lines() {
             lines.push(Line::from(vec![
-                Span::raw("  "),
+                Span::raw("    "),
                 Span::styled(body_line.to_owned(), Style::default().fg(TEXT_PRIMARY)),
             ]));
         }
