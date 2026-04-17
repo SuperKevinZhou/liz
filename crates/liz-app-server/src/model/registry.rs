@@ -962,6 +962,7 @@ fn openai_compatible_spec(
         "302ai" => Some("https://api.302.ai/v1"),
         "cortecs" => Some("https://api.cortecs.ai/v1"),
         "deepseek" => Some("https://api.deepseek.com"),
+        "groq" => Some("https://api.groq.com/openai/v1"),
         "helicone" => Some("https://ai-gateway.helicone.ai/v1"),
         "io-net" => Some("https://api.intelligence.io.solutions/api/v1"),
         "moonshot" | "moonshotai" => Some("https://api.moonshot.ai/v1"),
