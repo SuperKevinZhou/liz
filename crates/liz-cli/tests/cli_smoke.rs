@@ -6,6 +6,7 @@ use std::process::Command;
 #[test]
 fn cli_binary_prints_workspace_banner() {
     let output = Command::new(env!("CARGO_BIN_EXE_liz-cli"))
+        .arg("--banner")
         .output()
         .expect("cli binary should be executable in smoke tests");
 

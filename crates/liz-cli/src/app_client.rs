@@ -63,12 +63,30 @@ impl WebSocketAppClient {
         self.response_rx.recv().map_err(|_| AppClientError::Disconnected)
     }
 
+    /// Receives the next response from the server when one is already queued.
+    pub fn try_recv_response(&self) -> Result<Option<ServerResponseEnvelope>, AppClientError> {
+        match self.response_rx.try_recv() {
+            Ok(response) => Ok(Some(response)),
+            Err(TryRecvError::Empty) => Ok(None),
+            Err(TryRecvError::Disconnected) => Err(AppClientError::Disconnected),
+        }
+    }
+
     /// Receives the next event from the server, waiting up to the provided timeout.
     pub fn recv_event_timeout(&self, timeout: Duration) -> Result<ServerEvent, AppClientError> {
         self.event_rx.recv_timeout(timeout).map_err(|error| match error {
             RecvTimeoutError::Timeout => AppClientError::TimedOut,
             RecvTimeoutError::Disconnected => AppClientError::Disconnected,
         })
+    }
+
+    /// Receives the next event from the server when one is already queued.
+    pub fn try_recv_event(&self) -> Result<Option<ServerEvent>, AppClientError> {
+        match self.event_rx.try_recv() {
+            Ok(event) => Ok(Some(event)),
+            Err(TryRecvError::Empty) => Ok(None),
+            Err(TryRecvError::Disconnected) => Err(AppClientError::Disconnected),
+        }
     }
 }
 

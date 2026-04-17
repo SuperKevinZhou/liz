@@ -2,6 +2,7 @@
 
 pub mod app_client;
 pub mod renderers;
+pub mod tui;
 pub mod view_model;
 
 /// Returns a short banner that is useful for smoke tests and manual sanity checks.
