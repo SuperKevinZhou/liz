@@ -1,10 +1,13 @@
 //! Event-driven CLI view-model coverage.
 
 use liz_cli::view_model::ViewModel;
-use liz_protocol::events::{ThreadStartedEvent, TurnCancelledEvent, TurnStartedEvent};
+use liz_protocol::events::{
+    MemoryCompilationAppliedEvent, MemoryWakeupLoadedEvent, ThreadStartedEvent,
+    TurnCancelledEvent, TurnStartedEvent,
+};
 use liz_protocol::{
-    EventId, ServerEvent, ServerEventPayload, Thread, ThreadId, ThreadStatus, Timestamp, Turn,
-    TurnId, TurnKind, TurnStatus,
+    EventId, MemoryCompilationSummary, MemoryWakeup, ServerEvent, ServerEventPayload, Thread,
+    ThreadId, ThreadStatus, Timestamp, Turn, TurnId, TurnKind, TurnStatus,
 };
 
 #[test]
@@ -59,12 +62,48 @@ fn view_model_projects_thread_and_turn_events() {
         created_at: Timestamp::new("2026-04-13T20:00:02Z"),
         payload: ServerEventPayload::TurnCancelled(TurnCancelledEvent { turn }),
     });
+    view_model.apply_event(&ServerEvent {
+        event_id: EventId::new("event_04"),
+        thread_id: ThreadId::new("thread_01"),
+        turn_id: None,
+        created_at: Timestamp::new("2026-04-13T20:00:03Z"),
+        payload: ServerEventPayload::MemoryWakeupLoaded(MemoryWakeupLoadedEvent {
+            wakeup: MemoryWakeup {
+                identity_summary: None,
+                active_state: Some("Resume websocket event work".to_owned()),
+                relevant_facts: vec![],
+                open_commitments: vec!["Verify event stream".to_owned()],
+                recent_topics: vec!["websocket".to_owned(), "events".to_owned()],
+                recent_keywords: vec!["resume".to_owned()],
+                citation_fact_ids: vec![],
+                citations: vec![],
+            },
+        }),
+    });
+    view_model.apply_event(&ServerEvent {
+        event_id: EventId::new("event_05"),
+        thread_id: ThreadId::new("thread_01"),
+        turn_id: None,
+        created_at: Timestamp::new("2026-04-13T20:00:04Z"),
+        payload: ServerEventPayload::MemoryCompilationApplied(MemoryCompilationAppliedEvent {
+            compilation: MemoryCompilationSummary {
+                delta_summary: "Compiled websocket wake-up facts".to_owned(),
+                updated_fact_ids: vec![],
+                invalidated_fact_ids: vec![],
+                recent_topics: vec!["websocket".to_owned()],
+                recent_keywords: vec!["events".to_owned()],
+                candidate_procedures: vec![],
+            },
+        }),
+    });
 
     assert_eq!(
         view_model.thread_statuses.get(&ThreadId::new("thread_01")),
         Some(&ThreadStatus::Active)
     );
-    assert_eq!(view_model.transcript_lines.len(), 2);
+    assert_eq!(view_model.transcript_lines.len(), 4);
     assert!(view_model.transcript_lines[0].contains("turn started"));
     assert!(view_model.transcript_lines[1].contains("turn interrupted"));
+    assert!(view_model.transcript_lines[2].contains("wake-up loaded"));
+    assert!(view_model.transcript_lines[3].contains("memory compiled"));
 }

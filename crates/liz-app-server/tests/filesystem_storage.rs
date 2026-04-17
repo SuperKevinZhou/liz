@@ -3,11 +3,12 @@
 use liz_app_server::storage::{
     ArtifactStore, CheckpointStore, FsArtifactStore, FsCheckpointStore, FsGlobalMemoryStore,
     FsThreadStore, FsTurnLog, GlobalMemorySnapshot, GlobalMemoryStore, StoragePaths,
-    StoredArtifact, StoredMemoryFact, ThreadStore, TurnLog, TurnLogEntry,
+    StoredArtifact, StoredMemoryFact, StoredTopicRecord, ThreadStore, TurnLog, TurnLogEntry,
 };
 use liz_protocol::{
-    ArtifactId, ArtifactKind, ArtifactRef, Checkpoint, CheckpointId, CheckpointScope, MemoryFactId,
-    Thread, ThreadId, ThreadStatus, Timestamp, TurnId,
+    ArtifactId, ArtifactKind, ArtifactRef, Checkpoint, CheckpointId, CheckpointScope,
+    MemoryCitationRef, MemoryFactId, MemoryFactKind, MemoryTopicStatus, Thread, ThreadId,
+    ThreadStatus, Timestamp, TurnId,
 };
 use tempfile::TempDir;
 
@@ -18,12 +19,43 @@ fn global_memory_store_round_trips_snapshot() {
     let store = FsGlobalMemoryStore::new(StoragePaths::new(temp_dir.path().join(".liz")));
     let snapshot = GlobalMemorySnapshot {
         identity_summary: Some("User prefers concise implementation notes".to_owned()),
+        active_state_summary: Some("Foreground memory keeps the active thread ready".to_owned()),
         active_thread_ids: vec![ThreadId::new("thread_01")],
+        recent_topics: vec!["memory".to_owned(), "wakeup".to_owned()],
+        recent_keywords: vec!["foreground".to_owned(), "recall".to_owned()],
         facts: vec![StoredMemoryFact {
             id: MemoryFactId::new("fact_01"),
+            kind: MemoryFactKind::Identity,
             subject: "user.preference".to_owned(),
             value: "likes direct answers".to_owned(),
+            keywords: vec!["preference".to_owned(), "direct".to_owned()],
+            related_thread_ids: vec![ThreadId::new("thread_01")],
+            citations: vec![MemoryCitationRef {
+                thread_id: ThreadId::new("thread_01"),
+                turn_id: Some(TurnId::new("turn_01")),
+                artifact_id: None,
+                note: "Preference captured during kickoff".to_owned(),
+            }],
             updated_at: Timestamp::new("2026-04-13T21:00:00Z"),
+            invalidated_at: None,
+            invalidated_by: None,
+        }],
+        topic_index: vec![StoredTopicRecord {
+            name: "memory".to_owned(),
+            aliases: vec!["recall".to_owned()],
+            summary: "Foreground memory work".to_owned(),
+            status: MemoryTopicStatus::Active,
+            last_active_at: Timestamp::new("2026-04-13T21:00:00Z"),
+            related_thread_ids: vec![ThreadId::new("thread_01")],
+            related_artifact_ids: vec![ArtifactId::new("artifact_01")],
+            citation_fact_ids: vec![MemoryFactId::new("fact_01")],
+            recent_keywords: vec!["foreground".to_owned(), "recall".to_owned()],
+            citations: vec![MemoryCitationRef {
+                thread_id: ThreadId::new("thread_01"),
+                turn_id: Some(TurnId::new("turn_01")),
+                artifact_id: Some(ArtifactId::new("artifact_01")),
+                note: "Foreground memory evidence".to_owned(),
+            }],
         }],
     };
 

@@ -1,8 +1,9 @@
 //! Event-driven CLI view model primitives.
 
 use liz_protocol::events::{
-    ApprovalRequestedEvent, ThreadInterruptedEvent, ThreadResumedEvent, ThreadStartedEvent,
-    ThreadUpdatedEvent, TurnCancelledEvent, TurnStartedEvent,
+    ApprovalRequestedEvent, MemoryCompilationAppliedEvent, MemoryWakeupLoadedEvent,
+    ThreadInterruptedEvent, ThreadResumedEvent, ThreadStartedEvent, ThreadUpdatedEvent,
+    TurnCancelledEvent, TurnStartedEvent,
 };
 use liz_protocol::{ApprovalRequest, ServerEvent, ServerEventPayload, ThreadId, ThreadStatus};
 use std::collections::BTreeMap;
@@ -49,6 +50,21 @@ impl ViewModel {
             }
             ServerEventPayload::ApprovalRequested(ApprovalRequestedEvent { approval }) => {
                 self.pending_approvals.push(approval.clone());
+            }
+            ServerEventPayload::MemoryWakeupLoaded(MemoryWakeupLoadedEvent { wakeup }) => {
+                self.transcript_lines.push(format!(
+                    "[{}] wake-up loaded: {}",
+                    event.thread_id,
+                    wakeup.recent_topics.join(", ")
+                ));
+            }
+            ServerEventPayload::MemoryCompilationApplied(MemoryCompilationAppliedEvent {
+                compilation,
+            }) => {
+                self.transcript_lines.push(format!(
+                    "[{}] memory compiled: {}",
+                    event.thread_id, compilation.delta_summary
+                ));
             }
             _ => {}
         }
