@@ -960,6 +960,7 @@ fn openai_compatible_spec(
         "sglang" => Some("http://127.0.0.1:30000/v1"),
         "vercel-ai-gateway" | "vercel" => Some("https://ai-gateway.vercel.sh/v1"),
         "302ai" => Some("https://api.302.ai/v1"),
+        "cohere" => Some("https://api.cohere.com/compatibility/v1"),
         "cortecs" => Some("https://api.cortecs.ai/v1"),
         "deepseek" => Some("https://api.deepseek.com"),
         "groq" => Some("https://api.groq.com/openai/v1"),
