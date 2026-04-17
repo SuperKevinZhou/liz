@@ -19,6 +19,7 @@ impl AwsBedrockAdapter {
         &self,
         provider: &ResolvedProvider,
         request: ModelTurnRequest,
+        simulate: bool,
         sink: &mut dyn FnMut(NormalizedTurnEvent),
     ) -> Result<ModelRunSummary, ModelError> {
         let resolved_model = normalize_bedrock_model_id(&provider.model_id);
@@ -44,34 +45,34 @@ impl AwsBedrockAdapter {
             notes: provider.spec.notes.iter().map(|note| (*note).to_owned()).collect(),
         };
 
-        if should_attempt_live_http(provider) {
-            return execute_live_http(provider, &plan, &region, request, sink);
+        if simulate {
+            sink(NormalizedTurnEvent::AssistantDelta {
+                chunk: format!("Using {}. ", plan.display_name),
+            });
+            sink(NormalizedTurnEvent::AssistantDelta {
+                chunk: format!("Resolved Bedrock model {} in {}.", plan.model_id, region),
+            });
+            sink(NormalizedTurnEvent::ProviderRawEvent {
+                label: format!("request-plan {}", plan.payload_preview),
+            });
+            let usage = UsageDelta {
+                input_tokens: estimate_tokens(&request.prompt),
+                output_tokens: estimate_tokens(&request.prompt) + 10,
+                reasoning_tokens: 0,
+                cache_hit_tokens: 0,
+                cache_write_tokens: 0,
+            };
+            sink(NormalizedTurnEvent::UsageDelta(usage.clone()));
+            let final_message = format!(
+                "{} request prepared for {} using aws-bedrock-converse.",
+                plan.display_name, plan.model_id
+            );
+            sink(NormalizedTurnEvent::AssistantMessage { message: final_message.clone() });
+
+            return Ok(ModelRunSummary { assistant_message: Some(final_message), usage });
         }
 
-        sink(NormalizedTurnEvent::AssistantDelta {
-            chunk: format!("Using {}. ", plan.display_name),
-        });
-        sink(NormalizedTurnEvent::AssistantDelta {
-            chunk: format!("Resolved Bedrock model {} in {}.", plan.model_id, region),
-        });
-        sink(NormalizedTurnEvent::ProviderRawEvent {
-            label: format!("request-plan {}", plan.payload_preview),
-        });
-        let usage = UsageDelta {
-            input_tokens: estimate_tokens(&request.prompt),
-            output_tokens: estimate_tokens(&request.prompt) + 10,
-            reasoning_tokens: 0,
-            cache_hit_tokens: 0,
-            cache_write_tokens: 0,
-        };
-        sink(NormalizedTurnEvent::UsageDelta(usage.clone()));
-        let final_message = format!(
-            "{} request prepared for {} using aws-bedrock-converse.",
-            plan.display_name, plan.model_id
-        );
-        sink(NormalizedTurnEvent::AssistantMessage { message: final_message.clone() });
-
-        Ok(ModelRunSummary { assistant_message: Some(final_message), usage })
+        execute_live_http(provider, &plan, &region, request, sink)
     }
 }
 
@@ -139,20 +140,6 @@ fn execute_live_http(
             cache_write_tokens: 0,
         },
     })
-}
-
-fn should_attempt_live_http(provider: &ResolvedProvider) -> bool {
-    if std::env::var("LIZ_PROVIDER_ENABLE_LIVE").ok().as_deref() != Some("1") {
-        return false;
-    }
-
-    provider.api_key.is_some()
-        || provider.metadata.contains_key("aws.profile")
-        || std::env::var("AWS_ACCESS_KEY_ID").is_ok()
-        || std::env::var("AWS_PROFILE").is_ok()
-        || std::env::var("AWS_WEB_IDENTITY_TOKEN_FILE").is_ok()
-        || std::env::var("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI").is_ok()
-        || std::env::var("AWS_CONTAINER_CREDENTIALS_FULL_URI").is_ok()
 }
 
 fn normalize_bedrock_model_id(model_id: &str) -> String {

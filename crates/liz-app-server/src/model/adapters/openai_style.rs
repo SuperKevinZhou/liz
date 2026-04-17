@@ -23,14 +23,15 @@ impl OpenAiStyleAdapter {
         &self,
         provider: &ResolvedProvider,
         request: ModelTurnRequest,
+        simulate: bool,
         sink: &mut dyn FnMut(NormalizedTurnEvent),
     ) -> Result<ModelRunSummary, ModelError> {
         let plan = self.build_plan(provider, &request)?;
-        if should_attempt_live_http(provider, &plan) {
-            return execute_live_http(provider, &plan, request, sink);
+        if simulate {
+            return simulate_stream(plan, request, sink);
         }
 
-        simulate_stream(plan, request, sink)
+        execute_live_http(provider, &plan, request, sink)
     }
 
     fn build_plan(
@@ -290,7 +291,16 @@ fn execute_live_http(
                     headers,
                 )
             }
-            _ => return simulate_stream(plan.clone(), request, sink),
+            _ => {
+                let operation = match &plan.transport {
+                    InvocationTransport::ProviderOperation { operation, .. } => *operation,
+                    InvocationTransport::HttpJson { .. } => "http-json",
+                };
+                return Err(ModelError::ProviderFailure(format!(
+                    "live provider operation is not implemented for {} ({operation})",
+                    plan.provider_id
+                )));
+            }
         },
     };
 
@@ -392,25 +402,6 @@ fn provider_supports_patching(family: &ModelProviderFamily) -> bool {
 
 fn supports_reasoning_accounting(family: &ModelProviderFamily) -> bool {
     matches!(family, ModelProviderFamily::OpenAiResponses | ModelProviderFamily::GitLabDuo)
-}
-
-fn should_attempt_live_http(provider: &ResolvedProvider, plan: &ProviderInvocationPlan) -> bool {
-    if std::env::var("LIZ_PROVIDER_ENABLE_LIVE").ok().as_deref() != Some("1") {
-        return false;
-    }
-
-    match plan.family {
-        ModelProviderFamily::OpenAiResponses => {
-            provider.api_key.is_some()
-                || provider.metadata.contains_key("openai_codex.refresh_token")
-        }
-        ModelProviderFamily::OpenAiCompatible => {
-            provider.base_url.is_some() || provider.api_key.is_some()
-        }
-        ModelProviderFamily::GitHubCopilot => provider.api_key.is_some(),
-        ModelProviderFamily::GitLabDuo => provider.api_key.is_some() && provider.base_url.is_some(),
-        _ => false,
-    }
 }
 
 fn default_openai_style_headers(

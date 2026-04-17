@@ -13,7 +13,7 @@ use tempfile::TempDir;
 #[test]
 fn websocket_app_client_exchanges_requests_and_events_with_real_server() {
     let temp_dir = TempDir::new().expect("temp dir should be created");
-    let server = AppServer::new(StoragePaths::new(temp_dir.path().join(".liz")));
+    let server = AppServer::new_simulated(StoragePaths::new(temp_dir.path().join(".liz")));
     let handle =
         spawn_websocket_server(server, "127.0.0.1:0").expect("websocket server should bind");
     let client = WebSocketAppClient::connect(&handle.ws_url()).expect("cli client should connect");

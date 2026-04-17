@@ -14,7 +14,7 @@ use tempfile::TempDir;
 #[test]
 fn turn_start_streams_assistant_and_tool_events_before_completion() {
     let temp_dir = TempDir::new().expect("temp dir should be created");
-    let server = AppServer::new(StoragePaths::new(temp_dir.path().join(".liz")));
+    let server = AppServer::new_simulated(StoragePaths::new(temp_dir.path().join(".liz")));
     let client = spawn_loopback_websocket(server);
 
     client
@@ -89,7 +89,7 @@ fn turn_start_streams_assistant_and_tool_events_before_completion() {
 fn turn_start_executes_committed_shell_tool_calls() {
     let temp_dir = TempDir::new().expect("temp dir should be created");
     let _sandbox_helper = SandboxHelperGuard::install(temp_dir.path());
-    let server = AppServer::new(StoragePaths::new(temp_dir.path().join(".liz")));
+    let server = AppServer::new_simulated(StoragePaths::new(temp_dir.path().join(".liz")));
     let client = spawn_loopback_websocket(server);
 
     client

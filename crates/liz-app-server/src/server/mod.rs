@@ -48,12 +48,22 @@ pub struct AppServer {
 impl AppServer {
     /// Creates a new app server rooted at the provided storage paths.
     pub fn new(paths: StoragePaths) -> Self {
+        Self::new_with_model_gateway(paths, ModelGateway::default())
+    }
+
+    /// Creates a new app server rooted at the provided storage paths and explicit model gateway.
+    pub fn new_with_model_gateway(paths: StoragePaths, model_gateway: ModelGateway) -> Self {
         Self {
             runtime: RuntimeCoordinator::new(crate::runtime::RuntimeStores::new(paths)),
             executor: ExecutorGateway::default(),
             event_bus: EventBus::new(),
-            model_gateway: ModelGateway::default(),
+            model_gateway,
         }
+    }
+
+    /// Creates a new app server with simulated provider streaming for isolated tests.
+    pub fn new_simulated(paths: StoragePaths) -> Self {
+        Self::new_with_model_gateway(paths, ModelGateway::simulated())
     }
 
     /// Creates an app server using the default `.liz` storage layout.

@@ -18,6 +18,7 @@ impl AnthropicAdapter {
         &self,
         provider: &ResolvedProvider,
         request: ModelTurnRequest,
+        simulate: bool,
         sink: &mut dyn FnMut(NormalizedTurnEvent),
     ) -> Result<ModelRunSummary, ModelError> {
         let base_url =
@@ -44,34 +45,34 @@ impl AnthropicAdapter {
             notes: provider.spec.notes.iter().map(|note| (*note).to_owned()).collect(),
         };
 
-        if should_attempt_live_http(provider) {
-            return execute_live_http(provider, &plan, request, sink);
+        if simulate {
+            sink(NormalizedTurnEvent::AssistantDelta {
+                chunk: format!("Using {} messages API. ", plan.display_name),
+            });
+            sink(NormalizedTurnEvent::AssistantDelta {
+                chunk: format!("Model {} is ready.", plan.model_id),
+            });
+            sink(NormalizedTurnEvent::ProviderRawEvent {
+                label: format!("request-plan {}", plan.payload_preview),
+            });
+            let usage = UsageDelta {
+                input_tokens: estimate_tokens(&request.prompt),
+                output_tokens: estimate_tokens(&request.prompt) + 10,
+                reasoning_tokens: 4,
+                cache_hit_tokens: 0,
+                cache_write_tokens: 0,
+            };
+            sink(NormalizedTurnEvent::UsageDelta(usage.clone()));
+            let final_message = format!(
+                "{} request prepared for {} using anthropic-messages.",
+                plan.display_name, plan.model_id
+            );
+            sink(NormalizedTurnEvent::AssistantMessage { message: final_message.clone() });
+
+            return Ok(ModelRunSummary { assistant_message: Some(final_message), usage });
         }
 
-        sink(NormalizedTurnEvent::AssistantDelta {
-            chunk: format!("Using {} messages API. ", plan.display_name),
-        });
-        sink(NormalizedTurnEvent::AssistantDelta {
-            chunk: format!("Model {} is ready.", plan.model_id),
-        });
-        sink(NormalizedTurnEvent::ProviderRawEvent {
-            label: format!("request-plan {}", plan.payload_preview),
-        });
-        let usage = UsageDelta {
-            input_tokens: estimate_tokens(&request.prompt),
-            output_tokens: estimate_tokens(&request.prompt) + 10,
-            reasoning_tokens: 4,
-            cache_hit_tokens: 0,
-            cache_write_tokens: 0,
-        };
-        sink(NormalizedTurnEvent::UsageDelta(usage.clone()));
-        let final_message = format!(
-            "{} request prepared for {} using anthropic-messages.",
-            plan.display_name, plan.model_id
-        );
-        sink(NormalizedTurnEvent::AssistantMessage { message: final_message.clone() });
-
-        Ok(ModelRunSummary { assistant_message: Some(final_message), usage })
+        execute_live_http(provider, &plan, request, sink)
     }
 }
 
@@ -158,11 +159,6 @@ fn execute_live_http(
             cache_write_tokens: 0,
         },
     })
-}
-
-fn should_attempt_live_http(provider: &ResolvedProvider) -> bool {
-    std::env::var("LIZ_PROVIDER_ENABLE_LIVE").ok().as_deref() == Some("1")
-        && provider.api_key.is_some()
 }
 
 fn trim_trailing_slash(value: &str) -> &str {

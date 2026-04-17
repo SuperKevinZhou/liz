@@ -17,7 +17,7 @@ use tungstenite::{client, Message, WebSocket};
 #[test]
 fn websocket_server_streams_lifecycle_events_without_polling() {
     let temp_dir = TempDir::new().expect("temp dir should be created");
-    let server = AppServer::new(StoragePaths::new(temp_dir.path().join(".liz")));
+    let server = AppServer::new_simulated(StoragePaths::new(temp_dir.path().join(".liz")));
     let handle =
         spawn_websocket_server(server, "127.0.0.1:0").expect("websocket server should bind");
     let mut client =

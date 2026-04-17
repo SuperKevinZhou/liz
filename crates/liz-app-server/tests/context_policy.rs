@@ -89,7 +89,7 @@ fn context_assembly_surfaces_recent_conversation_wakeup_and_executor_boundary() 
 #[test]
 fn risky_turn_stops_for_checkpoint_and_approval_then_resumes_after_approval() {
     let temp_dir = TempDir::new().expect("temp dir should be created");
-    let server = AppServer::new(StoragePaths::new(temp_dir.path().join(".liz")));
+    let server = AppServer::new_simulated(StoragePaths::new(temp_dir.path().join(".liz")));
     let client = spawn_loopback_websocket(server);
 
     client

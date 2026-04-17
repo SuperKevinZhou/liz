@@ -59,6 +59,7 @@ impl Error for ModelError {}
 #[derive(Debug, Clone)]
 pub struct ModelGateway {
     config: ModelGatewayConfig,
+    simulate: bool,
     registry: ProviderRegistry,
     anthropic: AnthropicAdapter,
     bedrock: AwsBedrockAdapter,
@@ -77,12 +78,18 @@ impl ModelGateway {
     pub fn from_config(config: ModelGatewayConfig) -> Self {
         Self {
             config,
+            simulate: false,
             registry: ProviderRegistry::default(),
             anthropic: AnthropicAdapter::default(),
             bedrock: AwsBedrockAdapter::default(),
             google: GoogleAdapter::default(),
             openai_style: OpenAiStyleAdapter::default(),
         }
+    }
+
+    /// Creates a gateway that simulates provider streaming for isolated tests.
+    pub fn simulated() -> Self {
+        Self::default().with_simulation(true)
     }
 
     /// Returns the configured primary provider identifier.
@@ -124,6 +131,12 @@ impl ModelGateway {
         self
     }
 
+    /// Forces the gateway to simulate provider streaming instead of making live calls.
+    pub fn with_simulation(mut self, simulate: bool) -> Self {
+        self.simulate = simulate;
+        self
+    }
+
     /// Returns the capability matrix for the currently selected primary provider.
     pub fn primary_capabilities(&self) -> &ModelCapabilities {
         self.registry
@@ -154,21 +167,21 @@ impl ModelGateway {
         let provider = self.resolve_primary_provider()?;
         match provider.spec.family {
             ModelProviderFamily::AnthropicMessages => {
-                self.anthropic.stream_turn(&provider, request, &mut sink)
+                self.anthropic.stream_turn(&provider, request, self.simulate, &mut sink)
             }
             ModelProviderFamily::AwsBedrockConverse => {
-                self.bedrock.stream_turn(&provider, request, &mut sink)
+                self.bedrock.stream_turn(&provider, request, self.simulate, &mut sink)
             }
             ModelProviderFamily::GoogleGenerativeAi
             | ModelProviderFamily::GoogleVertex
             | ModelProviderFamily::GoogleVertexAnthropic => {
-                self.google.stream_turn(&provider, request, &mut sink)
+                self.google.stream_turn(&provider, request, self.simulate, &mut sink)
             }
             ModelProviderFamily::OpenAiResponses
             | ModelProviderFamily::OpenAiCompatible
             | ModelProviderFamily::GitHubCopilot
             | ModelProviderFamily::GitLabDuo => {
-                self.openai_style.stream_turn(&provider, request, &mut sink)
+                self.openai_style.stream_turn(&provider, request, self.simulate, &mut sink)
             }
         }
     }

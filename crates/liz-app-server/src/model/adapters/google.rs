@@ -19,6 +19,7 @@ impl GoogleAdapter {
         &self,
         provider: &ResolvedProvider,
         request: ModelTurnRequest,
+        simulate: bool,
         sink: &mut dyn FnMut(NormalizedTurnEvent),
     ) -> Result<ModelRunSummary, ModelError> {
         let transport = match provider.spec.family {
@@ -58,42 +59,42 @@ impl GoogleAdapter {
             notes: provider.spec.notes.iter().map(|note| (*note).to_owned()).collect(),
         };
 
-        if should_attempt_live_http(provider) {
-            return execute_live_http(provider, &plan, request, sink);
+        if simulate {
+            let location_hint = provider
+                .metadata
+                .get("google.location")
+                .cloned()
+                .unwrap_or_else(|| "default-location".to_owned());
+
+            sink(NormalizedTurnEvent::AssistantDelta {
+                chunk: format!("Using {}. ", plan.display_name),
+            });
+            sink(NormalizedTurnEvent::AssistantDelta {
+                chunk: format!("Routing model {} in {}.", plan.model_id, location_hint),
+            });
+            sink(NormalizedTurnEvent::ProviderRawEvent {
+                label: format!("request-plan {}", plan.payload_preview),
+            });
+            let usage = UsageDelta {
+                input_tokens: estimate_tokens(&request.prompt),
+                output_tokens: estimate_tokens(&request.prompt) + 9,
+                reasoning_tokens: 0,
+                cache_hit_tokens: 0,
+                cache_write_tokens: 0,
+            };
+            sink(NormalizedTurnEvent::UsageDelta(usage.clone()));
+            let final_message = format!(
+                "{} request prepared for {} using {}.",
+                plan.display_name,
+                plan.model_id,
+                plan.family.transport_label()
+            );
+            sink(NormalizedTurnEvent::AssistantMessage { message: final_message.clone() });
+
+            return Ok(ModelRunSummary { assistant_message: Some(final_message), usage });
         }
 
-        let location_hint = provider
-            .metadata
-            .get("google.location")
-            .cloned()
-            .unwrap_or_else(|| "default-location".to_owned());
-
-        sink(NormalizedTurnEvent::AssistantDelta {
-            chunk: format!("Using {}. ", plan.display_name),
-        });
-        sink(NormalizedTurnEvent::AssistantDelta {
-            chunk: format!("Routing model {} in {}.", plan.model_id, location_hint),
-        });
-        sink(NormalizedTurnEvent::ProviderRawEvent {
-            label: format!("request-plan {}", plan.payload_preview),
-        });
-        let usage = UsageDelta {
-            input_tokens: estimate_tokens(&request.prompt),
-            output_tokens: estimate_tokens(&request.prompt) + 9,
-            reasoning_tokens: 0,
-            cache_hit_tokens: 0,
-            cache_write_tokens: 0,
-        };
-        sink(NormalizedTurnEvent::UsageDelta(usage.clone()));
-        let final_message = format!(
-            "{} request prepared for {} using {}.",
-            plan.display_name,
-            plan.model_id,
-            plan.family.transport_label()
-        );
-        sink(NormalizedTurnEvent::AssistantMessage { message: final_message.clone() });
-
-        Ok(ModelRunSummary { assistant_message: Some(final_message), usage })
+        execute_live_http(provider, &plan, request, sink)
     }
 }
 
@@ -165,7 +166,13 @@ fn execute_live_http(
                 headers,
             )
         }
-        _ => return simulate_only(plan, request, sink),
+        _ => {
+            return Err(ModelError::ProviderFailure(format!(
+                "live Google transport {} is not implemented for {}",
+                plan.family.transport_label(),
+                plan.provider_id
+            )))
+        }
     };
 
     let response = post_json(&build_client()?, &url, &headers, &body)?;
@@ -186,52 +193,6 @@ fn execute_live_http(
             cache_write_tokens: 0,
         },
     })
-}
-
-fn simulate_only(
-    plan: &ProviderInvocationPlan,
-    request: ModelTurnRequest,
-    sink: &mut dyn FnMut(NormalizedTurnEvent),
-) -> Result<ModelRunSummary, ModelError> {
-    let location_hint = "default-location";
-    sink(NormalizedTurnEvent::AssistantDelta { chunk: format!("Using {}. ", plan.display_name) });
-    sink(NormalizedTurnEvent::AssistantDelta {
-        chunk: format!("Routing model {} in {}.", plan.model_id, location_hint),
-    });
-    sink(NormalizedTurnEvent::ProviderRawEvent {
-        label: format!("request-plan {}", plan.payload_preview),
-    });
-    let usage = UsageDelta {
-        input_tokens: estimate_tokens(&request.prompt),
-        output_tokens: estimate_tokens(&request.prompt) + 9,
-        reasoning_tokens: 0,
-        cache_hit_tokens: 0,
-        cache_write_tokens: 0,
-    };
-    sink(NormalizedTurnEvent::UsageDelta(usage.clone()));
-    let final_message = format!(
-        "{} request prepared for {} using {}.",
-        plan.display_name,
-        plan.model_id,
-        plan.family.transport_label()
-    );
-    sink(NormalizedTurnEvent::AssistantMessage { message: final_message.clone() });
-
-    Ok(ModelRunSummary { assistant_message: Some(final_message), usage })
-}
-
-fn should_attempt_live_http(provider: &ResolvedProvider) -> bool {
-    if std::env::var("LIZ_PROVIDER_ENABLE_LIVE").ok().as_deref() != Some("1") {
-        return false;
-    }
-
-    match provider.spec.family {
-        ModelProviderFamily::GoogleGenerativeAi => provider.api_key.is_some(),
-        ModelProviderFamily::GoogleVertex | ModelProviderFamily::GoogleVertexAnthropic => {
-            provider.api_key.is_some() || provider.metadata.contains_key("google.project")
-        }
-        _ => false,
-    }
 }
 
 fn trim_trailing_slash(value: &str) -> &str {
