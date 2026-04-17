@@ -76,6 +76,9 @@ pub enum ClientRequest {
     /// Resumes an existing thread.
     #[serde(rename = "thread/resume")]
     ThreadResume(ThreadResumeRequest),
+    /// Lists persisted threads for thread-picker style clients.
+    #[serde(rename = "thread/list")]
+    ThreadList(ThreadListRequest),
     /// Forks an existing thread into a new line of work.
     #[serde(rename = "thread/fork")]
     ThreadFork(ThreadForkRequest),
@@ -262,6 +265,15 @@ pub struct ThreadStartRequest {
 pub struct ThreadResumeRequest {
     /// The identifier of the thread to resume.
     pub thread_id: ThreadId,
+}
+
+/// Lists persisted threads.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThreadListRequest {
+    /// Optional status filter for the returned threads.
+    pub status: Option<crate::thread::ThreadStatus>,
+    /// Optional result limit.
+    pub limit: Option<usize>,
 }
 
 /// Forks an existing thread.

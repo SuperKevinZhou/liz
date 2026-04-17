@@ -24,8 +24,8 @@ use liz_protocol::requests::{
     MemoryOpenSessionRequest, MemoryReadWakeupRequest, MemorySearchRequest,
     MiniMaxOAuthPollRequest, MiniMaxOAuthStartRequest, OpenAiCodexOAuthCompleteRequest,
     OpenAiCodexOAuthStartRequest, ProviderAuthDeleteRequest, ProviderAuthListRequest,
-    ProviderAuthUpsertRequest, ThreadForkRequest, ThreadResumeRequest, ThreadStartRequest,
-    TurnCancelRequest, TurnStartRequest,
+    ProviderAuthUpsertRequest, ThreadForkRequest, ThreadListRequest, ThreadResumeRequest,
+    ThreadStartRequest, TurnCancelRequest, TurnStartRequest,
 };
 use liz_protocol::responses::{
     ApprovalRespondResponse, GitHubCopilotDevicePollResponse, GitHubCopilotDeviceStartResponse,
@@ -34,8 +34,8 @@ use liz_protocol::responses::{
     MemoryOpenSessionResponse, MemoryReadWakeupResponse, MemorySearchResponse,
     MiniMaxOAuthPollResponse, MiniMaxOAuthStartResponse, OpenAiCodexOAuthCompleteResponse,
     OpenAiCodexOAuthStartResponse, ProviderAuthDeleteResponse, ProviderAuthListResponse,
-    ProviderAuthUpsertResponse, ThreadForkResponse, ThreadResumeResponse, ThreadStartResponse,
-    TurnCancelResponse, TurnStartResponse,
+    ProviderAuthUpsertResponse, ThreadForkResponse, ThreadListResponse, ThreadResumeResponse,
+    ThreadStartResponse, TurnCancelResponse, TurnStartResponse,
 };
 use liz_protocol::{
     ApprovalDecision, ApprovalRequest, ApprovalStatus, ArtifactKind, ArtifactRef, Checkpoint,
@@ -476,6 +476,19 @@ impl RuntimeCoordinator {
         let thread = self.thread_manager.resume_thread(&self.stores, request)?;
         let resume_summary = Some(self.build_resume_summary(&thread));
         Ok(ThreadResumeResponse { thread, resume_summary })
+    }
+
+    /// Lists persisted threads for picker-style client surfaces.
+    pub fn list_threads(&self, request: ThreadListRequest) -> RuntimeResult<ThreadListResponse> {
+        let mut threads = self.stores.list_threads()?;
+        if let Some(status) = request.status {
+            threads.retain(|thread| thread.status == status);
+        }
+        threads.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+        if let Some(limit) = request.limit {
+            threads.truncate(limit);
+        }
+        Ok(ThreadListResponse { threads })
     }
 
     /// Reads the current foreground memory wake-up for a thread.

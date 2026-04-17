@@ -107,6 +107,9 @@ pub enum ResponsePayload {
     /// Acknowledges `thread/resume`.
     #[serde(rename = "thread/resume")]
     ThreadResume(ThreadResumeResponse),
+    /// Acknowledges `thread/list`.
+    #[serde(rename = "thread/list")]
+    ThreadList(ThreadListResponse),
     /// Acknowledges `thread/fork`.
     #[serde(rename = "thread/fork")]
     ThreadFork(ThreadForkResponse),
@@ -251,6 +254,13 @@ pub struct ThreadResumeResponse {
     pub thread: Thread,
     /// The concise resume summary for the thread.
     pub resume_summary: Option<ResumeSummary>,
+}
+
+/// The response payload for `thread/list`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThreadListResponse {
+    /// Threads ordered for client-side picking surfaces.
+    pub threads: Vec<Thread>,
 }
 
 /// The response payload for `thread/fork`.

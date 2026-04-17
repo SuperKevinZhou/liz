@@ -4,9 +4,11 @@ use liz_app_server::server::AppServer;
 use liz_app_server::storage::StoragePaths;
 use liz_protocol::requests::{
     ClientRequest, ClientRequestEnvelope, MemoryCompileNowRequest, MemoryReadWakeupRequest,
-    ThreadStartRequest,
+    ThreadListRequest, ThreadStartRequest,
 };
-use liz_protocol::{RequestId, ResponsePayload, ServerEventPayload, ServerResponseEnvelope};
+use liz_protocol::{
+    RequestId, ResponsePayload, ServerEventPayload, ServerResponseEnvelope, ThreadStatus,
+};
 use std::time::Duration;
 use tempfile::TempDir;
 
@@ -65,6 +67,56 @@ fn memory_requests_emit_wakeup_and_compilation_events() {
         .recv_timeout(Duration::from_secs(1))
         .expect("memory_compilation_applied event should arrive");
     assert!(matches!(compilation_event.payload, ServerEventPayload::MemoryCompilationApplied(_)));
+}
+
+#[test]
+fn thread_list_request_returns_threads_without_emitting_events() {
+    let temp_dir = TempDir::new().expect("temp dir should be created");
+    let mut server = AppServer::new(StoragePaths::new(temp_dir.path().join(".liz")));
+    let events = server.subscribe_events();
+
+    for (request_id, title) in [("req_thread_1", "First thread"), ("req_thread_2", "Second thread")] {
+        let response = server.handle_request(envelope(
+            request_id,
+            ClientRequest::ThreadStart(ThreadStartRequest {
+                title: Some(title.to_owned()),
+                initial_goal: Some("Populate thread list".to_owned()),
+                workspace_ref: None,
+            }),
+        ));
+        assert!(matches!(
+            response,
+            ServerResponseEnvelope::Success(success)
+                if matches!(success.response, ResponsePayload::ThreadStart(_))
+        ));
+        let _ = events.recv_timeout(Duration::from_secs(1)).expect("thread_started event should arrive");
+    }
+
+    let response = server.handle_request(envelope(
+        "req_list_threads",
+        ClientRequest::ThreadList(ThreadListRequest {
+            status: Some(ThreadStatus::Active),
+            limit: Some(8),
+        }),
+    ));
+
+    match response {
+        ServerResponseEnvelope::Success(success) => match success.response {
+            ResponsePayload::ThreadList(response) => {
+                assert_eq!(response.threads.len(), 2);
+                assert_eq!(response.threads[0].title, "Second thread");
+                assert_eq!(response.threads[1].title, "First thread");
+                assert!(response.threads.iter().all(|thread| thread.status == ThreadStatus::Active));
+            }
+            other => panic!("unexpected thread list response: {other:?}"),
+        },
+        other => panic!("unexpected thread list envelope: {other:?}"),
+    }
+
+    assert!(
+        events.recv_timeout(Duration::from_millis(150)).is_err(),
+        "thread list should not publish any additional events"
+    );
 }
 
 fn envelope(request_id: &str, request: ClientRequest) -> ClientRequestEnvelope {

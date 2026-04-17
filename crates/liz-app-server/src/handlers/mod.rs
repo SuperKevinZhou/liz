@@ -101,6 +101,9 @@ pub fn handle_request(
             }
             (ResponsePayload::ThreadResume(response), events)
         }),
+        ClientRequest::ThreadList(request) => {
+            runtime.list_threads(request).map(|response| (ResponsePayload::ThreadList(response), Vec::new()))
+        }
         ClientRequest::ThreadFork(request) => runtime.fork_thread(request).map(|response| {
             let thread = response.thread.clone();
             (
