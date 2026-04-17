@@ -7,7 +7,7 @@ use crate::model::gateway::{ModelError, ModelRunSummary, ModelTurnRequest};
 use crate::model::http::{build_client, post_json};
 use crate::model::invocation::{InvocationTransport, ProviderInvocationPlan};
 use crate::model::normalized_stream::{NormalizedTurnEvent, UsageDelta};
-use crate::model::OutputBudget;
+use crate::model::{OutputBudget, PromptCachePolicy};
 use serde_json::json;
 
 /// Google-family adapter for direct Gemini and Vertex providers.
@@ -109,6 +109,7 @@ fn execute_live_http(
 ) -> Result<ModelRunSummary, ModelError> {
     let instruction_prompt = request.instruction_prompt();
     let output_budget = OutputBudget::for_provider(provider);
+    let prompt_cache = PromptCachePolicy::for_provider(provider);
     let (url, body, headers) = match plan.family {
         ModelProviderFamily::GoogleGenerativeAi => {
             let api_key = provider.api_key.clone().ok_or_else(|| {
@@ -120,6 +121,14 @@ fn execute_live_http(
                 .base_url
                 .clone()
                 .unwrap_or_else(|| "https://generativelanguage.googleapis.com".to_owned());
+            let mut body = json!({
+                "system_instruction": {"parts": [{"text": instruction_prompt}]},
+                "contents": [{"role": "user", "parts": [{"text": request.user_prompt}]}],
+                "generationConfig": {"maxOutputTokens": output_budget.max_output_tokens},
+            });
+            if let Some(cached_content) = prompt_cache.cached_content.clone() {
+                body["cachedContent"] = json!(cached_content);
+            }
             (
                 format!(
                     "{}/v1beta/models/{}:generateContent?key={}",
@@ -127,11 +136,7 @@ fn execute_live_http(
                     provider.model_id,
                     api_key
                 ),
-                json!({
-                    "system_instruction": {"parts": [{"text": instruction_prompt}]},
-                    "contents": [{"role": "user", "parts": [{"text": request.user_prompt}]}],
-                    "generationConfig": {"maxOutputTokens": output_budget.max_output_tokens},
-                }),
+                body,
                 provider.headers.clone(),
             )
         }
@@ -142,16 +147,20 @@ fn execute_live_http(
             let bearer = google_vertex_runtime_bearer(provider)?;
             let mut headers = provider.headers.clone();
             headers.entry("Authorization".to_owned()).or_insert_with(|| format!("Bearer {bearer}"));
+            let mut body = json!({
+                "system_instruction": {"parts": [{"text": instruction_prompt}]},
+                "contents": [{"role": "user", "parts": [{"text": request.user_prompt}]}],
+                "generationConfig": {"maxOutputTokens": output_budget.max_output_tokens},
+            });
+            if let Some(cached_content) = prompt_cache.cached_content.clone() {
+                body["cachedContent"] = json!(cached_content);
+            }
             (
                 format!(
                     "{host}/v1/projects/{project}/locations/{location}/publishers/google/models/{}:generateContent",
                     provider.model_id
                 ),
-                json!({
-                    "system_instruction": {"parts": [{"text": instruction_prompt}]},
-                    "contents": [{"role": "user", "parts": [{"text": request.user_prompt}]}],
-                    "generationConfig": {"maxOutputTokens": output_budget.max_output_tokens},
-                }),
+                body,
                 headers,
             )
         }
@@ -195,13 +204,7 @@ fn execute_live_http(
 
     Ok(ModelRunSummary {
         assistant_message: Some(assistant_message),
-        usage: UsageDelta {
-            input_tokens: estimate_tokens(&request.prompt),
-            output_tokens: estimate_tokens(&plan.model_id),
-            reasoning_tokens: 0,
-            cache_hit_tokens: 0,
-            cache_write_tokens: 0,
-        },
+        usage: extract_google_usage(plan, &request, &response),
     })
 }
 
@@ -231,6 +234,49 @@ fn extract_google_text(plan: &ProviderInvocationPlan, response: &serde_json::Val
             .and_then(|value| value.as_str())
             .map(str::to_owned)
             .unwrap_or_else(|| format!("{} response received.", plan.display_name)),
+    }
+}
+
+fn extract_google_usage(
+    plan: &ProviderInvocationPlan,
+    request: &ModelTurnRequest,
+    response: &serde_json::Value,
+) -> UsageDelta {
+    match plan.family {
+        ModelProviderFamily::GoogleVertexAnthropic => UsageDelta {
+            input_tokens: estimate_tokens(&request.prompt),
+            output_tokens: estimate_tokens(&plan.model_id),
+            reasoning_tokens: 0,
+            cache_hit_tokens: 0,
+            cache_write_tokens: 0,
+        },
+        _ => {
+            let prompt_tokens = response
+                .get("usageMetadata")
+                .and_then(|value| value.get("promptTokenCount"))
+                .and_then(|value| value.as_u64())
+                .and_then(|value| u32::try_from(value).ok())
+                .unwrap_or_else(|| estimate_tokens(&request.prompt));
+            let output_tokens = response
+                .get("usageMetadata")
+                .and_then(|value| value.get("candidatesTokenCount"))
+                .and_then(|value| value.as_u64())
+                .and_then(|value| u32::try_from(value).ok())
+                .unwrap_or_else(|| estimate_tokens(&plan.model_id));
+            let cache_hit_tokens = response
+                .get("usageMetadata")
+                .and_then(|value| value.get("cachedContentTokenCount"))
+                .and_then(|value| value.as_u64())
+                .and_then(|value| u32::try_from(value).ok())
+                .unwrap_or(0);
+            UsageDelta {
+                input_tokens: prompt_tokens.saturating_sub(cache_hit_tokens),
+                output_tokens,
+                reasoning_tokens: 0,
+                cache_hit_tokens,
+                cache_write_tokens: 0,
+            }
+        }
     }
 }
 

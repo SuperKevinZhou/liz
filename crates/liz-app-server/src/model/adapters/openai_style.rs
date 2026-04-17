@@ -11,7 +11,7 @@ use crate::model::gateway::{ModelError, ModelRunSummary, ModelTurnRequest};
 use crate::model::http::{build_client, post_json};
 use crate::model::invocation::{InvocationTransport, ProviderInvocationPlan};
 use crate::model::normalized_stream::{NormalizedTurnEvent, UsageDelta};
-use crate::model::OutputBudget;
+use crate::model::{OutputBudget, PromptCachePolicy};
 use serde_json::json;
 
 /// Provider-family adapter for OpenAI-style runtimes.
@@ -160,9 +160,10 @@ fn execute_live_http(
 ) -> Result<ModelRunSummary, ModelError> {
     let instruction_prompt = request.instruction_prompt();
     let output_budget = OutputBudget::for_provider(provider);
+    let prompt_cache = PromptCachePolicy::for_provider(provider);
     let (url, body, headers) = match &plan.transport {
         InvocationTransport::HttpJson { base_url, path, .. } => {
-            let body = match plan.family {
+            let mut body = match plan.family {
                 ModelProviderFamily::OpenAiResponses => json!({
                     "model": provider.model_id,
                     "instructions": instruction_prompt,
@@ -180,6 +181,12 @@ fn execute_live_http(
                     "stream": false,
                 }),
             };
+            if let Some(cache_retention) = prompt_cache.openai_cache_retention.clone() {
+                body["prompt_cache_retention"] = json!(cache_retention);
+            }
+            if let Some(prompt_cache_key) = prompt_cache.openai_prompt_cache_key.clone() {
+                body["prompt_cache_key"] = json!(prompt_cache_key);
+            }
             (
                 format!("{}{}", trim_trailing_slash(base_url), path),
                 body,
@@ -336,13 +343,7 @@ fn execute_live_http(
 
     Ok(ModelRunSummary {
         assistant_message: Some(assistant_message),
-        usage: UsageDelta {
-            input_tokens: estimate_tokens(&request.prompt),
-            output_tokens: estimate_tokens(&plan.model_id),
-            reasoning_tokens: 0,
-            cache_hit_tokens: 0,
-            cache_write_tokens: 0,
-        },
+        usage: extract_openai_style_usage(&request, plan, &response),
     })
 }
 
@@ -533,6 +534,52 @@ fn extract_openai_style_text(response: &serde_json::Value) -> Option<String> {
                 })
         })
         .or_else(|| response.as_str().map(str::to_owned))
+}
+
+fn extract_openai_style_usage(
+    request: &ModelTurnRequest,
+    plan: &ProviderInvocationPlan,
+    response: &serde_json::Value,
+) -> UsageDelta {
+    let usage = response.get("usage");
+    let input_tokens = usage
+        .and_then(|value| value.get("input_tokens").or_else(|| value.get("prompt_tokens")))
+        .and_then(|value| value.as_u64())
+        .and_then(|value| u32::try_from(value).ok())
+        .unwrap_or_else(|| estimate_tokens(&request.prompt));
+    let output_tokens = usage
+        .and_then(|value| value.get("output_tokens").or_else(|| value.get("completion_tokens")))
+        .and_then(|value| value.as_u64())
+        .and_then(|value| u32::try_from(value).ok())
+        .unwrap_or_else(|| estimate_tokens(&plan.model_id));
+    let reasoning_tokens = usage
+        .and_then(|value| value.get("output_tokens_details"))
+        .and_then(|value| value.get("reasoning_tokens"))
+        .and_then(|value| value.as_u64())
+        .and_then(|value| u32::try_from(value).ok())
+        .unwrap_or(0);
+    let cache_hit_tokens = usage
+        .and_then(|value| value.get("input_tokens_details"))
+        .and_then(|value| {
+            value.get("cached_tokens").or_else(|| value.get("cache_read_input_tokens"))
+        })
+        .and_then(|value| value.as_u64())
+        .and_then(|value| u32::try_from(value).ok())
+        .unwrap_or(0);
+    let cache_write_tokens = usage
+        .and_then(|value| value.get("input_tokens_details"))
+        .and_then(|value| value.get("cache_creation_input_tokens"))
+        .and_then(|value| value.as_u64())
+        .and_then(|value| u32::try_from(value).ok())
+        .unwrap_or(0);
+
+    UsageDelta {
+        input_tokens,
+        output_tokens,
+        reasoning_tokens,
+        cache_hit_tokens,
+        cache_write_tokens,
+    }
 }
 
 fn trim_trailing_slash(value: &str) -> &str {

@@ -202,6 +202,54 @@ fn cohere_live_request_uses_cohere_compatibility_base_url_by_default() {
 }
 
 #[test]
+fn openai_responses_prompt_cache_settings_map_to_request_and_usage() {
+    let _guard = env_lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");
+
+    let capture = Arc::new(Mutex::new(String::new()));
+    let base_url = format!(
+        "{}/v1",
+        spawn_json_server(
+            capture.clone(),
+            r#"{"output":[{"content":[{"text":"cached openai response"}]}],"usage":{"input_tokens":120,"output_tokens":24,"output_tokens_details":{"reasoning_tokens":7},"input_tokens_details":{"cached_tokens":80,"cache_creation_input_tokens":40}}}"#,
+        )
+    );
+
+    let mut overrides = BTreeMap::new();
+    overrides.insert(
+        "openai".to_owned(),
+        ProviderOverride {
+            base_url: Some(base_url),
+            api_key: Some("openai-cache-key".to_owned()),
+            model_id: Some("gpt-5.4".to_owned()),
+            headers: BTreeMap::new(),
+            metadata: BTreeMap::from([
+                (String::from("prompt_cache.retention"), String::from("ephemeral")),
+                (String::from("prompt_cache.key"), String::from("liz-stable-system")),
+            ]),
+        },
+    );
+
+    let gateway = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "openai".to_owned(),
+        overrides,
+    });
+    let summary = gateway.run_turn(demo_request(), |_| {}).expect("openai request should succeed");
+
+    let request = capture.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+    assert!(request.contains("POST /v1/responses HTTP/1.1"));
+    assert!(request.contains(r#""prompt_cache_retention":"ephemeral""#));
+    assert!(request.contains(r#""prompt_cache_key":"liz-stable-system""#));
+    assert_eq!(summary.usage.input_tokens, 120);
+    assert_eq!(summary.usage.output_tokens, 24);
+    assert_eq!(summary.usage.reasoning_tokens, 7);
+    assert_eq!(summary.usage.cache_hit_tokens, 80);
+    assert_eq!(summary.usage.cache_write_tokens, 40);
+
+    std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
+}
+
+#[test]
 fn openai_codex_live_request_refreshes_oauth_and_uses_native_codex_endpoint() {
     let _guard = env_lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");
@@ -298,6 +346,7 @@ fn opencode_live_request_uses_zen_responses_path() {
     assert!(request.contains("POST /zen/v1/responses HTTP/1.1"));
     assert!(request.to_ascii_lowercase().contains("authorization: bearer opencode-key"));
     assert!(request.contains(r#""model":"gpt-5.4""#));
+    assert!(request.contains(r#""prompt_cache_retention":"ephemeral""#));
     assert_eq!(summary.assistant_message.as_deref(), Some("hello from opencode zen"));
 
     std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
@@ -386,6 +435,7 @@ fn anthropic_live_request_uses_messages_shape_and_headers() {
     assert!(request.contains(r#""model":"claude-sonnet-4-6""#));
     assert!(request.contains(r#""system":"You are liz, a continuous personal agent."#));
     assert!(request.contains(r#""max_tokens":32000"#));
+    assert!(request.contains(r#""cache_control":{"type":"ephemeral"}"#));
     assert!(request.contains(r#""messages":["#));
     assert!(request.contains(r#""role":"user""#));
     assert!(request.contains(r#""content":"Run a patch tool command for this task""#));
@@ -435,6 +485,47 @@ fn google_live_request_uses_generate_content_shape() {
     assert!(request.contains(r#""parts":["#));
     assert!(request.contains(r#""text":"Run a patch tool command for this task""#));
     assert_eq!(summary.assistant_message.as_deref(), Some("hello from google"));
+
+    std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
+}
+
+#[test]
+fn google_live_request_passes_cached_content_and_maps_cache_hits() {
+    let _guard = env_lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");
+
+    let capture = Arc::new(Mutex::new(String::new()));
+    let base_url = spawn_json_server(
+        capture.clone(),
+        r#"{"candidates":[{"content":{"parts":[{"text":"hello from google cache"}]}}],"usageMetadata":{"promptTokenCount":96,"cachedContentTokenCount":72,"candidatesTokenCount":18}}"#,
+    );
+
+    let mut overrides = BTreeMap::new();
+    overrides.insert(
+        "google".to_owned(),
+        ProviderOverride {
+            base_url: Some(base_url),
+            api_key: Some("google-cache-test".to_owned()),
+            model_id: Some("gemini-3.1-pro".to_owned()),
+            headers: BTreeMap::new(),
+            metadata: BTreeMap::from([(
+                String::from("google.cached_content"),
+                String::from("cachedContents/liz-system-cache"),
+            )]),
+        },
+    );
+
+    let gateway = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "google".to_owned(),
+        overrides,
+    });
+    let summary = gateway.run_turn(demo_request(), |_| {}).expect("google request should succeed");
+
+    let request = capture.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+    assert!(request.contains(r#""cachedContent":"cachedContents/liz-system-cache""#));
+    assert_eq!(summary.usage.input_tokens, 24);
+    assert_eq!(summary.usage.output_tokens, 18);
+    assert_eq!(summary.usage.cache_hit_tokens, 72);
 
     std::env::remove_var("LIZ_PROVIDER_ENABLE_LIVE");
 }

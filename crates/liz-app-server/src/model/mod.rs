@@ -10,6 +10,7 @@ mod http;
 mod invocation;
 mod normalized_stream;
 mod output_budget;
+mod prompt_cache;
 mod provider_spec;
 mod registry;
 
@@ -33,5 +34,6 @@ pub use gateway::{ModelError, ModelGateway, ModelRunSummary, ModelTurnRequest};
 pub use invocation::{InvocationTransport, ProviderInvocationPlan};
 pub use normalized_stream::{NormalizedTurnEvent, UsageDelta};
 pub use output_budget::OutputBudget;
+pub use prompt_cache::{anthropic_system_blocks, anthropic_user_content, PromptCachePolicy};
 pub use provider_spec::{ProviderAuthKind, ProviderSpec};
 pub use registry::ProviderRegistry;
