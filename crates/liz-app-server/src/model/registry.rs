@@ -965,6 +965,7 @@ fn openai_compatible_spec(
         "groq" => Some("https://api.groq.com/openai/v1"),
         "helicone" => Some("https://ai-gateway.helicone.ai/v1"),
         "io-net" => Some("https://api.intelligence.io.solutions/api/v1"),
+        "mistral" => Some("https://api.mistral.ai/v1"),
         "moonshot" | "moonshotai" => Some("https://api.moonshot.ai/v1"),
         "nebius" | "nebius-token-factory" => Some("https://api.tokenfactory.nebius.com/v1"),
         "ovhcloud" | "ovhcloud-ai-endpoints" => {
