@@ -87,6 +87,47 @@ fn groq_live_request_uses_groq_openai_base_url_by_default() {
 }
 
 #[test]
+fn together_aliases_use_together_openai_base_url_by_default() {
+    for provider_id in ["together", "togetherai"] {
+        let capture = Arc::new(Mutex::new(String::new()));
+        let base_url = format!(
+            "{}/v1",
+            spawn_json_server(
+                capture.clone(),
+                r#"{"choices":[{"message":{"content":"hello from together"}}]}"#,
+            )
+        );
+
+        let mut overrides = BTreeMap::new();
+        overrides.insert(
+            provider_id.to_owned(),
+            ProviderOverride {
+                base_url: Some(base_url),
+                api_key: Some("together-key".to_owned()),
+                model_id: Some("meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8".to_owned()),
+                headers: BTreeMap::new(),
+                metadata: BTreeMap::new(),
+            },
+        );
+
+        let gateway = ModelGateway::from_config(ModelGatewayConfig {
+            primary_provider: provider_id.to_owned(),
+            overrides,
+        });
+        let summary =
+            gateway.run_turn(demo_request(), |_| {}).expect("together request should succeed");
+
+        let request = capture.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+        assert!(request.contains("POST /v1/chat/completions HTTP/1.1"), "{provider_id}: {request}");
+        assert!(
+            request.to_ascii_lowercase().contains("authorization: bearer together-key"),
+            "{provider_id}: {request}"
+        );
+        assert_eq!(summary.assistant_message.as_deref(), Some("hello from together"));
+    }
+}
+
+#[test]
 fn openai_codex_live_request_refreshes_oauth_and_uses_native_codex_endpoint() {
     let _guard = env_lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     std::env::set_var("LIZ_PROVIDER_ENABLE_LIVE", "1");

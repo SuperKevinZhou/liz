@@ -972,6 +972,7 @@ fn openai_compatible_spec(
         }
         "scaleway" => Some("https://api.scaleway.ai/v1"),
         "stackit" => Some("https://api.openai-compat.model-serving.eu01.onstackit.cloud/v1"),
+        "together" | "togetherai" => Some("https://api.together.xyz/v1"),
         "zai" => Some("https://api.z.ai/api/paas/v4"),
         _ => None,
     };
