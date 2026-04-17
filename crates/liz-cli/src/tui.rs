@@ -11,8 +11,8 @@ use crossterm::{execute, ExecutableCommand};
 use liz_protocol::requests::{
     ClientRequest, ClientRequestEnvelope, MemoryCompileNowRequest, MemoryListTopicsRequest,
     MemoryOpenEvidenceRequest, MemoryOpenSessionRequest, MemoryReadWakeupRequest,
-    MemorySearchRequest, ThreadListRequest, ThreadStartRequest,
-    TurnInputKind, TurnStartRequest,
+    MemorySearchRequest, ThreadListRequest, ThreadResumeRequest, ThreadStartRequest, TurnInputKind,
+    TurnStartRequest,
 };
 use liz_protocol::{
     MemorySearchHit, MemorySearchHitKind, MemorySearchMode, RequestId, ResponsePayload,
@@ -107,13 +107,7 @@ impl CliApp {
     fn new(client: WebSocketAppClient, server_url: String) -> Self {
         let mut view_model = ViewModel::default();
         view_model.status_line = "Connected; loading threads".to_owned();
-        Self {
-            client,
-            view_model,
-            server_url,
-            next_request_number: 1,
-            should_exit: false,
-        }
+        Self { client, view_model, server_url, next_request_number: 1, should_exit: false }
     }
 
     fn bootstrap(&mut self) -> Result<(), AppClientError> {
@@ -128,12 +122,13 @@ impl CliApp {
 
         match key.code {
             KeyCode::Char('q') => self.should_exit = true,
+            KeyCode::Char('r') => {
+                self.resume_selected_thread()?;
+            }
             KeyCode::Tab => {
                 self.view_model.composer_mode = self.view_model.composer_mode.next();
-                self.view_model.status_line = format!(
-                    "Composer mode: {}",
-                    self.view_model.composer_mode.description()
-                );
+                self.view_model.status_line =
+                    format!("Composer mode: {}", self.view_model.composer_mode.description());
             }
             KeyCode::Esc => {
                 self.view_model.input_buffer.clear();
@@ -366,8 +361,20 @@ impl CliApp {
             self.view_model.status_line = "No thread selected".to_owned();
             return Ok(());
         };
-        self.send_request(ClientRequest::MemoryOpenSession(MemoryOpenSessionRequest { thread_id }))?;
+        self.send_request(ClientRequest::MemoryOpenSession(MemoryOpenSessionRequest {
+            thread_id,
+        }))?;
         self.view_model.status_line = "Session expansion requested".to_owned();
+        Ok(())
+    }
+
+    fn resume_selected_thread(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let Some(thread_id) = self.view_model.selected_thread_id() else {
+            self.view_model.status_line = "No thread selected".to_owned();
+            return Ok(());
+        };
+        self.send_request(ClientRequest::ThreadResume(ThreadResumeRequest { thread_id }))?;
+        self.view_model.status_line = "Thread resume requested".to_owned();
         Ok(())
     }
 
@@ -380,7 +387,10 @@ impl CliApp {
     }
 
     fn refresh_threads(&mut self) -> Result<(), AppClientError> {
-        self.send_request(ClientRequest::ThreadList(ThreadListRequest { status: None, limit: Some(24) }))
+        self.send_request(ClientRequest::ThreadList(ThreadListRequest {
+            status: None,
+            limit: Some(24),
+        }))
     }
 
     fn expand_search_hit(
@@ -390,19 +400,21 @@ impl CliApp {
         match hit.kind {
             MemorySearchHitKind::Session | MemorySearchHitKind::Topic => {
                 if let Some(thread_id) = hit.thread_id.as_ref() {
-                    self.send_request(ClientRequest::MemoryOpenSession(MemoryOpenSessionRequest {
-                        thread_id: thread_id.clone(),
-                    }))?;
+                    self.send_request(ClientRequest::MemoryOpenSession(
+                        MemoryOpenSessionRequest { thread_id: thread_id.clone() },
+                    ))?;
                 }
             }
             MemorySearchHitKind::Fact | MemorySearchHitKind::Artifact => {
                 if let Some(thread_id) = hit.thread_id.as_ref() {
-                    self.send_request(ClientRequest::MemoryOpenEvidence(MemoryOpenEvidenceRequest {
-                        thread_id: thread_id.clone(),
-                        turn_id: hit.turn_id.clone(),
-                        artifact_id: hit.artifact_id.clone(),
-                        fact_id: hit.fact_id.clone(),
-                    }))?;
+                    self.send_request(ClientRequest::MemoryOpenEvidence(
+                        MemoryOpenEvidenceRequest {
+                            thread_id: thread_id.clone(),
+                            turn_id: hit.turn_id.clone(),
+                            artifact_id: hit.artifact_id.clone(),
+                            fact_id: hit.fact_id.clone(),
+                        },
+                    ))?;
                 }
             }
         }
@@ -417,12 +429,10 @@ impl CliApp {
             self.view_model.status_line = "No pending approvals".to_owned();
             return Ok(());
         };
-        self.send_request(ClientRequest::ApprovalRespond(
-            liz_protocol::ApprovalRespondRequest {
-                approval_id: approval.id,
-                decision,
-            },
-        ))?;
+        self.send_request(ClientRequest::ApprovalRespond(liz_protocol::ApprovalRespondRequest {
+            approval_id: approval.id,
+            decision,
+        }))?;
         self.view_model.status_line = "Approval response sent".to_owned();
         Ok(())
     }

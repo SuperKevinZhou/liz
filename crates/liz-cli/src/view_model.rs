@@ -10,9 +10,8 @@ use liz_protocol::events::{
 };
 use liz_protocol::{
     ApprovalRequest, ArtifactKind, MemoryEvidenceView, MemorySearchHit, MemorySessionView,
-    MemoryTopicSummary, MemoryWakeup, RecentConversationWakeupView, ResponsePayload,
-    ResumeSummary, ServerEvent, ServerEventPayload, ServerResponseEnvelope, Thread, ThreadId,
-    ThreadStatus,
+    MemoryTopicSummary, MemoryWakeup, RecentConversationWakeupView, ResponsePayload, ResumeSummary,
+    ServerEvent, ServerEventPayload, ServerResponseEnvelope, Thread, ThreadId, ThreadStatus,
 };
 use std::collections::BTreeMap;
 
@@ -210,7 +209,8 @@ impl ViewModel {
                             .unwrap_or(false)
                     });
                     self.evidence_view = Some(response.evidence.clone());
-                    self.status_line = format!("Expanded evidence {}", response.evidence.citation.note);
+                    self.status_line =
+                        format!("Expanded evidence {}", response.evidence.citation.note);
                 }
                 ResponsePayload::MemoryCompileNow(response) => {
                     self.candidate_procedures = response.compilation.candidate_procedures.clone();
@@ -232,10 +232,8 @@ impl ViewModel {
                 _ => {}
             },
             ServerResponseEnvelope::Error(error) => {
-                self.transcript_lines.push(format!(
-                    "[error] {}: {}",
-                    error.error.code, error.error.message
-                ));
+                self.transcript_lines
+                    .push(format!("[error] {}: {}", error.error.code, error.error.message));
                 self.status_line = error.error.message.clone();
             }
         }
@@ -286,10 +284,11 @@ impl ViewModel {
                 self.transcript_lines.push(format!("[assistant] {message}"));
             }
             ServerEventPayload::ToolCallStarted(ToolCallStartedEvent {
-                tool_name, summary, ..
+                tool_name,
+                summary,
+                ..
             }) => {
-                self.transcript_lines
-                    .push(format!("[tool] {tool_name} starting: {summary}"));
+                self.transcript_lines.push(format!("[tool] {tool_name} starting: {summary}"));
             }
             ServerEventPayload::ToolCallUpdated(ToolCallUpdatedEvent {
                 tool_name,
@@ -300,10 +299,7 @@ impl ViewModel {
                 self.transcript_lines.push(format!(
                     "[tool] {tool_name} updating: {}{}",
                     delta_summary,
-                    preview
-                        .as_ref()
-                        .map(|value| format!(" ({value})"))
-                        .unwrap_or_default()
+                    preview.as_ref().map(|value| format!(" ({value})")).unwrap_or_default()
                 ));
             }
             ServerEventPayload::ToolCallCommitted(ToolCallCommittedEvent {
@@ -311,13 +307,13 @@ impl ViewModel {
                 arguments_summary,
                 ..
             }) => {
-                self.transcript_lines.push(format!(
-                    "[tool] {tool_name} committed: {arguments_summary}"
-                ));
-            }
-            ServerEventPayload::ToolCompleted(ToolCompletedEvent { tool_name, summary, .. }) => {
                 self.transcript_lines
-                    .push(format!("[tool] {tool_name} completed: {summary}"));
+                    .push(format!("[tool] {tool_name} committed: {arguments_summary}"));
+            }
+            ServerEventPayload::ToolCompleted(ToolCompletedEvent {
+                tool_name, summary, ..
+            }) => {
+                self.transcript_lines.push(format!("[tool] {tool_name} completed: {summary}"));
             }
             ServerEventPayload::ToolFailed(ToolFailedEvent { tool_name, summary }) => {
                 self.transcript_lines.push(format!("[tool] {tool_name} failed: {summary}"));
@@ -331,10 +327,8 @@ impl ViewModel {
             }
             ServerEventPayload::ApprovalResolved(ApprovalResolvedEvent { approval, decision }) => {
                 self.pending_approvals.retain(|pending| pending.id != approval.id);
-                self.transcript_lines.push(format!(
-                    "[approval] {} resolved as {:?}",
-                    approval.id, decision
-                ));
+                self.transcript_lines
+                    .push(format!("[approval] {} resolved as {:?}", approval.id, decision));
             }
             ServerEventPayload::DiffAvailable(DiffAvailableEvent { artifact }) => {
                 self.transcript_lines
@@ -361,8 +355,7 @@ impl ViewModel {
                 summary,
             }) => {
                 self.dreaming_summaries.push(summary.clone());
-                self.transcript_lines
-                    .push(format!("[{}] dreaming: {}", event.thread_id, summary));
+                self.transcript_lines.push(format!("[{}] dreaming: {}", event.thread_id, summary));
             }
             _ => {}
         }

@@ -38,21 +38,13 @@ pub fn render(frame: &mut Frame<'_>, view_model: &ViewModel, server_url: &str) {
     render_help_bar(frame, layout[3], view_model.composer_mode);
 }
 
-fn render_status_bar(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    view_model: &ViewModel,
-    server_url: &str,
-) {
+fn render_status_bar(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel, server_url: &str) {
     let thread_label = view_model
         .selected_thread()
         .map(|thread| format!("thread {}", thread.title))
         .unwrap_or_else(|| "no thread selected".to_owned());
     let status = vec![Span::styled(
-        format!(
-            " liz-cli  {}  |  {}  |  {} ",
-            server_url, thread_label, view_model.status_line
-        ),
+        format!(" liz-cli  {}  |  {}  |  {} ", server_url, thread_label, view_model.status_line),
         Style::default().fg(Color::Black).bg(Color::Rgb(203, 213, 225)),
     )];
     frame.render_widget(Paragraph::new(Line::from(status)), area);
@@ -156,14 +148,12 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) 
     }
     let visible = tail_lines(&lines, area.height.saturating_sub(2) as usize);
     frame.render_widget(
-        Paragraph::new(visible.join("\n"))
-            .wrap(Wrap { trim: false })
-            .block(
-                Block::default()
-                    .title("Transcript")
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Blue)),
-            ),
+        Paragraph::new(visible.join("\n")).wrap(Wrap { trim: false }).block(
+            Block::default()
+                .title("Transcript")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Blue)),
+        ),
         area,
     );
 }
@@ -193,10 +183,7 @@ fn render_resume_and_approvals(frame: &mut Frame<'_>, area: Rect, view_model: &V
             lines.push(format!("active: {active_summary}"));
         }
         if !summary.pending_commitments.is_empty() {
-            lines.push(format!(
-                "commitments: {}",
-                summary.pending_commitments.join(" | ")
-            ));
+            lines.push(format!("commitments: {}", summary.pending_commitments.join(" | ")));
         }
     } else {
         lines.push("resume: no resume summary loaded".to_owned());
@@ -211,14 +198,12 @@ fn render_resume_and_approvals(frame: &mut Frame<'_>, area: Rect, view_model: &V
     }
 
     frame.render_widget(
-        Paragraph::new(lines.join("\n"))
-            .wrap(Wrap { trim: false })
-            .block(
-                Block::default()
-                    .title("Resume + Approval")
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Blue)),
-            ),
+        Paragraph::new(lines.join("\n")).wrap(Wrap { trim: false }).block(
+            Block::default()
+                .title("Resume + Approval")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Blue)),
+        ),
         area,
     );
 }
@@ -243,11 +228,7 @@ fn render_wakeup(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
         if !recent.recent_summaries.is_empty() {
             lines.push("recent conversation:".to_owned());
             lines.extend(
-                recent
-                    .recent_summaries
-                    .iter()
-                    .take(2)
-                    .map(|summary| format!("- {summary}")),
+                recent.recent_summaries.iter().take(2).map(|summary| format!("- {summary}")),
             );
         }
     }
@@ -256,14 +237,12 @@ fn render_wakeup(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
     }
 
     frame.render_widget(
-        Paragraph::new(lines.join("\n"))
-            .wrap(Wrap { trim: false })
-            .block(
-                Block::default()
-                    .title("Wake-up")
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Blue)),
-            ),
+        Paragraph::new(lines.join("\n")).wrap(Wrap { trim: false }).block(
+            Block::default()
+                .title("Wake-up")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Blue)),
+        ),
         area,
     );
 }
@@ -272,12 +251,20 @@ fn render_recall_and_evidence(frame: &mut Frame<'_>, area: Rect, view_model: &Vi
     let mut lines = Vec::new();
     if !view_model.recall_hits.is_empty() {
         lines.push("recall hits:".to_owned());
-        lines.extend(view_model.recall_hits.iter().take(3).map(|hit| {
-            format!("- {:?}: {} ({})", hit.kind, hit.title, hit.summary)
-        }));
+        lines.extend(
+            view_model
+                .recall_hits
+                .iter()
+                .take(3)
+                .map(|hit| format!("- {:?}: {} ({})", hit.kind, hit.title, hit.summary)),
+        );
     }
     if let Some(session) = view_model.session_view.as_ref() {
-        lines.push(format!("session {} [{}]", session.title, format!("{:?}", session.status).to_ascii_lowercase()));
+        lines.push(format!(
+            "session {} [{}]",
+            session.title,
+            format!("{:?}", session.status).to_ascii_lowercase()
+        ));
         lines.extend(
             session
                 .recent_entries
@@ -294,10 +281,7 @@ fn render_recall_and_evidence(frame: &mut Frame<'_>, area: Rect, view_model: &Vi
         if let Some(artifact_body) = evidence.artifact_body.as_ref() {
             lines.push("artifact:".to_owned());
             lines.extend(tail_lines(
-                &artifact_body
-                    .lines()
-                    .map(|line| line.to_owned())
-                    .collect::<Vec<_>>(),
+                &artifact_body.lines().map(|line| line.to_owned()).collect::<Vec<_>>(),
                 3,
             ));
         }
@@ -314,14 +298,12 @@ fn render_recall_and_evidence(frame: &mut Frame<'_>, area: Rect, view_model: &Vi
     }
 
     frame.render_widget(
-        Paragraph::new(lines.join("\n"))
-            .wrap(Wrap { trim: false })
-            .block(
-                Block::default()
-                    .title("Recall + Evidence")
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Blue)),
-            ),
+        Paragraph::new(lines.join("\n")).wrap(Wrap { trim: false }).block(
+            Block::default()
+                .title("Recall + Evidence")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Blue)),
+        ),
         area,
     );
 }
@@ -354,14 +336,12 @@ fn render_experience(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) 
     }
 
     frame.render_widget(
-        Paragraph::new(lines.join("\n"))
-            .wrap(Wrap { trim: false })
-            .block(
-                Block::default()
-                    .title("Experience + Dreaming")
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Blue)),
-            ),
+        Paragraph::new(lines.join("\n")).wrap(Wrap { trim: false }).block(
+            Block::default()
+                .title("Experience + Dreaming")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Blue)),
+        ),
         area,
     );
 }
@@ -374,27 +354,22 @@ fn render_input_box(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
         view_model.input_buffer.clone()
     };
     frame.render_widget(
-        Paragraph::new(body)
-            .wrap(Wrap { trim: false })
-            .block(
-                Block::default()
-                    .title(title)
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Magenta)),
-            ),
+        Paragraph::new(body).wrap(Wrap { trim: false }).block(
+            Block::default()
+                .title(title)
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Magenta)),
+        ),
         area,
     );
 }
 
 fn render_help_bar(frame: &mut Frame<'_>, area: Rect, composer_mode: ComposerMode) {
     let help = format!(
-        "Tab mode  Enter submit  Up/Down select thread  F1 refresh  F2 wake-up  F3 topics  F4 session  F5 compile  F6/F7 search  F8 approve  F9 deny  Esc clear  q quit  [{}]",
+        "Tab mode  Enter submit  Up/Down select thread  r resume  F1 refresh  F2 wake-up  F3 topics  F4 session  F5 compile  F6/F7 search  F8 approve  F9 deny  Esc clear  q quit  [{}]",
         composer_mode.description()
     );
-    frame.render_widget(
-        Paragraph::new(help).style(Style::default().fg(Color::Gray)),
-        area,
-    );
+    frame.render_widget(Paragraph::new(help).style(Style::default().fg(Color::Gray)), area);
 }
 
 fn tail_lines(lines: &[String], limit: usize) -> Vec<String> {

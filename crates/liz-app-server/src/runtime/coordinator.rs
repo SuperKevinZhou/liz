@@ -714,10 +714,7 @@ impl RuntimeCoordinator {
     }
 
     /// Produces a lightweight reflection summary from the currently compiled memory state.
-    pub fn summarize_thread_dreaming(
-        &self,
-        thread_id: &ThreadId,
-    ) -> RuntimeResult<Option<String>> {
+    pub fn summarize_thread_dreaming(&self, thread_id: &ThreadId) -> RuntimeResult<Option<String>> {
         self.memory_engine.summarize_dreaming(&self.stores, thread_id)
     }
 

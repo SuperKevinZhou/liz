@@ -206,7 +206,8 @@ impl ForegroundMemoryEngine {
             .take(2)
             .map(|fact| fact.value.clone())
             .collect::<Vec<_>>();
-        let open_commitments = thread.pending_commitments.iter().take(2).cloned().collect::<Vec<_>>();
+        let open_commitments =
+            thread.pending_commitments.iter().take(2).cloned().collect::<Vec<_>>();
 
         if thread_topics.is_empty() && procedures.is_empty() && open_commitments.is_empty() {
             return Ok(None);

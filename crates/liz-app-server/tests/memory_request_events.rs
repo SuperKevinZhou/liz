@@ -75,7 +75,8 @@ fn thread_list_request_returns_threads_without_emitting_events() {
     let mut server = AppServer::new(StoragePaths::new(temp_dir.path().join(".liz")));
     let events = server.subscribe_events();
 
-    for (request_id, title) in [("req_thread_1", "First thread"), ("req_thread_2", "Second thread")] {
+    for (request_id, title) in [("req_thread_1", "First thread"), ("req_thread_2", "Second thread")]
+    {
         let response = server.handle_request(envelope(
             request_id,
             ClientRequest::ThreadStart(ThreadStartRequest {
@@ -89,7 +90,9 @@ fn thread_list_request_returns_threads_without_emitting_events() {
             ServerResponseEnvelope::Success(success)
                 if matches!(success.response, ResponsePayload::ThreadStart(_))
         ));
-        let _ = events.recv_timeout(Duration::from_secs(1)).expect("thread_started event should arrive");
+        let _ = events
+            .recv_timeout(Duration::from_secs(1))
+            .expect("thread_started event should arrive");
     }
 
     let response = server.handle_request(envelope(
@@ -106,7 +109,10 @@ fn thread_list_request_returns_threads_without_emitting_events() {
                 assert_eq!(response.threads.len(), 2);
                 assert_eq!(response.threads[0].title, "Second thread");
                 assert_eq!(response.threads[1].title, "First thread");
-                assert!(response.threads.iter().all(|thread| thread.status == ThreadStatus::Active));
+                assert!(response
+                    .threads
+                    .iter()
+                    .all(|thread| thread.status == ThreadStatus::Active));
             }
             other => panic!("unexpected thread list response: {other:?}"),
         },
