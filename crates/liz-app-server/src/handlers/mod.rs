@@ -88,11 +88,9 @@ pub fn handle_request(
                 None,
                 ServerEventPayload::ThreadResumed(ThreadResumedEvent { thread: thread.clone() }),
             )];
-            if let Ok(memory) =
-                runtime.read_memory_wakeup(liz_protocol::MemoryReadWakeupRequest {
-                    thread_id: thread.id.clone(),
-                })
-            {
+            if let Ok(memory) = runtime.read_memory_wakeup(liz_protocol::MemoryReadWakeupRequest {
+                thread_id: thread.id.clone(),
+            }) {
                 events.push(PendingEvent::new(
                     thread.id.clone(),
                     None,
@@ -236,8 +234,8 @@ pub fn handle_request(
             "rollback_not_ready",
             "rollback handling is implemented in a later phase",
         )),
-        ClientRequest::MemoryReadWakeup(request) => runtime.read_memory_wakeup(request).map(
-            |response| {
+        ClientRequest::MemoryReadWakeup(request) => {
+            runtime.read_memory_wakeup(request).map(|response| {
                 let thread_id = response.thread_id.clone();
                 let wakeup = response.wakeup.clone();
                 (
@@ -248,10 +246,10 @@ pub fn handle_request(
                         ServerEventPayload::MemoryWakeupLoaded(MemoryWakeupLoadedEvent { wakeup }),
                     )],
                 )
-            },
-        ),
-        ClientRequest::MemoryCompileNow(request) => runtime.compile_memory_now(request).map(
-            |response| {
+            })
+        }
+        ClientRequest::MemoryCompileNow(request) => {
+            runtime.compile_memory_now(request).map(|response| {
                 let thread_id = response.thread_id.clone();
                 let mut events = vec![PendingEvent::new(
                     thread_id.clone(),
@@ -272,8 +270,8 @@ pub fn handle_request(
                     ));
                 }
                 (ResponsePayload::MemoryCompileNow(response), events)
-            },
-        ),
+            })
+        }
         ClientRequest::MemoryListTopics(request) => runtime
             .list_memory_topics(request)
             .map(|response| (ResponsePayload::MemoryListTopics(response), Vec::new())),

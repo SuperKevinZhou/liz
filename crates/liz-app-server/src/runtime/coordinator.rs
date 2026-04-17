@@ -485,11 +485,7 @@ impl RuntimeCoordinator {
     ) -> RuntimeResult<MemoryReadWakeupResponse> {
         let (wakeup, recent_conversation) =
             self.memory_engine.read_wakeup(&self.stores, &request.thread_id)?;
-        Ok(MemoryReadWakeupResponse {
-            thread_id: request.thread_id,
-            wakeup,
-            recent_conversation,
-        })
+        Ok(MemoryReadWakeupResponse { thread_id: request.thread_id, wakeup, recent_conversation })
     }
 
     /// Forces a foreground memory compilation pass for a thread.
@@ -507,8 +503,7 @@ impl RuntimeCoordinator {
         &self,
         request: MemoryListTopicsRequest,
     ) -> RuntimeResult<MemoryListTopicsResponse> {
-        let topics =
-            self.memory_engine.list_topics(&self.stores, request.status, request.limit)?;
+        let topics = self.memory_engine.list_topics(&self.stores, request.status, request.limit)?;
         Ok(MemoryListTopicsResponse { topics })
     }
 
@@ -517,9 +512,8 @@ impl RuntimeCoordinator {
         &self,
         request: MemorySearchRequest,
     ) -> RuntimeResult<MemorySearchResponse> {
-        let hits = self
-            .memory_engine
-            .search(&self.stores, &request.query, request.mode, request.limit)?;
+        let hits =
+            self.memory_engine.search(&self.stores, &request.query, request.mode, request.limit)?;
         Ok(MemorySearchResponse { query: request.query, mode: request.mode, hits })
     }
 

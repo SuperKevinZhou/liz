@@ -3,9 +3,7 @@
 use crate::approval::ApprovalDecision;
 use crate::auth::ProviderAuthProfile;
 use crate::checkpoint::CheckpointScope;
-use crate::ids::{
-    ApprovalId, ArtifactId, CheckpointId, MemoryFactId, RequestId, ThreadId, TurnId,
-};
+use crate::ids::{ApprovalId, ArtifactId, CheckpointId, MemoryFactId, RequestId, ThreadId, TurnId};
 use crate::memory::{MemorySearchMode, MemoryTopicStatus};
 use crate::tool::ToolCallRequest;
 use serde::{Deserialize, Serialize};

@@ -40,9 +40,9 @@ pub use ids::{
 };
 pub use memory::{
     MemoryCitationRef, MemoryCompilationSummary, MemoryEvidenceView, MemoryFactKind,
-    MemorySearchHit, MemorySearchHitKind, MemorySearchMode, MemorySessionEntry,
-    MemorySessionView, MemoryTopicStatus, MemoryTopicSummary, MemoryWakeup,
-    RecentConversationWakeupView, ResumeSummary,
+    MemorySearchHit, MemorySearchHitKind, MemorySearchMode, MemorySessionEntry, MemorySessionView,
+    MemoryTopicStatus, MemoryTopicSummary, MemoryWakeup, RecentConversationWakeupView,
+    ResumeSummary,
 };
 pub use primitives::{ProtocolVersion, RiskLevel, Timestamp};
 pub use requests::{

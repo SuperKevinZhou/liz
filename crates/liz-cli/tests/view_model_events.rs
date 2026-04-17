@@ -2,8 +2,8 @@
 
 use liz_cli::view_model::ViewModel;
 use liz_protocol::events::{
-    MemoryCompilationAppliedEvent, MemoryWakeupLoadedEvent, ThreadStartedEvent,
-    TurnCancelledEvent, TurnStartedEvent,
+    MemoryCompilationAppliedEvent, MemoryWakeupLoadedEvent, ThreadStartedEvent, TurnCancelledEvent,
+    TurnStartedEvent,
 };
 use liz_protocol::{
     EventId, MemoryCompilationSummary, MemoryWakeup, ServerEvent, ServerEventPayload, Thread,

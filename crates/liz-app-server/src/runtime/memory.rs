@@ -253,7 +253,10 @@ impl ForegroundMemoryEngine {
                 score,
                 thread_id: fact.related_thread_ids.first().cloned(),
                 turn_id: fact.citations.first().and_then(|citation| citation.turn_id.clone()),
-                artifact_id: fact.citations.first().and_then(|citation| citation.artifact_id.clone()),
+                artifact_id: fact
+                    .citations
+                    .first()
+                    .and_then(|citation| citation.artifact_id.clone()),
                 fact_id: Some(fact.id.clone()),
             });
         }
@@ -261,11 +264,8 @@ impl ForegroundMemoryEngine {
         for thread in stores.list_threads()? {
             let entries = stores.read_turn_log(&thread.id)?;
             let recent = recent_entries(&entries);
-            let summaries = recent
-                .iter()
-                .map(|entry| entry.summary.as_str())
-                .collect::<Vec<_>>()
-                .join(" ");
+            let summaries =
+                recent.iter().map(|entry| entry.summary.as_str()).collect::<Vec<_>>().join(" ");
             let haystack = format!(
                 "{} {} {} {}",
                 thread.title,
@@ -295,10 +295,7 @@ impl ForegroundMemoryEngine {
         }
 
         hits.sort_by(|left, right| {
-            right
-                .score
-                .cmp(&left.score)
-                .then_with(|| left.title.cmp(&right.title))
+            right.score.cmp(&left.score).then_with(|| left.title.cmp(&right.title))
         });
         hits.truncate(limit.unwrap_or(DEFAULT_SEARCH_LIMIT));
         Ok(hits)
@@ -424,7 +421,9 @@ fn build_memory_wakeup(
         .facts
         .iter()
         .filter(|fact| fact.invalidated_at.is_none() && fact.invalidated_by.is_none())
-        .filter(|fact| fact.related_thread_ids.is_empty() || fact.related_thread_ids.contains(&thread.id))
+        .filter(|fact| {
+            fact.related_thread_ids.is_empty() || fact.related_thread_ids.contains(&thread.id)
+        })
         .take(6)
         .map(|fact| format!("{}: {}", fact.subject, fact.value))
         .collect::<Vec<_>>();
@@ -432,7 +431,9 @@ fn build_memory_wakeup(
         .facts
         .iter()
         .filter(|fact| fact.invalidated_at.is_none() && fact.invalidated_by.is_none())
-        .filter(|fact| fact.related_thread_ids.is_empty() || fact.related_thread_ids.contains(&thread.id))
+        .filter(|fact| {
+            fact.related_thread_ids.is_empty() || fact.related_thread_ids.contains(&thread.id)
+        })
         .take(6)
         .map(|fact| fact.id.clone())
         .collect::<Vec<_>>();
@@ -470,8 +471,10 @@ fn build_recent_conversation(
         .map(|entry| entry.summary.clone())
         .filter(|summary| !summary.trim().is_empty())
         .collect::<Vec<_>>();
-    let active_topics =
-        derive_topics_from_text(&recent_summaries.iter().map(String::as_str).collect::<Vec<_>>(), 6);
+    let active_topics = derive_topics_from_text(
+        &recent_summaries.iter().map(String::as_str).collect::<Vec<_>>(),
+        6,
+    );
     let recent_keywords = derive_keywords_from_text(
         &recent_summaries.iter().map(String::as_str).collect::<Vec<_>>(),
         8,
@@ -562,11 +565,9 @@ fn sync_topic_index(
             .active_summary
             .clone()
             .unwrap_or_else(|| format!("Recent topic around {topic_name}"));
-        if let Some(topic) = snapshot
-            .topic_index
-            .iter_mut()
-            .find(|topic| topic.name == topic_name || topic.aliases.iter().any(|alias| alias == &topic_name))
-        {
+        if let Some(topic) = snapshot.topic_index.iter_mut().find(|topic| {
+            topic.name == topic_name || topic.aliases.iter().any(|alias| alias == &topic_name)
+        }) {
             topic.summary = summary.clone();
             topic.status = status;
             topic.last_active_at = now.clone();
@@ -663,7 +664,10 @@ fn recent_entries(entries: &[TurnLogEntry]) -> Vec<TurnLogEntry> {
     slice
 }
 
-fn citations_from_entries(thread_id: &ThreadId, entries: &[TurnLogEntry]) -> Vec<MemoryCitationRef> {
+fn citations_from_entries(
+    thread_id: &ThreadId,
+    entries: &[TurnLogEntry],
+) -> Vec<MemoryCitationRef> {
     entries
         .iter()
         .take(RECENT_SUMMARY_LIMIT)
@@ -750,8 +754,7 @@ fn normalize_tokens(text: &str) -> Vec<String> {
         "thread", "turn", "work", "task", "then", "when", "what",
     ];
 
-    text
-        .split(|character: char| !character.is_alphanumeric() && character != '_')
+    text.split(|character: char| !character.is_alphanumeric() && character != '_')
         .filter_map(|token| {
             let normalized = token.to_ascii_lowercase();
             (!normalized.is_empty()

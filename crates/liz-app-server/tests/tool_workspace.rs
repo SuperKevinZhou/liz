@@ -667,8 +667,21 @@ fn shell_exec_preserves_sandbox_denial_output_in_command_artifacts() {
         .expect("command output artifact should exist");
     match shell_response.result {
         ToolResult::ShellExec(result) => {
-            assert_eq!(result.exit_code, 77, "shell exec result: {result:?}");
-            assert!(result.stderr.contains("sandbox denied"), "shell exec result: {result:?}");
+            if cfg!(any(target_os = "linux", target_os = "windows")) {
+                assert_eq!(result.exit_code, 77, "shell exec result: {result:?}");
+                assert!(result.stderr.contains("sandbox denied"), "shell exec result: {result:?}");
+            } else {
+                assert_eq!(result.exit_code, 0, "shell exec result: {result:?}");
+                assert!(
+                    result.stdout.contains("[sandbox mode=workspace-write"),
+                    "shell exec result: {result:?}"
+                );
+                assert!(
+                    normalized_test_output(&result.stdout).contains("hello"),
+                    "shell exec result: {result:?}"
+                );
+                assert!(result.stderr.contains("warn"), "shell exec result: {result:?}");
+            }
         }
         other => panic!("unexpected shell result: {other:?}"),
     }
@@ -677,7 +690,13 @@ fn shell_exec_preserves_sandbox_denial_output_in_command_artifacts() {
         fs::read_to_string(Path::new(&command_output_locator)).expect("artifact should exist");
     let artifact_body = read_artifact_body(&artifact_body);
     assert!(artifact_body.contains("\"mode\": \"workspace-write\""), "{artifact_body}");
-    assert!(artifact_body.contains("sandbox denied"), "{artifact_body}");
+    if cfg!(any(target_os = "linux", target_os = "windows")) {
+        assert!(artifact_body.contains("sandbox denied"), "{artifact_body}");
+    } else {
+        assert!(artifact_body.contains("[sandbox mode=workspace-write"), "{artifact_body}");
+        assert!(artifact_body.contains("hello"), "{artifact_body}");
+        assert!(artifact_body.contains("warn"), "{artifact_body}");
+    }
 }
 
 fn foreground_output_command() -> String {
@@ -744,11 +763,8 @@ impl SandboxHelperGuard {
         #[cfg(target_os = "windows")]
         {
             let helper_path = root.join("windows-denied-sandbox.cmd");
-            fs::write(
-                &helper_path,
-                "@echo off\r\necho sandbox denied 1>&2\r\nexit /b 77\r\n",
-            )
-            .expect("windows helper should be written");
+            fs::write(&helper_path, "@echo off\r\necho sandbox denied 1>&2\r\nexit /b 77\r\n")
+                .expect("windows helper should be written");
 
             let previous = std::env::var_os("LIZ_WINDOWS_SANDBOX_USER_HELPER");
             std::env::set_var("LIZ_WINDOWS_SANDBOX_USER_HELPER", &helper_path);

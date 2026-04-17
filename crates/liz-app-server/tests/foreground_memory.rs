@@ -129,13 +129,11 @@ fn foreground_memory_compile_and_recall_flows_round_trip() {
         })
         .expect("artifact evidence should open")
         .evidence;
-    assert!(
-        artifact_evidence
-            .artifact_body
-            .as_deref()
-            .expect("artifact body should be present")
-            .contains("foreground memory wakeup")
-    );
+    assert!(artifact_evidence
+        .artifact_body
+        .as_deref()
+        .expect("artifact body should be present")
+        .contains("foreground memory wakeup"));
 
     let fact_id = wakeup
         .wakeup
@@ -206,11 +204,7 @@ fn foreground_memory_marks_superseded_commitments_as_invalidated() {
         .expect("resumed turn should start")
         .turn;
     runtime
-        .complete_turn(
-            &thread.id,
-            &resumed_turn.id,
-            "Resolved invalidation marker".to_owned(),
-        )
+        .complete_turn(&thread.id, &resumed_turn.id, "Resolved invalidation marker".to_owned())
         .expect("resumed turn should complete");
 
     let second_compile = runtime

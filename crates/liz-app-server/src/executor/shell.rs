@@ -481,14 +481,12 @@ fn helper_names_for_backend(backend: PlatformSandboxBackend) -> Option<&'static 
         PlatformSandboxBackend::LinuxHelper => {
             Some(&["liz-linux-sandbox", "liz-linux-sandbox-helper"])
         }
-        PlatformSandboxBackend::WindowsRestrictedToken => Some(&[
-            "liz-windows-restricted-token.exe",
-            "liz-windows-restricted-token.cmd",
-        ]),
-        PlatformSandboxBackend::WindowsSandboxUser => Some(&[
-            "liz-windows-sandbox-user.exe",
-            "liz-windows-sandbox-user.cmd",
-        ]),
+        PlatformSandboxBackend::WindowsRestrictedToken => {
+            Some(&["liz-windows-restricted-token.exe", "liz-windows-restricted-token.cmd"])
+        }
+        PlatformSandboxBackend::WindowsSandboxUser => {
+            Some(&["liz-windows-sandbox-user.exe", "liz-windows-sandbox-user.cmd"])
+        }
         PlatformSandboxBackend::MacosSeatbelt | PlatformSandboxBackend::None => None,
     }
 }
@@ -753,7 +751,8 @@ mod tests {
             std::env::remove_var(env_key);
         }
 
-        let resolved = helper_path_for_backend(backend).expect("default helper path should resolve");
+        let resolved =
+            helper_path_for_backend(backend).expect("default helper path should resolve");
         assert_eq!(PathBuf::from(resolved), helper_path);
 
         restore_path(previous_path);

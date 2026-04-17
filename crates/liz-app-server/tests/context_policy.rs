@@ -64,11 +64,7 @@ fn context_assembly_surfaces_recent_conversation_wakeup_and_executor_boundary() 
         .expect("turn start should succeed")
         .turn;
     runtime
-        .complete_turn(
-            &thread.id,
-            &turn.id,
-            "Patched websocket transport retry logic".to_owned(),
-        )
+        .complete_turn(&thread.id, &turn.id, "Patched websocket transport retry logic".to_owned())
         .expect("turn should complete");
 
     let context = runtime

@@ -31,15 +31,12 @@ fn memory_requests_emit_wakeup_and_compilation_events() {
         other => panic!("unexpected thread envelope: {other:?}"),
     };
 
-    let _ = events
-        .recv_timeout(Duration::from_secs(1))
-        .expect("thread_started event should arrive");
+    let _ =
+        events.recv_timeout(Duration::from_secs(1)).expect("thread_started event should arrive");
 
     let wakeup_response = server.handle_request(envelope(
         "req_wakeup",
-        ClientRequest::MemoryReadWakeup(MemoryReadWakeupRequest {
-            thread_id: thread.id.clone(),
-        }),
+        ClientRequest::MemoryReadWakeup(MemoryReadWakeupRequest { thread_id: thread.id.clone() }),
     ));
     match wakeup_response {
         ServerResponseEnvelope::Success(success) => {
@@ -51,16 +48,11 @@ fn memory_requests_emit_wakeup_and_compilation_events() {
     let wakeup_event = events
         .recv_timeout(Duration::from_secs(1))
         .expect("memory_wakeup_loaded event should arrive");
-    assert!(matches!(
-        wakeup_event.payload,
-        ServerEventPayload::MemoryWakeupLoaded(_)
-    ));
+    assert!(matches!(wakeup_event.payload, ServerEventPayload::MemoryWakeupLoaded(_)));
 
     let compile_response = server.handle_request(envelope(
         "req_compile",
-        ClientRequest::MemoryCompileNow(MemoryCompileNowRequest {
-            thread_id: thread.id.clone(),
-        }),
+        ClientRequest::MemoryCompileNow(MemoryCompileNowRequest { thread_id: thread.id.clone() }),
     ));
     match compile_response {
         ServerResponseEnvelope::Success(success) => {
@@ -72,10 +64,7 @@ fn memory_requests_emit_wakeup_and_compilation_events() {
     let compilation_event = events
         .recv_timeout(Duration::from_secs(1))
         .expect("memory_compilation_applied event should arrive");
-    assert!(matches!(
-        compilation_event.payload,
-        ServerEventPayload::MemoryCompilationApplied(_)
-    ));
+    assert!(matches!(compilation_event.payload, ServerEventPayload::MemoryCompilationApplied(_)));
 }
 
 fn envelope(request_id: &str, request: ClientRequest) -> ClientRequestEnvelope {

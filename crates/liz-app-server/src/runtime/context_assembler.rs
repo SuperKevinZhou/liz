@@ -254,7 +254,8 @@ fn derive_recent_topics(summaries: &[String]) -> Vec<String> {
     let mut seen = BTreeSet::new();
     let mut topics = Vec::new();
     for summary in summaries {
-        for token in summary.split(|character: char| !character.is_alphanumeric() && character != '_')
+        for token in
+            summary.split(|character: char| !character.is_alphanumeric() && character != '_')
         {
             let token = token.to_ascii_lowercase();
             if token.len() < 4 || !seen.insert(token.clone()) {
@@ -274,7 +275,8 @@ fn derive_recent_keywords(summaries: &[String]) -> Vec<String> {
 
     let mut counts = BTreeMap::new();
     for summary in summaries {
-        for token in summary.split(|character: char| !character.is_alphanumeric() && character != '_')
+        for token in
+            summary.split(|character: char| !character.is_alphanumeric() && character != '_')
         {
             let token = token.to_ascii_lowercase();
             if token.len() < 3 {
