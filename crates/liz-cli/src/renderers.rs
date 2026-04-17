@@ -18,6 +18,7 @@ const RAIL_SELECTED: Color = Color::Rgb(184, 198, 255);
 const SYSTEM: Color = Color::Rgb(173, 179, 189);
 const HELP_RULE: &str =
     "Esc close  Up/Down switch thread  Tab threads  /help commands  /memory recall";
+const OVERLAY_SHADOW: Color = Color::Rgb(22, 24, 31);
 
 /// Minimal renderer metadata for banner and smoke surfaces.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,24 +61,28 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel, serv
         .map(|thread| thread.title.as_str())
         .unwrap_or("New conversation");
     let approval_badge = if view_model.pending_approval_count() > 0 {
-        format!(" approvals {} ", view_model.pending_approval_count())
+        format!("approval {}", view_model.pending_approval_count())
     } else {
-        " clear ".to_owned()
+        String::new()
     };
-    let wakeup_badge =
-        if view_model.has_wakeup_context() { " wake-up ready " } else { " no wake-up " };
-    let header = Line::from(vec![
+    let wakeup_badge = if view_model.has_wakeup_context() { "wake-up" } else { "" };
+    let mut header = vec![
         Span::styled("liz", Style::default().fg(BRAND).add_modifier(Modifier::BOLD)),
         Span::raw("  "),
         Span::styled(title, Style::default().fg(TEXT_PRIMARY).add_modifier(Modifier::BOLD)),
-        Span::raw("  "),
-        Span::styled(approval_badge, Style::default().fg(APPROVAL)),
-        Span::styled(wakeup_badge, Style::default().fg(ACCENT)),
-        Span::raw("  "),
-        Span::styled(server_url, Style::default().fg(TEXT_MUTED)),
-    ]);
+    ];
+    if !approval_badge.is_empty() {
+        header.push(Span::raw("  "));
+        header.push(Span::styled(approval_badge, Style::default().fg(APPROVAL)));
+    }
+    if !wakeup_badge.is_empty() {
+        header.push(Span::raw("  "));
+        header.push(Span::styled(wakeup_badge, Style::default().fg(ACCENT)));
+    }
+    header.push(Span::raw("  "));
+    header.push(Span::styled(server_url, Style::default().fg(TEXT_MUTED)));
 
-    frame.render_widget(Paragraph::new(header).wrap(Wrap { trim: false }), area);
+    frame.render_widget(Paragraph::new(Line::from(header)).wrap(Wrap { trim: false }), area);
 }
 
 fn render_rule(frame: &mut Frame<'_>, area: Rect) {
@@ -194,8 +199,12 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
 }
 
 fn render_overlay(frame: &mut Frame<'_>, panel: OverlayPanel, view_model: &ViewModel) {
-    let popup = centered_rect(frame.area(), 78, 68);
+    let popup = overlay_rect(frame.area(), panel);
+    let shadow = shadow_rect(popup, frame.area());
     frame.render_widget(Clear, popup);
+    if let Some(shadow) = shadow {
+        frame.render_widget(Block::default().style(Style::default().bg(OVERLAY_SHADOW)), shadow);
+    }
 
     let (title, body) = match panel {
         OverlayPanel::Help => ("Help", help_overlay_text()),
@@ -441,7 +450,7 @@ where
 {
     Block::default()
         .title(title)
-        .borders(Borders::ALL)
+        .borders(Borders::TOP | Borders::LEFT)
         .border_type(BorderType::Plain)
         .border_style(Style::default().fg(BORDER_SOFT))
 }
@@ -457,24 +466,43 @@ where
         .border_style(Style::default().fg(BORDER_SOFT))
 }
 
-fn centered_rect(area: Rect, width_percent: u16, height_percent: u16) -> Rect {
-    let vertical = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - height_percent) / 2),
-            Constraint::Percentage(height_percent),
-            Constraint::Percentage((100 - height_percent) / 2),
-        ])
-        .split(area);
-    let horizontal = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - width_percent) / 2),
-            Constraint::Percentage(width_percent),
-            Constraint::Percentage((100 - width_percent) / 2),
-        ])
-        .split(vertical[1]);
-    horizontal[1]
+fn overlay_rect(area: Rect, panel: OverlayPanel) -> Rect {
+    match panel {
+        OverlayPanel::Help => anchored_overlay(area, 92, 16, OverlayAnchor::Bottom),
+        OverlayPanel::Search => anchored_overlay(area, 92, 18, OverlayAnchor::Bottom),
+        OverlayPanel::Memory => anchored_overlay(area, 90, 22, OverlayAnchor::Center),
+    }
+}
+
+fn shadow_rect(popup: Rect, bounds: Rect) -> Option<Rect> {
+    let x = popup.x.saturating_add(1);
+    let y = popup.y.saturating_add(1);
+    if x >= bounds.right() || y >= bounds.bottom() {
+        return None;
+    }
+    Some(Rect::new(
+        x,
+        y,
+        popup.width.min(bounds.right().saturating_sub(x)),
+        popup.height.min(bounds.bottom().saturating_sub(y)),
+    ))
+}
+
+enum OverlayAnchor {
+    Center,
+    Bottom,
+}
+
+fn anchored_overlay(area: Rect, width_percent: u16, height: u16, anchor: OverlayAnchor) -> Rect {
+    let width = (area.width.saturating_mul(width_percent)).saturating_div(100).max(40);
+    let width = width.min(area.width.saturating_sub(2).max(1));
+    let height = height.min(area.height.saturating_sub(2).max(1));
+    let x = area.x + area.width.saturating_sub(width) / 2;
+    let y = match anchor {
+        OverlayAnchor::Center => area.y + area.height.saturating_sub(height) / 2,
+        OverlayAnchor::Bottom => area.bottom().saturating_sub(height + 2),
+    };
+    Rect::new(x, y, width, height)
 }
 
 fn tail_lines(lines: &[Line<'static>], limit: usize) -> Vec<Line<'static>> {
