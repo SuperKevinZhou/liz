@@ -103,7 +103,12 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel, serv
 fn render_transcript(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
     let mut lines = Vec::new();
 
+    append_status_block(&mut lines, view_model, area.width as usize);
+
     if let Some(summary) = wakeup_line(view_model) {
+        if !lines.is_empty() {
+            lines.push(Line::default());
+        }
         lines.push(Line::from(vec![
             Span::styled("resume", Style::default().fg(ACCENT)),
             Span::raw("  "),
@@ -113,6 +118,9 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) 
     }
 
     if view_model.transcript_entries.is_empty() && view_model.streaming_preview().is_none() {
+        if !lines.is_empty() {
+            lines.push(Line::default());
+        }
         lines
             .push(Line::from(Span::styled("What should liz do next?", Style::default().fg(MUTED))));
         lines.push(Line::from(Span::styled(
@@ -261,6 +269,57 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, panel: OverlayPanel, view_m
         OverlayPanel::Memory => render_memory_overlay(frame, popup, view_model),
         OverlayPanel::Threads => render_threads_overlay(frame, popup, view_model),
     }
+}
+
+fn append_status_block(lines: &mut Vec<Line<'static>>, view_model: &ViewModel, width: usize) {
+    let provider_name = view_model
+        .model_status
+        .as_ref()
+        .and_then(|status| status.display_name.clone())
+        .unwrap_or_else(|| "Provider".to_owned());
+    let model_name = view_model
+        .model_status
+        .as_ref()
+        .and_then(|status| status.model_id.clone())
+        .unwrap_or_else(|| "Not configured".to_owned());
+    let state_label = if view_model.pending_approval_count() > 0 {
+        ("Approval required", WARNING)
+    } else if view_model.streaming_preview().is_some() {
+        ("Responding", ACCENT)
+    } else if view_model.model_status.as_ref().map(|status| status.ready).unwrap_or(false) {
+        ("Ready", SUCCESS)
+    } else {
+        ("Setup required", MUTED)
+    };
+
+    let line_width = width.clamp(32, 72);
+    let border = "─".repeat(line_width.saturating_sub(2));
+    lines.push(Line::from(Span::styled(border.clone(), Style::default().fg(BORDER_ACTIVE))));
+    lines.push(Line::from(vec![
+        Span::styled("status", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Span::raw("  "),
+        Span::styled(state_label.0, Style::default().fg(state_label.1)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("provider", Style::default().fg(SUBTLE)),
+        Span::raw("  "),
+        Span::styled(provider_name, Style::default().fg(TEXT)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("model", Style::default().fg(SUBTLE)),
+        Span::raw("     "),
+        Span::styled(model_name, Style::default().fg(MUTED)),
+    ]));
+
+    if !view_model.status_line.is_empty() {
+        lines.push(Line::from(vec![
+            Span::styled("note", Style::default().fg(SUBTLE)),
+            Span::raw("      "),
+            Span::styled(view_model.status_line.clone(), Style::default().fg(MUTED)),
+        ]));
+    }
+
+    lines.push(Line::from(Span::styled(border, Style::default().fg(BORDER_ACTIVE))));
 }
 
 fn render_command_palette_docked(
