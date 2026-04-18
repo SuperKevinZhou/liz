@@ -75,34 +75,22 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) 
         lines.push(Line::default());
     }
 
-    if view_model.transcript_entries.is_empty() && view_model.streaming_preview().is_none() {
-        if !lines.is_empty() {
-            lines.push(Line::default());
-        }
-        lines
-            .push(Line::from(Span::styled("What should liz do next?", Style::default().fg(MUTED))));
-        lines.push(Line::from(Span::styled(
-            "Type / to open commands.",
-            Style::default().fg(SUBTLE),
-        )));
-    } else {
-        for entry in &view_model.transcript_entries {
-            append_transcript_entry(&mut lines, entry.kind, &entry.body, area.width as usize);
-            lines.push(Line::default());
-        }
+    for entry in &view_model.transcript_entries {
+        append_transcript_entry(&mut lines, entry.kind, &entry.body, area.width as usize);
+        lines.push(Line::default());
+    }
 
-        if let Some(streaming) = view_model.streaming_preview() {
+    if let Some(streaming) = view_model.streaming_preview() {
+        lines.push(Line::from(vec![
+            Span::styled("liz", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            Span::raw("  "),
+            Span::styled("responding", Style::default().fg(MUTED)),
+        ]));
+        for wrapped in wrap_text(streaming, area.width.saturating_sub(2) as usize) {
             lines.push(Line::from(vec![
-                Span::styled("liz", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
                 Span::raw("  "),
-                Span::styled("responding", Style::default().fg(MUTED)),
+                Span::styled(wrapped, Style::default().fg(TEXT)),
             ]));
-            for wrapped in wrap_text(streaming, area.width.saturating_sub(2) as usize) {
-                lines.push(Line::from(vec![
-                    Span::raw("  "),
-                    Span::styled(wrapped, Style::default().fg(TEXT)),
-                ]));
-            }
         }
     }
 
@@ -817,19 +805,32 @@ fn footer_left_spans(view_model: &ViewModel) -> Vec<Span<'static>> {
         return vec![
             Span::styled("Enter", Style::default().fg(MUTED)),
             Span::styled(" approve", Style::default().fg(SUBTLE)),
-            Span::raw("  "),
+            Span::styled(" · ", Style::default().fg(SUBTLE)),
             Span::styled("Esc", Style::default().fg(MUTED)),
             Span::styled(" deny", Style::default().fg(SUBTLE)),
         ];
     }
 
-    let mut spans = vec![
-        Span::styled("?", Style::default().fg(MUTED)),
-        Span::styled(" for shortcuts", Style::default().fg(SUBTLE)),
-    ];
+    if view_model.streaming_preview().is_some() {
+        return vec![
+            Span::styled("Esc", Style::default().fg(MUTED)),
+            Span::styled(" interrupt", Style::default().fg(SUBTLE)),
+        ];
+    }
+
+    let mut spans = Vec::new();
+    let show_shortcuts_hint = view_model.status_line.is_empty()
+        && view_model.streaming_preview().is_none()
+        && view_model.pending_approval_count() == 0;
+    if show_shortcuts_hint {
+        spans.push(Span::styled("?", Style::default().fg(MUTED)));
+        spans.push(Span::styled(" for shortcuts", Style::default().fg(SUBTLE)));
+    }
 
     if !view_model.input_buffer.is_empty() {
-        spans.push(Span::raw("  "));
+        if !spans.is_empty() {
+            spans.push(Span::styled(" · ", Style::default().fg(SUBTLE)));
+        }
         spans.push(Span::styled("Esc", Style::default().fg(MUTED)));
         spans.push(Span::styled(" clear", Style::default().fg(SUBTLE)));
     }
@@ -856,11 +857,11 @@ fn footer_right_spans(view_model: &ViewModel) -> Vec<Span<'static>> {
     }
 
     if view_model.slash_mode {
-        spans.push(Span::styled("  ", Style::default().fg(MUTED)));
+        spans.push(Span::styled(" · ", Style::default().fg(SUBTLE)));
         spans.push(Span::styled("Tab", Style::default().fg(MUTED)));
         spans.push(Span::styled(" complete", Style::default().fg(SUBTLE)));
     } else {
-        spans.push(Span::styled("  ", Style::default().fg(MUTED)));
+        spans.push(Span::styled(" · ", Style::default().fg(SUBTLE)));
         spans.push(Span::styled("/", Style::default().fg(MUTED)));
         spans.push(Span::styled(" commands", Style::default().fg(SUBTLE)));
     }
