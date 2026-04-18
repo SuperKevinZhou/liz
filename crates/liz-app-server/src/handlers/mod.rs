@@ -64,6 +64,10 @@ pub fn handle_request(
         ClientRequest::ProviderAuthList(request) => runtime
             .list_provider_auth_profiles(request)
             .map(|response| (ResponsePayload::ProviderAuthList(response), Vec::new())),
+        ClientRequest::ModelStatus(_) => Err(RuntimeError::unsupported(
+            "model_status_requires_server",
+            "model/status must be handled by the app server",
+        )),
         ClientRequest::ProviderAuthUpsert(request) => runtime
             .upsert_provider_auth_profile(request)
             .map(|response| (ResponsePayload::ProviderAuthUpsert(response), Vec::new())),

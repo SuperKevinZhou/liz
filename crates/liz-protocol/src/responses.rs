@@ -95,6 +95,9 @@ pub enum ResponsePayload {
     /// Acknowledges `provider_auth/list`.
     #[serde(rename = "provider_auth/list")]
     ProviderAuthList(ProviderAuthListResponse),
+    /// Acknowledges `model/status`.
+    #[serde(rename = "model/status")]
+    ModelStatus(ModelStatusResponse),
     /// Acknowledges `provider_auth/upsert`.
     #[serde(rename = "provider_auth/upsert")]
     ProviderAuthUpsert(ProviderAuthUpsertResponse),
@@ -224,6 +227,27 @@ pub struct MiniMaxOAuthPollResponse {
 pub struct ProviderAuthListResponse {
     /// The matching persisted profiles.
     pub profiles: Vec<ProviderAuthProfile>,
+}
+
+/// The response payload for `model/status`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelStatusResponse {
+    /// The configured primary provider identifier.
+    pub provider_id: String,
+    /// The provider display name, when the provider is known.
+    pub display_name: Option<String>,
+    /// The resolved model identifier, when the provider is known.
+    pub model_id: Option<String>,
+    /// The provider auth mode label.
+    pub auth_kind: Option<String>,
+    /// Whether the provider can be used for a live model turn now.
+    pub ready: bool,
+    /// Whether a usable credential is present or not required.
+    pub credential_configured: bool,
+    /// Safe environment/config hints that can satisfy the provider.
+    pub credential_hints: Vec<String>,
+    /// User-visible readiness notes.
+    pub notes: Vec<String>,
 }
 
 /// The response payload for `provider_auth/upsert`.

@@ -11,8 +11,8 @@ use crossterm::{execute, ExecutableCommand};
 use liz_protocol::requests::{
     ClientRequest, ClientRequestEnvelope, MemoryCompileNowRequest, MemoryListTopicsRequest,
     MemoryOpenEvidenceRequest, MemoryOpenSessionRequest, MemoryReadWakeupRequest,
-    MemorySearchRequest, ThreadListRequest, ThreadResumeRequest, ThreadStartRequest, TurnInputKind,
-    TurnStartRequest,
+    MemorySearchRequest, ModelStatusRequest, ThreadListRequest, ThreadResumeRequest,
+    ThreadStartRequest, TurnInputKind, TurnStartRequest,
 };
 use liz_protocol::{
     MemorySearchHit, MemorySearchHitKind, MemorySearchMode, RequestId, ResponsePayload,
@@ -119,7 +119,8 @@ impl CliApp {
     }
 
     fn bootstrap(&mut self) -> Result<(), AppClientError> {
-        self.refresh_threads()
+        self.refresh_threads()?;
+        self.send_request(ClientRequest::ModelStatus(ModelStatusRequest {}))
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> Result<(), Box<dyn std::error::Error>> {

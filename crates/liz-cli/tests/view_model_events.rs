@@ -7,9 +7,9 @@ use liz_protocol::events::{
 };
 use liz_protocol::{
     EventId, MemoryCompilationSummary, MemoryOpenSessionResponse, MemorySessionEntry,
-    MemorySessionView, MemoryWakeup, ResponsePayload, ServerEvent, ServerEventPayload,
-    ServerResponseEnvelope, SuccessResponseEnvelope, Thread, ThreadId, ThreadStatus, Timestamp,
-    Turn, TurnId, TurnKind, TurnStatus,
+    MemorySessionView, MemoryWakeup, ModelStatusResponse, ResponsePayload, ServerEvent,
+    ServerEventPayload, ServerResponseEnvelope, SuccessResponseEnvelope, Thread, ThreadId,
+    ThreadStatus, Timestamp, Turn, TurnId, TurnKind, TurnStatus,
 };
 
 #[test]
@@ -177,6 +177,32 @@ fn view_model_projects_session_history_into_primary_transcript() {
     assert_eq!(view_model.transcript_entries[0].kind, TranscriptEntryKind::User);
     assert_eq!(view_model.transcript_entries[0].body, "explain the CLI");
     assert_eq!(view_model.transcript_entries[1].kind, TranscriptEntryKind::Assistant);
+}
+
+#[test]
+fn view_model_surfaces_missing_provider_configuration() {
+    let mut view_model = ViewModel::default();
+    view_model.apply_response(&ServerResponseEnvelope::Success(Box::new(
+        SuccessResponseEnvelope {
+            ok: true,
+            request_id: liz_protocol::RequestId::new("response_model_status"),
+            response: ResponsePayload::ModelStatus(ModelStatusResponse {
+                provider_id: "openai".to_owned(),
+                display_name: Some("OpenAI".to_owned()),
+                model_id: Some("gpt-5.4".to_owned()),
+                auth_kind: Some("api-key".to_owned()),
+                ready: false,
+                credential_configured: false,
+                credential_hints: vec!["OPENAI_API_KEY".to_owned()],
+                notes: vec!["Configure credentials with OPENAI_API_KEY".to_owned()],
+            }),
+        },
+    )));
+
+    assert_eq!(view_model.transcript_entries.len(), 1);
+    assert_eq!(view_model.transcript_entries[0].kind, TranscriptEntryKind::System);
+    assert!(view_model.transcript_entries[0].body.contains("Model provider is not ready"));
+    assert!(view_model.transcript_entries[0].body.contains("OPENAI_API_KEY"));
 }
 
 fn thread(id: &str, title: &str) -> Thread {

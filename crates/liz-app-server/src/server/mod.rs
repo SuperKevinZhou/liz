@@ -12,10 +12,10 @@ use liz_protocol::{
     ApprovalDecision, ApprovalRequestedEvent, ArtifactCreatedEvent, AssistantChunkEvent,
     AssistantCompletedEvent, CheckpointCreatedEvent, ClientRequestEnvelope, DiffAvailableEvent,
     ExecutorOutputChunkEvent, ExecutorTaskId, MemoryCompilationAppliedEvent,
-    MemoryDreamingCompletedEvent, MemoryInvalidationAppliedEvent, ProviderAuthProfile,
-    ProviderCredential, ServerEvent, ServerEventPayload, ServerResponseEnvelope, ThreadId,
-    ToolCallRequest, ToolCompletedEvent, TurnCancelRequest, TurnCompletedEvent, TurnFailedEvent,
-    TurnId,
+    MemoryDreamingCompletedEvent, MemoryInvalidationAppliedEvent, ModelStatusResponse,
+    ProviderAuthProfile, ProviderCredential, ServerEvent, ServerEventPayload,
+    ServerResponseEnvelope, ThreadId, ToolCallRequest, ToolCompletedEvent, TurnCancelRequest,
+    TurnCompletedEvent, TurnFailedEvent, TurnId,
 };
 use std::sync::mpsc::Receiver;
 
@@ -79,6 +79,16 @@ impl AppServer {
 
     /// Handles a single protocol request and returns the matching response envelope.
     pub fn handle_request(&mut self, envelope: ClientRequestEnvelope) -> ServerResponseEnvelope {
+        if matches!(envelope.request, liz_protocol::ClientRequest::ModelStatus(_)) {
+            return ServerResponseEnvelope::Success(Box::new(
+                liz_protocol::SuccessResponseEnvelope {
+                    ok: true,
+                    request_id: envelope.request_id,
+                    response: liz_protocol::ResponsePayload::ModelStatus(self.model_status()),
+                },
+            ));
+        }
+
         let request = envelope.request.clone();
         let handled = handlers::handle_request(&mut self.runtime, &self.executor, envelope);
         self.event_bus.publish_all(handled.events);
@@ -105,6 +115,11 @@ impl AppServer {
     /// Returns a shared reference to the runtime coordinator for direct inspection in tests.
     pub fn runtime(&self) -> &RuntimeCoordinator {
         &self.runtime
+    }
+
+    /// Returns the effective model/provider readiness status used by CLI startup diagnostics.
+    pub fn model_status(&self) -> ModelStatusResponse {
+        model_status_from_gateway(&self.gateway_with_provider_auth_profiles())
     }
 
     fn continue_turn_after_policy(&mut self, response: &ServerResponseEnvelope, input: String) {
@@ -476,6 +491,70 @@ impl AppServer {
 
         gateway
     }
+}
+
+fn model_status_from_gateway(gateway: &ModelGateway) -> ModelStatusResponse {
+    let provider_id = gateway.primary_provider_id().to_owned();
+    match gateway.resolved_primary_provider() {
+        Ok(provider) => {
+            let credential_hints = credential_hints_for_spec(&provider.spec);
+            let credential_configured = provider.api_key.is_some()
+                || matches!(provider.spec.auth_kind, crate::model::ProviderAuthKind::Local)
+                || provider.metadata.values().any(|value| !value.trim().is_empty());
+            let mut notes =
+                provider.spec.notes.iter().map(|note| (*note).to_owned()).collect::<Vec<_>>();
+            if !credential_configured {
+                notes.push(format!("Configure credentials with {}", credential_hints.join(" or ")));
+            }
+            ModelStatusResponse {
+                provider_id,
+                display_name: Some(provider.spec.display_name.to_owned()),
+                model_id: Some(provider.model_id),
+                auth_kind: Some(provider.spec.auth_kind.label().to_owned()),
+                ready: credential_configured,
+                credential_configured,
+                credential_hints,
+                notes,
+            }
+        }
+        Err(error) => {
+            let Some(spec) = gateway.provider_spec(&provider_id) else {
+                return ModelStatusResponse {
+                    provider_id,
+                    display_name: None,
+                    model_id: None,
+                    auth_kind: None,
+                    ready: false,
+                    credential_configured: false,
+                    credential_hints: Vec::new(),
+                    notes: vec![error.to_string()],
+                };
+            };
+            ModelStatusResponse {
+                provider_id,
+                display_name: Some(spec.display_name.to_owned()),
+                model_id: Some(spec.default_model.to_owned()),
+                auth_kind: Some(spec.auth_kind.label().to_owned()),
+                ready: false,
+                credential_configured: false,
+                credential_hints: credential_hints_for_spec(spec),
+                notes: vec![error.to_string()],
+            }
+        }
+    }
+}
+
+fn credential_hints_for_spec(spec: &crate::model::ProviderSpec) -> Vec<String> {
+    let mut hints = spec.credential_env_keys().into_iter().map(str::to_owned).collect::<Vec<_>>();
+    for strategy in &spec.auth_strategies {
+        for key in strategy.config_keys {
+            let key = (*key).to_owned();
+            if !hints.contains(&key) {
+                hints.push(key);
+            }
+        }
+    }
+    hints
 }
 
 fn select_default_auth_profiles(profiles: Vec<ProviderAuthProfile>) -> Vec<ProviderAuthProfile> {

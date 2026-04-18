@@ -10,9 +10,9 @@ use liz_protocol::events::{
 };
 use liz_protocol::{
     ApprovalRequest, ArtifactKind, MemoryEvidenceView, MemorySearchHit, MemorySessionEntry,
-    MemorySessionView, MemoryTopicSummary, MemoryWakeup, RecentConversationWakeupView,
-    ResponsePayload, ResumeSummary, ServerEvent, ServerEventPayload, ServerResponseEnvelope,
-    Thread, ThreadId, ThreadStatus,
+    MemorySessionView, MemoryTopicSummary, MemoryWakeup, ModelStatusResponse,
+    RecentConversationWakeupView, ResponsePayload, ResumeSummary, ServerEvent, ServerEventPayload,
+    ServerResponseEnvelope, Thread, ThreadId, ThreadStatus,
 };
 use std::collections::BTreeMap;
 
@@ -268,6 +268,9 @@ impl ViewModel {
                 ResponsePayload::ToolCall(response) => {
                     self.status_line = response.summary.clone();
                 }
+                ResponsePayload::ModelStatus(response) => {
+                    self.apply_model_status(response);
+                }
                 _ => {}
             },
             ServerResponseEnvelope::Error(error) => {
@@ -442,6 +445,34 @@ impl ViewModel {
             TranscriptEntry { kind: TranscriptEntryKind::User, body: message },
         );
         self.transcript_entries = self.pending_thread_start_entries.clone();
+    }
+
+    fn apply_model_status(&mut self, response: &ModelStatusResponse) {
+        let display_name = response.display_name.as_deref().unwrap_or(&response.provider_id);
+        if response.ready {
+            self.status_line = format!(
+                "{} ready{}",
+                display_name,
+                response.model_id.as_ref().map(|model| format!(" on {model}")).unwrap_or_default()
+            );
+            return;
+        }
+
+        let hint = if response.credential_hints.is_empty() {
+            "Configure a supported provider before sending model turns.".to_owned()
+        } else {
+            format!("Set {}", response.credential_hints.join(" or "))
+        };
+        let reason =
+            response.notes.first().cloned().unwrap_or_else(|| "provider is not ready".to_owned());
+        self.push_entry_for_selected_thread(
+            TranscriptEntryKind::System,
+            format!(
+                "Model provider is not ready.\nProvider: {display_name} ({})\nReason: {reason}\nNext: {hint}",
+                response.provider_id
+            ),
+        );
+        self.status_line = "Configure a model provider before sending real turns".to_owned();
     }
 
     fn push_entry_for_selected_thread(&mut self, kind: TranscriptEntryKind, body: String) {

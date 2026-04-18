@@ -64,6 +64,9 @@ pub enum ClientRequest {
     /// Lists persisted provider auth profiles.
     #[serde(rename = "provider_auth/list")]
     ProviderAuthList(ProviderAuthListRequest),
+    /// Reads the effective model/provider readiness status.
+    #[serde(rename = "model/status")]
+    ModelStatus(ModelStatusRequest),
     /// Creates or replaces a provider auth profile.
     #[serde(rename = "provider_auth/upsert")]
     ProviderAuthUpsert(ProviderAuthUpsertRequest),
@@ -234,6 +237,10 @@ pub struct ProviderAuthListRequest {
     /// Optional provider identifier filter.
     pub provider_id: Option<String>,
 }
+
+/// Reads effective model/provider readiness without exposing credentials.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelStatusRequest {}
 
 /// Creates or replaces a provider auth profile.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

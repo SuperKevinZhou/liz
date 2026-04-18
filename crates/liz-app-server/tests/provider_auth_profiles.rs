@@ -93,3 +93,57 @@ fn provider_auth_profiles_round_trip_through_server_and_storage() {
         other => panic!("unexpected envelope: {other:?}"),
     }
 }
+
+#[test]
+fn model_status_reports_missing_and_persisted_provider_credentials() {
+    let tmp = TempDir::new().expect("temp dir");
+    let paths = StoragePaths::new(tmp.path());
+    let mut server = AppServer::new(paths);
+
+    let missing = server.handle_request(ClientRequestEnvelope {
+        request_id: RequestId::new("req_model_status_missing"),
+        request: ClientRequest::ModelStatus(liz_protocol::ModelStatusRequest {}),
+    });
+    match missing {
+        ServerResponseEnvelope::Success(success) => match success.response {
+            ResponsePayload::ModelStatus(response) => {
+                assert_eq!(response.provider_id, "openai");
+                assert!(!response.ready);
+                assert!(!response.credential_configured);
+                assert!(response.credential_hints.contains(&"OPENAI_API_KEY".to_owned()));
+            }
+            other => panic!("unexpected response payload: {other:?}"),
+        },
+        other => panic!("unexpected envelope: {other:?}"),
+    }
+
+    let openai_profile = ProviderAuthProfile {
+        profile_id: "openai:default".to_owned(),
+        provider_id: "openai".to_owned(),
+        display_name: Some("OpenAI".to_owned()),
+        credential: ProviderCredential::ApiKey { api_key: "sk-demo".to_owned() },
+    };
+    server.handle_request(ClientRequestEnvelope {
+        request_id: RequestId::new("req_auth_upsert_openai"),
+        request: ClientRequest::ProviderAuthUpsert(ProviderAuthUpsertRequest {
+            profile: openai_profile,
+        }),
+    });
+
+    let configured = server.handle_request(ClientRequestEnvelope {
+        request_id: RequestId::new("req_model_status_configured"),
+        request: ClientRequest::ModelStatus(liz_protocol::ModelStatusRequest {}),
+    });
+    match configured {
+        ServerResponseEnvelope::Success(success) => match success.response {
+            ResponsePayload::ModelStatus(response) => {
+                assert_eq!(response.provider_id, "openai");
+                assert!(response.ready);
+                assert!(response.credential_configured);
+                assert_eq!(response.model_id.as_deref(), Some("gpt-5.4"));
+            }
+            other => panic!("unexpected response payload: {other:?}"),
+        },
+        other => panic!("unexpected envelope: {other:?}"),
+    }
+}

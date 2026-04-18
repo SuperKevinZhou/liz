@@ -246,6 +246,11 @@ impl ModelGateway {
             .collect()
     }
 
+    /// Returns the builtin provider spec for a provider identifier.
+    pub fn provider_spec(&self, provider_id: &str) -> Option<&crate::model::ProviderSpec> {
+        self.registry.provider(provider_id)
+    }
+
     /// Resolves the primary provider after applying overrides and environment defaults.
     pub fn resolved_primary_provider(&self) -> Result<ResolvedProvider, ModelError> {
         self.resolve_primary_provider()

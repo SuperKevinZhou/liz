@@ -82,6 +82,44 @@ fn error_response_envelope_serializes_error_payload() {
     assert_eq!(value["error"]["code"], "thread_not_found");
 }
 
+/// Ensures model status messages keep a stable wire shape for CLI startup diagnostics.
+#[test]
+fn model_status_messages_round_trip() {
+    let request = ClientRequestEnvelope {
+        request_id: RequestId::new("req_model_status"),
+        request: ClientRequest::ModelStatus(liz_protocol::ModelStatusRequest {}),
+    };
+    let response = ServerResponseEnvelope::Success(Box::new(SuccessResponseEnvelope {
+        ok: true,
+        request_id: RequestId::new("req_model_status"),
+        response: ResponsePayload::ModelStatus(liz_protocol::ModelStatusResponse {
+            provider_id: "openai".to_owned(),
+            display_name: Some("OpenAI".to_owned()),
+            model_id: Some("gpt-5.4".to_owned()),
+            auth_kind: Some("api-key".to_owned()),
+            ready: false,
+            credential_configured: false,
+            credential_hints: vec!["OPENAI_API_KEY".to_owned()],
+            notes: vec!["Configure credentials with OPENAI_API_KEY".to_owned()],
+        }),
+    }));
+
+    let request_value = serde_json::to_value(&request).expect("request should serialize");
+    let response_value = serde_json::to_value(&response).expect("response should serialize");
+
+    assert_eq!(request_value["method"], "model/status");
+    assert_eq!(response_value["method"], "model/status");
+    assert_eq!(response_value["data"]["provider_id"], "openai");
+
+    let request_round_trip: ClientRequestEnvelope =
+        serde_json::from_value(request_value).expect("request should deserialize");
+    let response_round_trip: ServerResponseEnvelope =
+        serde_json::from_value(response_value).expect("response should deserialize");
+
+    assert_eq!(request_round_trip, request);
+    assert_eq!(response_round_trip, response);
+}
+
 /// Ensures event envelopes serialize with the expected event type names.
 #[test]
 fn server_event_envelope_round_trips() {
