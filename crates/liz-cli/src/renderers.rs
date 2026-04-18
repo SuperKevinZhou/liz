@@ -17,7 +17,6 @@ const ACCENT: Color = Color::Cyan;
 const USER: Color = Color::Blue;
 const WARNING: Color = Color::Yellow;
 const SUCCESS: Color = Color::Green;
-const ERROR: Color = Color::Red;
 
 /// Minimal renderer metadata for banner and smoke surfaces.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,7 +42,8 @@ pub fn render(frame: &mut Frame<'_>, view_model: &ViewModel, server_url: &str) {
         ])
         .split(frame.area());
 
-    render_header(frame, layout[0], view_model, server_url);
+    let _ = server_url;
+    render_header(frame, layout[0], view_model);
     render_transcript(frame, layout[1], view_model);
     render_composer(frame, layout[2], view_model);
 
@@ -62,53 +62,22 @@ pub fn render(frame: &mut Frame<'_>, view_model: &ViewModel, server_url: &str) {
     }
 }
 
-fn render_header(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel, server_url: &str) {
+fn render_header(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
     let title =
         view_model.selected_thread().map(|thread| thread.title.as_str()).unwrap_or("new chat");
 
-    let left = vec![
+    let header = Line::from(vec![
         Span::styled("liz", Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
         Span::raw(" "),
         Span::styled(title, Style::default().fg(MUTED)),
-    ];
-
-    let right = if view_model.pending_approval_count() > 0 {
-        vec![Span::styled("Approval required", Style::default().fg(WARNING))]
-    } else if view_model.streaming_preview().is_some() {
-        vec![Span::styled("Responding…", Style::default().fg(ACCENT))]
-    } else if !view_model.status_line.is_empty() {
-        vec![Span::styled(
-            view_model.status_line.as_str(),
-            Style::default().fg(status_color(view_model)),
-        )]
-    } else if view_model.model_status.as_ref().map(|status| status.ready).unwrap_or(false) {
-        vec![Span::styled("Ready", Style::default().fg(SUCCESS))]
-    } else {
-        vec![
-            Span::styled("Not configured", Style::default().fg(MUTED)),
-            Span::raw(" "),
-            Span::styled(server_url, Style::default().fg(SUBTLE)),
-        ]
-    };
-
-    let sections = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(20), Constraint::Length(visible_width(&right) as u16)])
-        .split(area);
-
-    frame.render_widget(Paragraph::new(Line::from(left)), sections[0]);
-    frame.render_widget(Paragraph::new(Line::from(right)).alignment(Alignment::Right), sections[1]);
+    ]);
+    frame.render_widget(Paragraph::new(header).alignment(Alignment::Left), area);
 }
 
 fn render_transcript(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
     let mut lines = Vec::new();
 
-    append_status_block(&mut lines, view_model, area.width as usize);
-
     if let Some(summary) = wakeup_line(view_model) {
-        if !lines.is_empty() {
-            lines.push(Line::default());
-        }
         lines.push(Line::from(vec![
             Span::styled("resume", Style::default().fg(ACCENT)),
             Span::raw("  "),
@@ -164,10 +133,16 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
 
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(2), Constraint::Length(1)])
+        .constraints([Constraint::Length(1), Constraint::Min(1), Constraint::Length(1)])
         .split(inner);
 
     let placeholder = if view_model.slash_mode { "Type a command" } else { "Ask anything" };
+    frame.render_widget(
+        Paragraph::new(Line::from(status_line_spans(view_model)))
+            .style(Style::default().fg(MUTED))
+            .wrap(Wrap { trim: false }),
+        layout[0],
+    );
 
     let body = if view_model.input_buffer.is_empty() {
         Text::from(Line::from(vec![
@@ -195,27 +170,22 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
 
     frame.render_widget(
         Paragraph::new(body).wrap(Wrap { trim: false }).style(Style::default().fg(TEXT)),
-        layout[0],
+        layout[1],
     );
 
-    let footer = vec![
-        Span::styled("⏎", Style::default().fg(MUTED)),
-        Span::styled(" send", Style::default().fg(SUBTLE)),
-        Span::raw("  "),
-        Span::styled("⇧⏎", Style::default().fg(MUTED)),
-        Span::styled(" newline", Style::default().fg(SUBTLE)),
-        Span::raw("  "),
-        Span::styled("/", Style::default().fg(MUTED)),
-        Span::styled(" commands", Style::default().fg(SUBTLE)),
-        Span::raw("  "),
-        Span::styled("Tab", Style::default().fg(MUTED)),
-        Span::styled(
-            if view_model.slash_mode { " complete" } else { " browse" },
-            Style::default().fg(SUBTLE),
-        ),
-    ];
+    let footer = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Min(24),
+            Constraint::Length(footer_right_width(view_model) as u16),
+        ])
+        .split(layout[2]);
 
-    frame.render_widget(Paragraph::new(Line::from(footer)), layout[1]);
+    frame.render_widget(Paragraph::new(Line::from(footer_left_spans(view_model))), footer[0]);
+    frame.render_widget(
+        Paragraph::new(Line::from(footer_right_spans(view_model))).alignment(Alignment::Right),
+        footer[1],
+    );
 }
 
 fn render_approval_notice(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
@@ -269,57 +239,6 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, panel: OverlayPanel, view_m
         OverlayPanel::Memory => render_memory_overlay(frame, popup, view_model),
         OverlayPanel::Threads => render_threads_overlay(frame, popup, view_model),
     }
-}
-
-fn append_status_block(lines: &mut Vec<Line<'static>>, view_model: &ViewModel, width: usize) {
-    let provider_name = view_model
-        .model_status
-        .as_ref()
-        .and_then(|status| status.display_name.clone())
-        .unwrap_or_else(|| "Provider".to_owned());
-    let model_name = view_model
-        .model_status
-        .as_ref()
-        .and_then(|status| status.model_id.clone())
-        .unwrap_or_else(|| "Not configured".to_owned());
-    let state_label = if view_model.pending_approval_count() > 0 {
-        ("Approval required", WARNING)
-    } else if view_model.streaming_preview().is_some() {
-        ("Responding", ACCENT)
-    } else if view_model.model_status.as_ref().map(|status| status.ready).unwrap_or(false) {
-        ("Ready", SUCCESS)
-    } else {
-        ("Setup required", MUTED)
-    };
-
-    let line_width = width.clamp(32, 72);
-    let border = "─".repeat(line_width.saturating_sub(2));
-    lines.push(Line::from(Span::styled(border.clone(), Style::default().fg(BORDER_ACTIVE))));
-    lines.push(Line::from(vec![
-        Span::styled("status", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-        Span::raw("  "),
-        Span::styled(state_label.0, Style::default().fg(state_label.1)),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("provider", Style::default().fg(SUBTLE)),
-        Span::raw("  "),
-        Span::styled(provider_name, Style::default().fg(TEXT)),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("model", Style::default().fg(SUBTLE)),
-        Span::raw("     "),
-        Span::styled(model_name, Style::default().fg(MUTED)),
-    ]));
-
-    if !view_model.status_line.is_empty() {
-        lines.push(Line::from(vec![
-            Span::styled("note", Style::default().fg(SUBTLE)),
-            Span::raw("      "),
-            Span::styled(view_model.status_line.clone(), Style::default().fg(MUTED)),
-        ]));
-    }
-
-    lines.push(Line::from(Span::styled(border, Style::default().fg(BORDER_ACTIVE))));
 }
 
 fn render_command_palette_docked(
@@ -781,7 +700,7 @@ fn modal_block<'a>(title: &'a str) -> Block<'a> {
 }
 
 fn composer_height(view_model: &ViewModel) -> u16 {
-    view_model.input_buffer.lines().count().max(1).clamp(1, 6) as u16 + 2
+    view_model.input_buffer.lines().count().max(1).clamp(1, 6) as u16 + 3
 }
 
 fn centered_rect(area: Rect, width_percent: u16, height: u16) -> Rect {
@@ -852,21 +771,86 @@ fn tail_lines(lines: &[Line<'static>], limit: usize) -> Vec<Line<'static>> {
     }
 }
 
-fn status_color(view_model: &ViewModel) -> Color {
-    let status = view_model.status_line.to_ascii_lowercase();
-    if status.contains("failed") || status.contains("error") {
-        ERROR
-    } else if status.contains("ready") || status.contains("saved") || status.contains("opened") {
-        SUCCESS
-    } else if status.contains("approval") || status.contains("needs") {
-        WARNING
-    } else {
-        MUTED
-    }
-}
-
 fn first_non_empty_line(text: &str) -> String {
     text.lines().find(|line| !line.trim().is_empty()).unwrap_or(text).to_owned()
+}
+
+fn status_line_spans(view_model: &ViewModel) -> Vec<Span<'static>> {
+    let (label, color) = if view_model.pending_approval_count() > 0 {
+        ("Approval required", WARNING)
+    } else if view_model.streaming_preview().is_some() {
+        ("Responding…", ACCENT)
+    } else if view_model.model_status.as_ref().map(|status| status.ready).unwrap_or(false) {
+        ("Ready", SUCCESS)
+    } else {
+        ("Setup required", MUTED)
+    };
+    let mut spans = vec![Span::styled(label, Style::default().fg(color))];
+    if !view_model.status_line.is_empty() {
+        spans.push(Span::styled("  ", Style::default().fg(MUTED)));
+        spans.push(Span::styled(view_model.status_line.clone(), Style::default().fg(MUTED)));
+    }
+    spans
+}
+
+fn footer_left_spans(view_model: &ViewModel) -> Vec<Span<'static>> {
+    if view_model.pending_approval_count() > 0 {
+        return vec![
+            Span::styled("Enter", Style::default().fg(MUTED)),
+            Span::styled(" approve", Style::default().fg(SUBTLE)),
+            Span::raw("  "),
+            Span::styled("Esc", Style::default().fg(MUTED)),
+            Span::styled(" deny", Style::default().fg(SUBTLE)),
+        ];
+    }
+
+    let mut spans = vec![
+        Span::styled("?", Style::default().fg(MUTED)),
+        Span::styled(" for shortcuts", Style::default().fg(SUBTLE)),
+    ];
+
+    if !view_model.input_buffer.is_empty() {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled("Esc", Style::default().fg(MUTED)));
+        spans.push(Span::styled(" clear", Style::default().fg(SUBTLE)));
+    }
+
+    spans
+}
+
+fn footer_right_spans(view_model: &ViewModel) -> Vec<Span<'static>> {
+    let provider_name = view_model
+        .model_status
+        .as_ref()
+        .and_then(|status| status.display_name.clone())
+        .unwrap_or_else(|| "Provider".to_owned());
+    let model_name = view_model
+        .model_status
+        .as_ref()
+        .and_then(|status| status.model_id.clone())
+        .unwrap_or_else(|| "Not configured".to_owned());
+
+    let mut spans = vec![Span::styled(provider_name, Style::default().fg(MUTED))];
+    if !model_name.is_empty() {
+        spans.push(Span::styled("  ", Style::default().fg(MUTED)));
+        spans.push(Span::styled(model_name, Style::default().fg(SUBTLE)));
+    }
+
+    if view_model.slash_mode {
+        spans.push(Span::styled("  ", Style::default().fg(MUTED)));
+        spans.push(Span::styled("Tab", Style::default().fg(MUTED)));
+        spans.push(Span::styled(" complete", Style::default().fg(SUBTLE)));
+    } else {
+        spans.push(Span::styled("  ", Style::default().fg(MUTED)));
+        spans.push(Span::styled("/", Style::default().fg(MUTED)));
+        spans.push(Span::styled(" commands", Style::default().fg(SUBTLE)));
+    }
+
+    spans
+}
+
+fn footer_right_width(view_model: &ViewModel) -> usize {
+    visible_width(&footer_right_spans(view_model)).max(24)
 }
 
 fn visible_width(spans: &[Span<'_>]) -> usize {
