@@ -9,19 +9,25 @@ use liz_protocol::events::{
     TurnCancelledEvent, TurnCompletedEvent, TurnFailedEvent, TurnStartedEvent,
 };
 use liz_protocol::{
-    ApprovalRequest, ArtifactKind, MemoryEvidenceView, MemorySearchHit, MemorySessionView,
-    MemoryTopicSummary, MemoryWakeup, RecentConversationWakeupView, ResponsePayload, ResumeSummary,
-    ServerEvent, ServerEventPayload, ServerResponseEnvelope, Thread, ThreadId, ThreadStatus,
+    ApprovalRequest, ArtifactKind, MemoryEvidenceView, MemorySearchHit, MemorySessionEntry,
+    MemorySessionView, MemoryTopicSummary, MemoryWakeup, RecentConversationWakeupView,
+    ResponsePayload, ResumeSummary, ServerEvent, ServerEventPayload, ServerResponseEnvelope,
+    Thread, ThreadId, ThreadStatus,
 };
 use std::collections::BTreeMap;
 
 /// Transcript entry categories surfaced by the chat shell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TranscriptEntryKind {
+    /// User-authored input.
     User,
+    /// Assistant output produced by the model runtime.
     Assistant,
+    /// Tool execution progress or completion output.
     Tool,
+    /// Approval request surfaced inline with the conversation.
     Approval,
+    /// Runtime status, interruption, memory, or error notes.
     System,
 }
 
@@ -41,15 +47,20 @@ impl TranscriptEntryKind {
 /// A single transcript item rendered in the primary conversation flow.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TranscriptEntry {
+    /// The rendering category for the transcript entry.
     pub kind: TranscriptEntryKind,
+    /// The user-visible transcript body.
     pub body: String,
 }
 
 /// Overlay surfaces that can temporarily take focus without replacing the transcript.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OverlayPanel {
+    /// Command and keyboard help.
     Help,
+    /// Memory search result overlay.
     Search,
+    /// Wake-up, recall, evidence, and compiled-experience overlay.
     Memory,
 }
 
@@ -64,6 +75,8 @@ pub struct ViewModel {
     pub selected_thread_index: usize,
     /// Transcript entries shown in the primary chat flow.
     pub transcript_entries: Vec<TranscriptEntry>,
+    /// Transcript entries keyed by their owning thread.
+    pub thread_transcripts: BTreeMap<ThreadId, Vec<TranscriptEntry>>,
     /// Approvals currently waiting on user action.
     pub pending_approvals: Vec<ApprovalRequest>,
     /// The latest resume summary returned by the server.
@@ -94,6 +107,7 @@ pub struct ViewModel {
     pub show_thread_rail: bool,
     /// The active overlay panel, if any.
     pub active_overlay: Option<OverlayPanel>,
+    pending_thread_start_entries: Vec<TranscriptEntry>,
     assistant_streaming: Option<String>,
 }
 
@@ -171,11 +185,13 @@ impl ViewModel {
             ServerResponseEnvelope::Success(success) => match &success.response {
                 ResponsePayload::ThreadStart(response) => {
                     self.upsert_thread(response.thread.clone());
+                    self.attach_pending_entries_to_thread(&response.thread.id);
                     self.status_line = format!("Started {}", response.thread.title);
                 }
                 ResponsePayload::ThreadResume(response) => {
                     self.upsert_thread(response.thread.clone());
                     self.resume_summary = response.resume_summary.clone();
+                    self.sync_visible_transcript();
                     self.status_line = format!("Resumed {}", response.thread.title);
                 }
                 ResponsePayload::ThreadList(response) => {
@@ -191,6 +207,7 @@ impl ViewModel {
                             self.threads.iter().position(|thread| thread.id == selected_id)
                         })
                         .unwrap_or(0);
+                    self.sync_visible_transcript();
                     self.status_line = match self.threads.len() {
                         0 => "No threads yet".to_owned(),
                         1 => "Loaded 1 thread".to_owned(),
@@ -199,6 +216,7 @@ impl ViewModel {
                 }
                 ResponsePayload::ThreadFork(response) => {
                     self.upsert_thread(response.thread.clone());
+                    self.sync_visible_transcript();
                     self.status_line = format!("Forked {}", response.thread.title);
                 }
                 ResponsePayload::MemoryReadWakeup(response) => {
@@ -217,6 +235,7 @@ impl ViewModel {
                 }
                 ResponsePayload::MemoryOpenSession(response) => {
                     self.session_view = Some(response.session.clone());
+                    self.replace_thread_history(&response.session);
                     self.status_line = format!("Opened {}", response.session.title);
                 }
                 ResponsePayload::MemoryOpenEvidence(response) => {
@@ -252,7 +271,10 @@ impl ViewModel {
                 _ => {}
             },
             ServerResponseEnvelope::Error(error) => {
-                self.push_entry(TranscriptEntryKind::System, error.error.message.clone());
+                self.push_entry_for_selected_thread(
+                    TranscriptEntryKind::System,
+                    error.error.message.clone(),
+                );
                 self.status_line = error.error.message.clone();
             }
         }
@@ -270,6 +292,13 @@ impl ViewModel {
                 self.upsert_thread(thread.clone());
             }
             ServerEventPayload::TurnStarted(TurnStartedEvent { turn }) => {
+                if let Some(goal) = turn.goal.as_ref().filter(|goal| !goal.trim().is_empty()) {
+                    self.push_thread_entry(
+                        event.thread_id.clone(),
+                        TranscriptEntryKind::User,
+                        goal.clone(),
+                    );
+                }
                 self.status_line = turn
                     .goal
                     .clone()
@@ -281,11 +310,19 @@ impl ViewModel {
                     turn.summary.clone().unwrap_or_else(|| "Turn completed".to_owned());
             }
             ServerEventPayload::TurnFailed(TurnFailedEvent { message, .. }) => {
-                self.push_entry(TranscriptEntryKind::System, format!("Turn failed: {message}"));
+                self.push_thread_entry(
+                    event.thread_id.clone(),
+                    TranscriptEntryKind::System,
+                    format!("Turn failed: {message}"),
+                );
                 self.status_line = message.clone();
             }
             ServerEventPayload::TurnCancelled(TurnCancelledEvent { .. }) => {
-                self.push_entry(TranscriptEntryKind::System, "Turn interrupted".to_owned());
+                self.push_thread_entry(
+                    event.thread_id.clone(),
+                    TranscriptEntryKind::System,
+                    "Turn interrupted".to_owned(),
+                );
                 self.status_line = "Turn interrupted".to_owned();
             }
             ServerEventPayload::AssistantChunk(AssistantChunkEvent { chunk, .. }) => {
@@ -295,7 +332,11 @@ impl ViewModel {
             }
             ServerEventPayload::AssistantCompleted(AssistantCompletedEvent { message }) => {
                 self.assistant_streaming = None;
-                self.push_entry(TranscriptEntryKind::Assistant, message.clone());
+                self.push_thread_entry(
+                    event.thread_id.clone(),
+                    TranscriptEntryKind::Assistant,
+                    message.clone(),
+                );
                 self.status_line = "Reply finished".to_owned();
             }
             ServerEventPayload::ToolCallStarted(ToolCallStartedEvent {
@@ -327,16 +368,25 @@ impl ViewModel {
             ServerEventPayload::ToolCompleted(ToolCompletedEvent {
                 tool_name, summary, ..
             }) => {
-                self.push_entry(TranscriptEntryKind::Tool, format!("{tool_name}: {summary}"));
+                self.push_thread_entry(
+                    event.thread_id.clone(),
+                    TranscriptEntryKind::Tool,
+                    format!("{tool_name}: {summary}"),
+                );
                 self.status_line = format!("{tool_name} finished");
             }
             ServerEventPayload::ToolFailed(ToolFailedEvent { tool_name, summary }) => {
-                self.push_entry(TranscriptEntryKind::Tool, format!("{tool_name}: {summary}"));
+                self.push_thread_entry(
+                    event.thread_id.clone(),
+                    TranscriptEntryKind::Tool,
+                    format!("{tool_name}: {summary}"),
+                );
                 self.status_line = format!("{tool_name} failed");
             }
             ServerEventPayload::ApprovalRequested(ApprovalRequestedEvent { approval }) => {
                 self.pending_approvals.push(approval.clone());
-                self.push_entry(
+                self.push_thread_entry(
+                    event.thread_id.clone(),
                     TranscriptEntryKind::Approval,
                     format!("{} needs approval: {}", approval.id, approval.reason),
                 );
@@ -344,7 +394,8 @@ impl ViewModel {
             }
             ServerEventPayload::ApprovalResolved(ApprovalResolvedEvent { approval, decision }) => {
                 self.pending_approvals.retain(|pending| pending.id != approval.id);
-                self.push_entry(
+                self.push_thread_entry(
+                    event.thread_id.clone(),
                     TranscriptEntryKind::System,
                     format!("Approval {} resolved as {:?}", approval.id, decision),
                 );
@@ -362,7 +413,8 @@ impl ViewModel {
                 compilation,
             }) => {
                 self.candidate_procedures = compilation.candidate_procedures.clone();
-                self.push_entry(
+                self.push_thread_entry(
+                    event.thread_id.clone(),
                     TranscriptEntryKind::System,
                     format!("Memory updated: {}", compilation.delta_summary),
                 );
@@ -380,11 +432,32 @@ impl ViewModel {
 
     /// Adds a user message to the transcript.
     pub fn push_user_message(&mut self, message: String) {
-        self.push_entry(TranscriptEntryKind::User, message);
+        self.push_entry_for_selected_thread(TranscriptEntryKind::User, message);
     }
 
-    fn push_entry(&mut self, kind: TranscriptEntryKind, body: String) {
-        self.transcript_entries.push(TranscriptEntry { kind, body });
+    /// Adds the first user message while a new thread request is still in flight.
+    pub fn push_pending_thread_start_message(&mut self, message: String) {
+        push_deduped_entry(
+            &mut self.pending_thread_start_entries,
+            TranscriptEntry { kind: TranscriptEntryKind::User, body: message },
+        );
+        self.transcript_entries = self.pending_thread_start_entries.clone();
+    }
+
+    fn push_entry_for_selected_thread(&mut self, kind: TranscriptEntryKind, body: String) {
+        if let Some(thread_id) = self.selected_thread_id() {
+            self.push_thread_entry(thread_id, kind, body);
+        } else {
+            push_deduped_entry(&mut self.transcript_entries, TranscriptEntry { kind, body });
+        }
+    }
+
+    fn push_thread_entry(&mut self, thread_id: ThreadId, kind: TranscriptEntryKind, body: String) {
+        let entry = TranscriptEntry { kind, body };
+        push_deduped_entry(self.thread_transcripts.entry(thread_id.clone()).or_default(), entry);
+        if self.selected_thread_id().as_ref() == Some(&thread_id) {
+            self.sync_visible_transcript();
+        }
     }
 
     fn upsert_thread(&mut self, thread: Thread) {
@@ -400,5 +473,78 @@ impl ViewModel {
             .or(Some(thread.id))
             .and_then(|selected_id| self.threads.iter().position(|item| item.id == selected_id))
             .unwrap_or(0);
+        self.sync_visible_transcript();
     }
+
+    fn sync_visible_transcript(&mut self) {
+        self.transcript_entries = self
+            .selected_thread_id()
+            .and_then(|thread_id| self.thread_transcripts.get(&thread_id).cloned())
+            .unwrap_or_default();
+    }
+
+    fn attach_pending_entries_to_thread(&mut self, thread_id: &ThreadId) {
+        if self.pending_thread_start_entries.is_empty() {
+            self.sync_visible_transcript();
+            return;
+        }
+
+        let transcript = self.thread_transcripts.entry(thread_id.clone()).or_default();
+        for entry in self.pending_thread_start_entries.drain(..) {
+            push_deduped_entry(transcript, entry);
+        }
+        self.sync_visible_transcript();
+    }
+
+    fn replace_thread_history(&mut self, session: &MemorySessionView) {
+        let mut history =
+            session.recent_entries.iter().filter_map(entry_from_session).collect::<Vec<_>>();
+
+        if let Some(existing) = self.thread_transcripts.get(&session.thread_id) {
+            for entry in existing {
+                push_deduped_entry(&mut history, entry.clone());
+            }
+        }
+
+        self.thread_transcripts.insert(session.thread_id.clone(), history);
+        if self.selected_thread_id().as_ref() == Some(&session.thread_id) {
+            self.sync_visible_transcript();
+        }
+    }
+}
+
+fn entry_from_session(entry: &MemorySessionEntry) -> Option<TranscriptEntry> {
+    let body = entry.summary.trim();
+    if body.is_empty() {
+        return None;
+    }
+
+    let (kind, body) = match entry.event.as_str() {
+        "turn_started" => (
+            TranscriptEntryKind::User,
+            body.strip_prefix("Started turn for: ").unwrap_or(body).to_owned(),
+        ),
+        "turn_completed" => (TranscriptEntryKind::Assistant, body.to_owned()),
+        "tool_completed" => (TranscriptEntryKind::Tool, body.to_owned()),
+        "approval_wait" => (TranscriptEntryKind::Approval, body.to_owned()),
+        "approval_resolved" => (TranscriptEntryKind::System, body.to_owned()),
+        "turn_cancelled" => (TranscriptEntryKind::System, format!("Interrupted: {body}")),
+        "turn_failed" => (TranscriptEntryKind::System, format!("Turn failed: {body}")),
+        _ => (TranscriptEntryKind::System, body.to_owned()),
+    };
+
+    Some(TranscriptEntry { kind, body })
+}
+
+fn push_deduped_entry(entries: &mut Vec<TranscriptEntry>, entry: TranscriptEntry) {
+    if entry.body.trim().is_empty() {
+        return;
+    }
+    if entries.last() == Some(&entry) {
+        return;
+    }
+    if entries.iter().rev().take(3).any(|existing| existing == &entry) {
+        return;
+    }
+    entries.push(entry);
 }

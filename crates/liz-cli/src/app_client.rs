@@ -256,6 +256,18 @@ fn handshake_error_is_retryable(
         tungstenite::HandshakeError::Interrupted(_) => true,
         tungstenite::HandshakeError::Failure(error) => {
             error.to_string().contains("Handshake not finished")
+                || matches!(
+                    error,
+                    tungstenite::Error::Io(error)
+                        if matches!(
+                            error.kind(),
+                            ErrorKind::WouldBlock
+                                | ErrorKind::TimedOut
+                                | ErrorKind::Interrupted
+                                | ErrorKind::ConnectionAborted
+                                | ErrorKind::ConnectionReset
+                        )
+                )
         }
     }
 }

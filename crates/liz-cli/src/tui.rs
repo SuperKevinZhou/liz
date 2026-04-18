@@ -101,13 +101,21 @@ struct CliApp {
     server_url: String,
     next_request_number: u64,
     should_exit: bool,
+    pending_new_thread_input: Option<String>,
 }
 
 impl CliApp {
     fn new(client: WebSocketAppClient, server_url: String) -> Self {
         let mut view_model = ViewModel::default();
         view_model.status_line = "Connected. Loading conversations...".to_owned();
-        Self { client, view_model, server_url, next_request_number: 1, should_exit: false }
+        Self {
+            client,
+            view_model,
+            server_url,
+            next_request_number: 1,
+            should_exit: false,
+            pending_new_thread_input: None,
+        }
     }
 
     fn bootstrap(&mut self) -> Result<(), AppClientError> {
@@ -189,8 +197,7 @@ impl CliApp {
         }
 
         let Some(thread_id) = self.view_model.selected_thread_id() else {
-            self.view_model.status_line =
-                "Start a conversation with /new <message> before sending a reply".to_owned();
+            self.start_thread_from_message(input)?;
             return Ok(());
         };
 
@@ -258,18 +265,31 @@ impl CliApp {
 
     fn start_new_thread(&mut self, argument: &str) -> Result<(), Box<dyn std::error::Error>> {
         if argument.is_empty() {
-            self.view_model.status_line = "Use /new <message> to start a conversation".to_owned();
+            self.pending_new_thread_input = None;
+            self.view_model.transcript_entries.clear();
+            self.view_model.close_overlay();
+            self.view_model.status_line =
+                "New conversation ready. Type the first message when you are ready.".to_owned();
             return Ok(());
         }
 
-        let title = argument.chars().take(48).collect::<String>();
-        self.view_model.push_user_message(argument.to_owned());
+        self.start_thread_from_message(argument.to_owned())?;
+        Ok(())
+    }
+
+    fn start_thread_from_message(
+        &mut self,
+        input: String,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let title = input.chars().take(48).collect::<String>();
+        self.pending_new_thread_input = Some(input.clone());
+        self.view_model.push_pending_thread_start_message(input.clone());
         self.send_request(ClientRequest::ThreadStart(ThreadStartRequest {
             title: Some(title),
-            initial_goal: Some(argument.to_owned()),
+            initial_goal: Some(input),
             workspace_ref: None,
         }))?;
-        self.view_model.status_line = "Starting new conversation".to_owned();
+        self.view_model.status_line = "Starting conversation".to_owned();
         Ok(())
     }
 
@@ -321,6 +341,13 @@ impl CliApp {
                 ResponsePayload::ThreadStart(response) => {
                     self.refresh_threads()?;
                     self.load_thread_surfaces(&response.thread.id)?;
+                    if let Some(input) = self.pending_new_thread_input.take() {
+                        self.send_request(ClientRequest::TurnStart(TurnStartRequest {
+                            thread_id: response.thread.id.clone(),
+                            input,
+                            input_kind: TurnInputKind::UserMessage,
+                        }))?;
+                    }
                 }
                 ResponsePayload::ThreadResume(response) => {
                     self.refresh_threads()?;
@@ -535,6 +562,10 @@ impl Drop for TerminalGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use liz_protocol::{
+        ClientRequest, ResponsePayload, ServerResponseEnvelope, SuccessResponseEnvelope, Thread,
+        ThreadStartResponse, ThreadStatus, Timestamp,
+    };
     use std::sync::mpsc;
 
     #[test]
@@ -583,11 +614,77 @@ mod tests {
         assert!(!app.should_exit);
     }
 
+    #[test]
+    fn first_plain_message_starts_thread_then_turn() {
+        let (request_tx, request_rx) = mpsc::channel();
+        let (_response_tx, response_rx) = mpsc::channel();
+        let (_event_tx, event_rx) = mpsc::channel();
+        let client = WebSocketAppClient::new(request_tx, response_rx, event_rx);
+        let mut app = CliApp::new(client, DEFAULT_SERVER_URL.to_owned());
+
+        app.view_model.input_buffer = "hello liz".to_owned();
+        app.submit_input().expect("plain first message should start a thread");
+
+        let thread_start = request_rx.recv().expect("thread/start request should be sent");
+        assert!(matches!(thread_start.request, ClientRequest::ThreadStart(_)));
+
+        let thread = test_thread("thread_01", "hello liz");
+        app.follow_up_after_response(&ServerResponseEnvelope::Success(Box::new(
+            SuccessResponseEnvelope {
+                ok: true,
+                request_id: RequestId::new("test_response"),
+                response: ResponsePayload::ThreadStart(ThreadStartResponse { thread }),
+            },
+        )))
+        .expect("thread/start follow-up should send the pending turn");
+
+        let follow_up_requests = (0..5)
+            .map(|_| request_rx.recv().expect("follow-up request should be sent").request)
+            .collect::<Vec<_>>();
+        assert!(follow_up_requests
+            .iter()
+            .any(|request| { matches!(request, ClientRequest::MemoryReadWakeup(_)) }));
+        assert!(follow_up_requests
+            .iter()
+            .any(|request| { matches!(request, ClientRequest::MemoryOpenSession(_)) }));
+        assert!(follow_up_requests
+            .iter()
+            .any(|request| { matches!(request, ClientRequest::MemoryListTopics(_)) }));
+        let turn_start = follow_up_requests
+            .into_iter()
+            .find(|request| matches!(request, ClientRequest::TurnStart(_)))
+            .expect("turn/start request should be sent");
+        match turn_start {
+            ClientRequest::TurnStart(request) => {
+                assert_eq!(request.thread_id, ThreadId::new("thread_01"));
+                assert_eq!(request.input, "hello liz");
+            }
+            other => panic!("expected turn/start, got {other:?}"),
+        }
+    }
+
     fn test_app() -> CliApp {
         let (request_tx, _request_rx) = mpsc::channel();
         let (_response_tx, response_rx) = mpsc::channel();
         let (_event_tx, event_rx) = mpsc::channel();
         let client = WebSocketAppClient::new(request_tx, response_rx, event_rx);
         CliApp::new(client, DEFAULT_SERVER_URL.to_owned())
+    }
+
+    fn test_thread(id: &str, title: &str) -> Thread {
+        Thread {
+            id: ThreadId::new(id),
+            title: title.to_owned(),
+            status: ThreadStatus::Active,
+            created_at: Timestamp::new("2026-04-18T00:00:00Z"),
+            updated_at: Timestamp::new("2026-04-18T00:00:00Z"),
+            active_goal: Some(title.to_owned()),
+            active_summary: None,
+            last_interruption: None,
+            pending_commitments: Vec::new(),
+            latest_turn_id: None,
+            latest_checkpoint_id: None,
+            parent_thread_id: None,
+        }
     }
 }

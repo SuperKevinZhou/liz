@@ -6,8 +6,10 @@ use liz_protocol::events::{
     ThreadStartedEvent, TurnCancelledEvent, TurnStartedEvent,
 };
 use liz_protocol::{
-    EventId, MemoryCompilationSummary, MemoryWakeup, ServerEvent, ServerEventPayload, Thread,
-    ThreadId, ThreadStatus, Timestamp, Turn, TurnId, TurnKind, TurnStatus,
+    EventId, MemoryCompilationSummary, MemoryOpenSessionResponse, MemorySessionEntry,
+    MemorySessionView, MemoryWakeup, ResponsePayload, ServerEvent, ServerEventPayload,
+    ServerResponseEnvelope, SuccessResponseEnvelope, Thread, ThreadId, ThreadStatus, Timestamp,
+    Turn, TurnId, TurnKind, TurnStatus,
 };
 
 #[test]
@@ -110,14 +112,86 @@ fn view_model_projects_thread_and_turn_events() {
         view_model.thread_statuses.get(&ThreadId::new("thread_01")),
         Some(&ThreadStatus::Active)
     );
-    assert_eq!(view_model.transcript_entries.len(), 2);
-    assert_eq!(view_model.transcript_entries[0].kind, TranscriptEntryKind::System);
-    assert!(view_model.transcript_entries[0].body.contains("Turn interrupted"));
+    assert_eq!(view_model.transcript_entries.len(), 3);
+    assert_eq!(view_model.transcript_entries[0].kind, TranscriptEntryKind::User);
+    assert!(view_model.transcript_entries[0].body.contains("Start event stream"));
     assert_eq!(view_model.transcript_entries[1].kind, TranscriptEntryKind::System);
-    assert!(view_model.transcript_entries[1].body.contains("Memory updated"));
+    assert!(view_model.transcript_entries[1].body.contains("Turn interrupted"));
+    assert_eq!(view_model.transcript_entries[2].kind, TranscriptEntryKind::System);
+    assert!(view_model.transcript_entries[2].body.contains("Memory updated"));
     assert!(
         view_model.status_line.contains("Reflection") || view_model.status_line.contains("updated")
     );
     assert!(view_model.wakeup.is_some());
     assert_eq!(view_model.dreaming_summaries.len(), 1);
+}
+
+#[test]
+fn view_model_projects_session_history_into_primary_transcript() {
+    let thread_id = ThreadId::new("thread_history");
+    let mut view_model = ViewModel::default();
+    view_model.apply_event(&ServerEvent {
+        event_id: EventId::new("event_history_thread"),
+        thread_id: thread_id.clone(),
+        turn_id: None,
+        created_at: Timestamp::new("2026-04-18T00:00:00Z"),
+        payload: ServerEventPayload::ThreadStarted(ThreadStartedEvent {
+            thread: thread("thread_history", "History"),
+        }),
+    });
+
+    view_model.apply_response(&ServerResponseEnvelope::Success(Box::new(
+        SuccessResponseEnvelope {
+            ok: true,
+            request_id: liz_protocol::RequestId::new("response_history"),
+            response: ResponsePayload::MemoryOpenSession(MemoryOpenSessionResponse {
+                session: MemorySessionView {
+                    thread_id,
+                    title: "History".to_owned(),
+                    status: ThreadStatus::Active,
+                    active_summary: Some("Continue history".to_owned()),
+                    pending_commitments: Vec::new(),
+                    recent_entries: vec![
+                        MemorySessionEntry {
+                            recorded_at: Timestamp::new("2026-04-18T00:00:01Z"),
+                            event: "turn_started".to_owned(),
+                            summary: "Started turn for: explain the CLI".to_owned(),
+                            turn_id: Some(TurnId::new("turn_01")),
+                            artifact_ids: Vec::new(),
+                        },
+                        MemorySessionEntry {
+                            recorded_at: Timestamp::new("2026-04-18T00:00:02Z"),
+                            event: "turn_completed".to_owned(),
+                            summary: "The CLI keeps a continuous transcript.".to_owned(),
+                            turn_id: Some(TurnId::new("turn_01")),
+                            artifact_ids: Vec::new(),
+                        },
+                    ],
+                    artifacts: Vec::new(),
+                },
+            }),
+        },
+    )));
+
+    assert_eq!(view_model.transcript_entries.len(), 2);
+    assert_eq!(view_model.transcript_entries[0].kind, TranscriptEntryKind::User);
+    assert_eq!(view_model.transcript_entries[0].body, "explain the CLI");
+    assert_eq!(view_model.transcript_entries[1].kind, TranscriptEntryKind::Assistant);
+}
+
+fn thread(id: &str, title: &str) -> Thread {
+    Thread {
+        id: ThreadId::new(id),
+        title: title.to_owned(),
+        status: ThreadStatus::Active,
+        created_at: Timestamp::new("2026-04-18T00:00:00Z"),
+        updated_at: Timestamp::new("2026-04-18T00:00:00Z"),
+        active_goal: Some(title.to_owned()),
+        active_summary: None,
+        last_interruption: None,
+        pending_commitments: Vec::new(),
+        latest_turn_id: None,
+        latest_checkpoint_id: None,
+        parent_thread_id: None,
+    }
 }

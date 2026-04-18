@@ -39,10 +39,10 @@ pub fn render(frame: &mut Frame<'_>, view_model: &ViewModel, server_url: &str) {
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(2),
+            Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Min(10),
-            Constraint::Length(5),
+            Constraint::Length(composer_height(view_model)),
         ])
         .split(frame.area());
 
@@ -57,30 +57,27 @@ pub fn render(frame: &mut Frame<'_>, view_model: &ViewModel, server_url: &str) {
 }
 
 fn render_header(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel, server_url: &str) {
-    let title = view_model
-        .selected_thread()
-        .map(|thread| thread.title.as_str())
-        .unwrap_or("New conversation");
+    let title =
+        view_model.selected_thread().map(|thread| thread.title.as_str()).unwrap_or("untitled");
     let approval_badge = if view_model.pending_approval_count() > 0 {
         format!("approval {}", view_model.pending_approval_count())
     } else {
         String::new()
     };
     let wakeup_badge = if view_model.has_wakeup_context() { "wake-up" } else { "" };
-    let mut header = vec![
-        Span::styled("liz", Style::default().fg(BRAND).add_modifier(Modifier::BOLD)),
-        Span::raw("  "),
-        Span::styled(title, Style::default().fg(TEXT_PRIMARY).add_modifier(Modifier::BOLD)),
-    ];
+    let mut header = vec![Span::styled(
+        format!("liz  {title}"),
+        Style::default().fg(TEXT_PRIMARY).add_modifier(Modifier::BOLD),
+    )];
     if !approval_badge.is_empty() {
-        header.push(Span::raw("  "));
+        header.push(Span::raw("   "));
         header.push(Span::styled(approval_badge, Style::default().fg(APPROVAL)));
     }
     if !wakeup_badge.is_empty() {
-        header.push(Span::raw("  "));
+        header.push(Span::raw("   "));
         header.push(Span::styled(wakeup_badge, Style::default().fg(ACCENT)));
     }
-    header.push(Span::raw("  "));
+    header.push(Span::raw("   "));
     header.push(Span::styled(server_url, Style::default().fg(TEXT_MUTED)));
 
     frame.render_widget(Paragraph::new(Line::from(header)).wrap(Wrap { trim: false }), area);
@@ -174,28 +171,39 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) 
 }
 
 fn render_composer(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
-    let placeholder = "Message liz...  /help for commands, /threads to browse conversations";
+    let placeholder = "What should liz do next?  /help for commands";
     let body = if view_model.input_buffer.is_empty() {
-        Text::from(Line::from(Span::styled(placeholder, Style::default().fg(TEXT_MUTED))))
+        Text::from(Line::from(vec![
+            Span::styled("> ", Style::default().fg(BRAND).add_modifier(Modifier::BOLD)),
+            Span::styled(placeholder, Style::default().fg(TEXT_MUTED)),
+        ]))
     } else {
-        Text::from(view_model.input_buffer.clone())
+        let mut lines = Vec::new();
+        for (index, line) in view_model.input_buffer.lines().enumerate() {
+            let prefix = if index == 0 { "> " } else { "  " };
+            lines.push(Line::from(vec![
+                Span::styled(prefix, Style::default().fg(BRAND).add_modifier(Modifier::BOLD)),
+                Span::styled(line.to_owned(), Style::default().fg(TEXT_PRIMARY)),
+            ]));
+        }
+        Text::from(lines)
     };
-    let title = Line::from(vec![
-        Span::styled("liz >", Style::default().fg(BRAND).add_modifier(Modifier::BOLD)),
-        Span::raw("  "),
-        Span::styled("Enter send", Style::default().fg(COMPOSER_HINT)),
-        Span::raw("  "),
-        Span::styled("Shift+Enter newline", Style::default().fg(COMPOSER_HINT)),
-        Span::raw("  "),
-        Span::styled(view_model.status_line.as_str(), Style::default().fg(ACCENT)),
-    ]);
 
     frame.render_widget(
-        Paragraph::new(body)
-            .wrap(Wrap { trim: false })
-            .block(composer_block(title))
-            .style(Style::default().fg(TEXT_PRIMARY)),
+        Paragraph::new(body).wrap(Wrap { trim: false }).style(Style::default().fg(TEXT_PRIMARY)),
         area,
+    );
+
+    let hint_area = Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1);
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("Enter send", Style::default().fg(COMPOSER_HINT)),
+            Span::raw("   "),
+            Span::styled("Shift+Enter newline", Style::default().fg(COMPOSER_HINT)),
+            Span::raw("   "),
+            Span::styled(view_model.status_line.as_str(), Style::default().fg(ACCENT)),
+        ])),
+        hint_area,
     );
 }
 
@@ -236,7 +244,7 @@ fn build_transcript_lines(view_model: &ViewModel) -> Vec<Line<'static>> {
 
     if view_model.transcript_entries.is_empty() && view_model.streaming_preview().is_none() {
         lines.push(Line::from(Span::styled(
-            "Start talking. liz will keep the chat front and center.",
+            "Start talking. The conversation will grow here like a terminal transcript.",
             Style::default().fg(TEXT_MUTED),
         )));
         return lines;
@@ -248,7 +256,7 @@ fn build_transcript_lines(view_model: &ViewModel) -> Vec<Line<'static>> {
             TranscriptEntryKind::Assistant => "liz",
             TranscriptEntryKind::Tool => "tool",
             TranscriptEntryKind::Approval => "approval",
-            TranscriptEntryKind::System => "note",
+            TranscriptEntryKind::System => "system",
         };
         let label_style = match entry.kind {
             TranscriptEntryKind::User => Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
@@ -261,14 +269,10 @@ fn build_transcript_lines(view_model: &ViewModel) -> Vec<Line<'static>> {
             }
             TranscriptEntryKind::System => Style::default().fg(SYSTEM),
         };
-        lines.push(Line::from(vec![
-            Span::styled(label, label_style),
-            Span::raw(" "),
-            Span::styled("·", Style::default().fg(BORDER_SOFT)),
-        ]));
+        lines.push(Line::from(Span::styled(label, label_style)));
         for body_line in entry.body.lines() {
             lines.push(Line::from(vec![
-                Span::raw("    "),
+                Span::raw("  "),
                 Span::styled(body_line.to_owned(), Style::default().fg(TEXT_PRIMARY)),
             ]));
         }
@@ -278,11 +282,11 @@ fn build_transcript_lines(view_model: &ViewModel) -> Vec<Line<'static>> {
     if let Some(streaming) = view_model.streaming_preview() {
         lines.push(Line::from(vec![
             Span::styled("liz", Style::default().fg(BRAND).add_modifier(Modifier::BOLD)),
-            Span::raw(" ·"),
+            Span::raw(""),
         ]));
         for body_line in streaming.lines() {
             lines.push(Line::from(vec![
-                Span::raw("    "),
+                Span::raw("  "),
                 Span::styled(body_line.to_owned(), Style::default().fg(TEXT_PRIMARY)),
             ]));
         }
@@ -329,7 +333,8 @@ fn help_overlay_text() -> Text<'static> {
             "Commands",
             Style::default().fg(BRAND).add_modifier(Modifier::BOLD),
         )),
-        Line::from("/new <message>      start a new conversation"),
+        Line::from("/new                open a fresh conversation"),
+        Line::from("/new <message>      open a fresh conversation and send the first message"),
         Line::from("/search <query>     search memory and recent conversations"),
         Line::from("/memory             inspect wake-up, recall, and compiled experience"),
         Line::from("/resume             refresh the selected thread"),
@@ -463,15 +468,9 @@ where
         .border_style(Style::default().fg(BORDER_SOFT))
 }
 
-fn composer_block<'a, T>(title: T) -> Block<'a>
-where
-    T: Into<Title<'a>>,
-{
-    Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(BORDER_SOFT))
+fn composer_height(view_model: &ViewModel) -> u16 {
+    let input_lines = view_model.input_buffer.lines().count().max(1) as u16;
+    input_lines.saturating_add(1).clamp(2, 7)
 }
 
 fn overlay_rect(area: Rect, panel: OverlayPanel) -> Rect {
