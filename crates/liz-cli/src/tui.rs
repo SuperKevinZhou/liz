@@ -12,8 +12,9 @@ use crossterm::{execute, ExecutableCommand};
 use liz_protocol::requests::{
     ClientRequest, ClientRequestEnvelope, MemoryCompileNowRequest, MemoryListTopicsRequest,
     MemoryOpenEvidenceRequest, MemoryOpenSessionRequest, MemoryReadWakeupRequest,
-    MemorySearchRequest, ModelStatusRequest, ProviderAuthListRequest, ThreadListRequest,
-    ThreadResumeRequest, ThreadStartRequest, TurnInputKind, TurnStartRequest,
+    MemorySearchRequest, ModelStatusRequest, ProviderAuthListRequest, ThreadForkRequest,
+    ThreadListRequest, ThreadResumeRequest, ThreadStartRequest, TurnCancelRequest, TurnInputKind,
+    TurnStartRequest,
 };
 use liz_protocol::{
     MemorySearchHit, MemorySearchHitKind, MemorySearchMode, RequestId, ResponsePayload,
@@ -228,7 +229,9 @@ impl CliApp {
 
         match command {
             "/new" => self.start_new_thread(argument)?,
+            "/clear" => self.start_new_thread("")?,
             "/resume" => self.resume_selected_thread()?,
+            "/fork" => self.fork_selected_thread(argument)?,
             "/refresh" => {
                 self.refresh_threads()?;
                 self.view_model.status_line = "Refreshing conversations".to_owned();
@@ -258,8 +261,11 @@ impl CliApp {
                 self.send_request(ClientRequest::ModelStatus(ModelStatusRequest {}))?;
                 self.view_model.status_line = "Refreshing provider status".to_owned();
             }
-            "/settings" => {
+            "/settings" | "/config" => {
                 self.handle_settings_command(argument)?;
+            }
+            "/cancel" => {
+                self.cancel_selected_turn()?;
             }
             "/approve" => {
                 self.respond_to_first_approval(liz_protocol::ApprovalDecision::ApproveOnce)?;
@@ -268,6 +274,9 @@ impl CliApp {
                 self.respond_to_first_approval(liz_protocol::ApprovalDecision::Deny)?;
             }
             "/wakeup" => {
+                self.request_selected_wakeup()?;
+            }
+            "/wake-up" => {
                 self.request_selected_wakeup()?;
             }
             "/compile" => {
@@ -573,6 +582,38 @@ impl CliApp {
         Ok(())
     }
 
+    fn fork_selected_thread(&mut self, argument: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let Some(thread_id) = self.view_model.selected_thread_id() else {
+            self.view_model.status_line = "No conversation selected".to_owned();
+            return Ok(());
+        };
+        let title = (!argument.is_empty()).then(|| argument.to_owned());
+        self.send_request(ClientRequest::ThreadFork(ThreadForkRequest {
+            thread_id,
+            title,
+            fork_reason: Some("Forked from liz-cli".to_owned()),
+        }))?;
+        self.view_model.status_line = "Forking conversation".to_owned();
+        Ok(())
+    }
+
+    fn cancel_selected_turn(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let Some(thread) = self.view_model.selected_thread().cloned() else {
+            self.view_model.status_line = "No conversation selected".to_owned();
+            return Ok(());
+        };
+        let Some(turn_id) = thread.latest_turn_id else {
+            self.view_model.status_line = "No active turn to cancel".to_owned();
+            return Ok(());
+        };
+        self.send_request(ClientRequest::TurnCancel(TurnCancelRequest {
+            thread_id: thread.id,
+            turn_id,
+        }))?;
+        self.view_model.status_line = "Cancelling turn".to_owned();
+        Ok(())
+    }
+
     fn list_topics(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         self.send_request(ClientRequest::MemoryListTopics(MemoryListTopicsRequest {
             status: None,
@@ -645,14 +686,18 @@ fn help_message() -> String {
         "",
         "/new                start a fresh conversation",
         "/new <message>      start fresh and send the first message",
+        "/clear              clear the current visible conversation and start fresh",
         "/resume             refresh the selected thread",
+        "/fork [title]       fork the selected conversation",
         "/refresh            reload the thread list",
         "/threads            toggle the conversation drawer",
         "/memory             inspect wake-up, evidence, and compiled memory",
         "/search <query>     search memory and recent conversations",
         "/status             refresh provider readiness",
-        "/settings           inspect provider setup and saved profiles",
+        "/settings           inspect and edit local provider setup",
+        "/config             alias for /settings",
         "/wakeup             refresh wake-up for the selected thread",
+        "/cancel             cancel the latest running turn on the selected thread",
         "/compile            compile memory for the selected thread",
         "/approve            approve the current pending request",
         "/deny               deny the current pending request",
@@ -713,6 +758,7 @@ fn settings_usage_message() -> String {
         "/settings set-provider <provider-id> base-url <url>",
         "/settings set-provider <provider-id> api-key <secret>",
         "/settings set-provider <provider-id> model <model-id>",
+        "/config ...",
     ]
     .join("\n")
 }
