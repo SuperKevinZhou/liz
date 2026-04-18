@@ -180,6 +180,9 @@ impl CliApp {
                     && self.view_model.accept_command_suggestion()
                 {
                     self.view_model.status_line = "Command completed".to_owned();
+                } else if self.view_model.slash_mode {
+                    self.view_model.open_overlay(OverlayPanel::CommandPalette);
+                    self.view_model.status_line = "Command palette opened".to_owned();
                 } else {
                     self.view_model.open_overlay(OverlayPanel::Threads);
                     self.view_model.status_line = "Conversation picker opened".to_owned();
@@ -260,6 +263,8 @@ impl CliApp {
             }
             KeyCode::Tab | KeyCode::Down => self.view_model.config_draft.focus_next(),
             KeyCode::Up => self.view_model.config_draft.focus_previous(),
+            KeyCode::Left => self.view_model.config_draft.cycle_provider(-1),
+            KeyCode::Right => self.view_model.config_draft.cycle_provider(1),
             KeyCode::Backspace => self.view_model.config_draft.pop_char(),
             KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.save_config_draft()?;

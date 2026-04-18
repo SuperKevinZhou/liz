@@ -286,7 +286,25 @@ fn render_command_palette(frame: &mut Frame<'_>, area: Rect, view_model: &ViewMo
             Span::raw("  "),
             Span::styled(suggestion.spec.description, Style::default().fg(MUTED)),
         ]));
+        if selected {
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled(suggestion.spec.usage, Style::default().fg(SUBTLE)),
+            ]));
+        }
     }
+
+    lines.push(Line::default());
+    lines.push(Line::from(vec![
+        Span::styled("Tab", Style::default().fg(MUTED)),
+        Span::styled(" complete", Style::default().fg(SUBTLE)),
+        Span::raw("   "),
+        Span::styled("Enter", Style::default().fg(MUTED)),
+        Span::styled(" run", Style::default().fg(SUBTLE)),
+        Span::raw("   "),
+        Span::styled("Up/Down", Style::default().fg(MUTED)),
+        Span::styled(" select", Style::default().fg(SUBTLE)),
+    ]));
 
     frame.render_widget(
         Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }).block(modal_block("Commands")),
@@ -333,6 +351,15 @@ fn render_config_overlay(frame: &mut Frame<'_>, area: Rect, view_model: &ViewMod
                 Style::default().fg(TEXT),
             ),
         ]));
+        if selected && row == ConfigFocus::Provider && !draft.known_providers.is_empty() {
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled(
+                    format!("available: {}", draft.known_providers.join(", ")),
+                    Style::default().fg(SUBTLE),
+                ),
+            ]));
+        }
     }
 
     lines.push(Line::default());
@@ -357,6 +384,9 @@ fn render_config_overlay(frame: &mut Frame<'_>, area: Rect, view_model: &ViewMod
     lines.push(Line::from(vec![
         Span::styled("Tab", Style::default().fg(MUTED)),
         Span::styled(" move", Style::default().fg(SUBTLE)),
+        Span::raw("   "),
+        Span::styled("←/→", Style::default().fg(MUTED)),
+        Span::styled(" provider", Style::default().fg(SUBTLE)),
         Span::raw("   "),
         Span::styled("Ctrl+S", Style::default().fg(MUTED)),
         Span::styled(" save", Style::default().fg(SUBTLE)),

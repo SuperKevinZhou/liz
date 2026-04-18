@@ -155,6 +155,8 @@ pub struct ConfigDraft {
     pub provider_id: String,
     /// Saved provider profiles loaded from auth storage.
     pub auth_profiles: Vec<ProviderAuthProfile>,
+    /// Known provider ids that can be cycled in the config panel.
+    pub known_providers: Vec<String>,
     /// Base URL override for the focused provider.
     pub base_url: String,
     /// API key override for the focused provider.
@@ -165,6 +167,7 @@ pub struct ConfigDraft {
     pub dirty: bool,
     /// The active row inside the config panel.
     pub focus: ConfigFocus,
+    provider_overrides: BTreeMap<String, ProviderOverrideDraft>,
 }
 
 impl Default for ConfigDraft {
@@ -173,11 +176,13 @@ impl Default for ConfigDraft {
             config_path: String::new(),
             provider_id: "openai".to_owned(),
             auth_profiles: Vec::new(),
+            known_providers: vec!["openai".to_owned()],
             base_url: String::new(),
             api_key: String::new(),
             model_id: String::new(),
             dirty: false,
             focus: ConfigFocus::Provider,
+            provider_overrides: BTreeMap::new(),
         }
     }
 }
@@ -217,6 +222,8 @@ impl ConfigDraft {
         };
         target.push(value);
         self.dirty = true;
+        self.sync_known_providers();
+        self.persist_visible_fields();
     }
 
     /// Removes the last character from the focused field.
@@ -229,7 +236,34 @@ impl ConfigDraft {
         };
         if target.pop().is_some() {
             self.dirty = true;
+            self.sync_known_providers();
+            self.persist_visible_fields();
         }
+    }
+
+    /// Cycles the primary provider across the known provider list.
+    pub fn cycle_provider(&mut self, direction: i32) {
+        if self.known_providers.is_empty() {
+            self.known_providers.push(self.provider_id.clone());
+        }
+        let current_index = self
+            .known_providers
+            .iter()
+            .position(|provider| provider == &self.provider_id)
+            .unwrap_or(0);
+        let next_index = if direction < 0 {
+            if current_index == 0 {
+                self.known_providers.len() - 1
+            } else {
+                current_index - 1
+            }
+        } else {
+            (current_index + 1) % self.known_providers.len()
+        };
+        self.persist_visible_fields();
+        self.provider_id = self.known_providers[next_index].clone();
+        self.restore_visible_fields();
+        self.dirty = true;
     }
 
     /// Replaces the whole draft from a persisted config file.
@@ -240,6 +274,21 @@ impl ConfigDraft {
         auth_profiles: &[ProviderAuthProfile],
         fallback_provider: Option<&str>,
     ) {
+        self.provider_overrides = config
+            .providers
+            .iter()
+            .map(|(provider_id, provider)| {
+                (
+                    provider_id.clone(),
+                    ProviderOverrideDraft {
+                        base_url: provider.base_url.clone().unwrap_or_default(),
+                        api_key: provider.api_key.clone().unwrap_or_default(),
+                        model_id: provider.model_id.clone().unwrap_or_default(),
+                    },
+                )
+            })
+            .collect();
+
         let provider_id = config
             .primary_provider
             .clone()
@@ -249,13 +298,53 @@ impl ConfigDraft {
 
         self.config_path = location.to_owned();
         self.provider_id = provider_id;
+        self.auth_profiles = auth_profiles.to_vec();
+        self.known_providers =
+            collect_known_providers(&self.provider_id, config, auth_profiles, fallback_provider);
         self.base_url = provider.and_then(|provider| provider.base_url.clone()).unwrap_or_default();
         self.api_key = provider.and_then(|provider| provider.api_key.clone()).unwrap_or_default();
         self.model_id = provider.and_then(|provider| provider.model_id.clone()).unwrap_or_default();
-        self.auth_profiles = auth_profiles.to_vec();
         self.focus = ConfigFocus::Provider;
         self.dirty = false;
+        self.restore_visible_fields();
     }
+
+    fn sync_known_providers(&mut self) {
+        if self.provider_id.is_empty() {
+            return;
+        }
+        if !self.known_providers.iter().any(|provider| provider == &self.provider_id) {
+            self.known_providers.insert(0, self.provider_id.clone());
+        }
+    }
+
+    fn persist_visible_fields(&mut self) {
+        if self.provider_id.is_empty() {
+            return;
+        }
+        self.provider_overrides.insert(
+            self.provider_id.clone(),
+            ProviderOverrideDraft {
+                base_url: self.base_url.clone(),
+                api_key: self.api_key.clone(),
+                model_id: self.model_id.clone(),
+            },
+        );
+    }
+
+    fn restore_visible_fields(&mut self) {
+        let saved = self.provider_overrides.get(&self.provider_id).cloned().unwrap_or_default();
+        self.base_url = saved.base_url;
+        self.api_key = saved.api_key;
+        self.model_id = saved.model_id;
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct ProviderOverrideDraft {
+    base_url: String,
+    api_key: String,
+    model_id: String,
 }
 
 /// Minimal event-projected view model for the CLI.
@@ -354,6 +443,11 @@ impl ViewModel {
     /// Returns the best current slash command suggestion.
     pub fn selected_command_suggestion(&self) -> Option<&SlashCommandSuggestion> {
         self.command_suggestions.get(self.selected_command_index)
+    }
+
+    /// Returns the selected command usage line, if any.
+    pub fn selected_command_usage(&self) -> Option<&'static str> {
+        self.selected_command_suggestion().map(|suggestion| suggestion.spec.usage)
     }
 
     /// Returns the currently typed slash command fragment, without the slash.
@@ -927,4 +1021,46 @@ fn slash_suggestions(query: &str) -> Vec<SlashCommandSuggestion> {
             .then(left.spec.name.cmp(right.spec.name))
     });
     suggestions
+}
+
+fn collect_known_providers(
+    current_provider: &str,
+    config: &LizConfigFile,
+    auth_profiles: &[ProviderAuthProfile],
+    fallback_provider: Option<&str>,
+) -> Vec<String> {
+    let mut providers = Vec::new();
+
+    for provider in [
+        Some(current_provider),
+        fallback_provider,
+        Some("openai"),
+        Some("anthropic"),
+        Some("openai-codex"),
+        Some("github-copilot"),
+        Some("gitlab"),
+        Some("minimax"),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        push_unique_provider(&mut providers, provider);
+    }
+
+    for provider in config.providers.keys() {
+        push_unique_provider(&mut providers, provider);
+    }
+
+    for profile in auth_profiles {
+        push_unique_provider(&mut providers, &profile.provider_id);
+    }
+
+    providers
+}
+
+fn push_unique_provider(providers: &mut Vec<String>, provider: &str) {
+    if provider.is_empty() || providers.iter().any(|entry| entry == provider) {
+        return;
+    }
+    providers.push(provider.to_owned());
 }
