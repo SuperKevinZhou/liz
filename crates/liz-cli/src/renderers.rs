@@ -104,7 +104,7 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) 
 }
 
 fn render_empty_transcript(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
-    let popup = centered_rect(area, 78, 11);
+    let popup = centered_rect(area, 84, 16);
     let cwd = env::current_dir()
         .ok()
         .map(|path| path.display().to_string())
@@ -119,44 +119,144 @@ fn render_empty_transcript(frame: &mut Frame<'_>, area: Rect, view_model: &ViewM
         .as_ref()
         .and_then(|status| status.display_name.clone())
         .unwrap_or_else(|| "Provider".to_owned());
-    let subtitle = format!("{provider_name} · {model_name}");
-    let state_line = wakeup_line(view_model).unwrap_or_else(|| {
-        if view_model.pending_approval_count() > 0 {
-            "Approval required before liz can continue".to_owned()
-        } else if !view_model.status_line.is_empty() {
-            view_model.status_line.clone()
-        } else {
-            "Use / to open commands".to_owned()
-        }
-    });
-    let lines = vec![
+    let border_title = format!(" liz CLI v{} ", env!("CARGO_PKG_VERSION"));
+    let sections = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(48),
+            Constraint::Length(1),
+            Constraint::Percentage(52),
+        ])
+        .split(popup);
+
+    let left_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(BORDER_ACTIVE))
+        .title(Title::from(Span::styled(border_title, Style::default().fg(TEXT))));
+    let left_inner = left_block.inner(sections[0]);
+    frame.render_widget(left_block, sections[0]);
+
+    let left_lines = vec![
+        Line::default(),
         Line::from(Span::styled(
             "Welcome to liz CLI",
             Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
         )),
         Line::default(),
-        Line::from(Span::styled(subtitle, Style::default().fg(MUTED))),
+        Line::from(Span::styled(
+            format!("{provider_name} · {model_name}"),
+            Style::default().fg(MUTED),
+        )),
         Line::from(Span::styled(cwd, Style::default().fg(SUBTLE))),
         Line::default(),
-        Line::from(Span::styled(state_line, Style::default().fg(status_line_color(view_model)))),
+        Line::from(Span::styled(
+            wakeup_line(view_model).unwrap_or_else(|| {
+                if view_model.pending_approval_count() > 0 {
+                    "Approval required before liz can continue".to_owned()
+                } else if !view_model.status_line.is_empty() {
+                    view_model.status_line.clone()
+                } else {
+                    "Use / to open commands".to_owned()
+                }
+            }),
+            Style::default().fg(status_line_color(view_model)),
+        )),
     ];
+    frame.render_widget(
+        Paragraph::new(Text::from(left_lines))
+            .alignment(Alignment::Center)
+            .wrap(Wrap { trim: false }),
+        left_inner,
+    );
 
     frame.render_widget(
-        Paragraph::new(Text::from(lines))
-            .alignment(Alignment::Center)
-            .wrap(Wrap { trim: false })
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
-                    .border_style(Style::default().fg(BORDER_ACTIVE))
-                    .title(Title::from(Span::styled(
-                        format!(" liz CLI v{} ", env!("CARGO_PKG_VERSION")),
-                        Style::default().fg(TEXT),
-                    ))),
-            ),
-        popup,
+        Paragraph::new("│").alignment(Alignment::Center).style(Style::default().fg(BORDER_ACTIVE)),
+        sections[1],
     );
+
+    render_welcome_feeds(frame, sections[2], view_model);
+}
+
+fn render_welcome_feeds(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
+    let columns = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(area);
+    render_feed_box(
+        frame,
+        columns[0],
+        "Tips for getting started",
+        welcome_tips_lines(view_model),
+        None,
+    );
+    render_feed_box(
+        frame,
+        columns[1],
+        "Recent activity",
+        recent_activity_lines(view_model),
+        Some("/resume for more"),
+    );
+}
+
+fn render_feed_box(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    title: &str,
+    lines: Vec<String>,
+    footer: Option<&str>,
+) {
+    frame.render_widget(
+        Block::default()
+            .borders(Borders::BOTTOM)
+            .border_style(Style::default().fg(BORDER_ACTIVE))
+            .title(Title::from(Span::styled(title.to_owned(), Style::default().fg(TEXT)))),
+        area,
+    );
+    let inner =
+        Rect::new(area.x, area.y.saturating_add(1), area.width, area.height.saturating_sub(1));
+    let mut text_lines = lines
+        .into_iter()
+        .map(|line| Line::from(Span::styled(line, Style::default().fg(MUTED))))
+        .collect::<Vec<_>>();
+    if let Some(footer) = footer {
+        text_lines.push(Line::default());
+        text_lines.push(Line::from(Span::styled(footer.to_owned(), Style::default().fg(SUBTLE))));
+    }
+    frame.render_widget(Paragraph::new(Text::from(text_lines)).wrap(Wrap { trim: false }), inner);
+}
+
+fn welcome_tips_lines(view_model: &ViewModel) -> Vec<String> {
+    let mut lines = vec![
+        "Use /help to browse commands and controls".to_owned(),
+        "Use /config to configure your provider".to_owned(),
+        "Use /memory to inspect wake-up and recall".to_owned(),
+    ];
+    if let Some(wakeup) = &view_model.wakeup {
+        for commitment in wakeup.open_commitments.iter().take(2) {
+            lines.push(format!("Open: {commitment}"));
+        }
+    }
+    lines
+}
+
+fn recent_activity_lines(view_model: &ViewModel) -> Vec<String> {
+    let mut lines = view_model
+        .threads
+        .iter()
+        .take(3)
+        .map(|thread| {
+            thread
+                .active_summary
+                .clone()
+                .or(thread.active_goal.clone())
+                .unwrap_or_else(|| thread.title.clone())
+        })
+        .collect::<Vec<_>>();
+    if lines.is_empty() {
+        lines.push("No recent activity".to_owned());
+    }
+    lines
 }
 
 fn render_composer(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
