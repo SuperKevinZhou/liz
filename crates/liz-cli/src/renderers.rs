@@ -246,7 +246,8 @@ fn render_command_palette_docked(
     composer_area: Rect,
     view_model: &ViewModel,
 ) {
-    let height = 9.min(composer_area.height.saturating_add(7));
+    let item_count = view_model.command_suggestions.len().min(6) as u16;
+    let height = item_count.max(1);
     let width = composer_area.width.saturating_sub(2).max(36);
     let popup = Rect::new(
         composer_area.x + 1.min(composer_area.width.saturating_sub(1)),
@@ -259,56 +260,17 @@ fn render_command_palette_docked(
 }
 
 fn render_command_palette(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
-    let mut lines = vec![
-        Line::from(vec![
-            Span::styled("/", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-            Span::styled(
-                view_model.slash_query().unwrap_or_default().to_owned(),
-                Style::default().fg(TEXT),
-            ),
-        ]),
-        Line::from(Span::styled("Run a command", Style::default().fg(SUBTLE))),
-    ];
-    lines.push(Line::default());
+    let lines = view_model
+        .command_suggestions
+        .iter()
+        .take(6)
+        .enumerate()
+        .map(|(index, suggestion)| {
+            command_suggestion_line(index, suggestion, area.width as usize, view_model)
+        })
+        .collect::<Vec<_>>();
 
-    for (index, suggestion) in view_model.command_suggestions.iter().take(6).enumerate() {
-        let selected = index == view_model.selected_command_index;
-        lines.push(Line::from(vec![
-            Span::styled(if selected { ">" } else { " " }, Style::default().fg(ACCENT)),
-            Span::raw(" "),
-            Span::styled(
-                format!("/{}", suggestion.spec.name),
-                Style::default()
-                    .fg(if selected { TEXT } else { ACCENT })
-                    .add_modifier(if selected { Modifier::BOLD } else { Modifier::empty() }),
-            ),
-            Span::raw("  "),
-            Span::styled(suggestion.spec.description, Style::default().fg(MUTED)),
-        ]));
-        if selected {
-            lines.push(Line::from(vec![
-                Span::raw("  "),
-                Span::styled(suggestion.spec.usage, Style::default().fg(SUBTLE)),
-            ]));
-        }
-    }
-
-    lines.push(Line::default());
-    lines.push(Line::from(vec![
-        Span::styled("Tab", Style::default().fg(MUTED)),
-        Span::styled(" complete", Style::default().fg(SUBTLE)),
-        Span::raw("   "),
-        Span::styled("Enter", Style::default().fg(MUTED)),
-        Span::styled(" run", Style::default().fg(SUBTLE)),
-        Span::raw("   "),
-        Span::styled("Up/Down", Style::default().fg(MUTED)),
-        Span::styled(" select", Style::default().fg(SUBTLE)),
-    ]));
-
-    frame.render_widget(
-        Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }).block(modal_block("Commands")),
-        area,
-    );
+    frame.render_widget(Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }), area);
 }
 
 fn render_config_overlay(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
@@ -851,6 +813,46 @@ fn footer_right_spans(view_model: &ViewModel) -> Vec<Span<'static>> {
 
 fn footer_right_width(view_model: &ViewModel) -> usize {
     visible_width(&footer_right_spans(view_model)).max(24)
+}
+
+fn command_suggestion_line(
+    index: usize,
+    suggestion: &crate::view_model::SlashCommandSuggestion,
+    width: usize,
+    view_model: &ViewModel,
+) -> Line<'static> {
+    let selected = index == view_model.selected_command_index;
+    let command = format!("/{}", suggestion.spec.name);
+    let command_width = width.saturating_mul(2).saturating_div(5).clamp(12, 28);
+    let padded_command = format!("{command:<command_width$}");
+    let description_width = width.saturating_sub(command_width + 2);
+    let description = truncate_inline(suggestion.spec.description, description_width);
+
+    Line::from(vec![
+        Span::styled(
+            padded_command,
+            Style::default().fg(if selected { TEXT } else { ACCENT }).add_modifier(if selected {
+                Modifier::BOLD
+            } else {
+                Modifier::empty()
+            }),
+        ),
+        Span::raw("  "),
+        Span::styled(description, Style::default().fg(if selected { TEXT } else { MUTED })),
+    ])
+}
+
+fn truncate_inline(text: &str, width: usize) -> String {
+    if width == 0 || text.chars().count() <= width {
+        return text.to_owned();
+    }
+
+    let mut truncated = String::new();
+    for ch in text.chars().take(width.saturating_sub(1)) {
+        truncated.push(ch);
+    }
+    truncated.push('…');
+    truncated
 }
 
 fn visible_width(spans: &[Span<'_>]) -> usize {
