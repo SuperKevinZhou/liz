@@ -62,25 +62,28 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel, serv
 
     let left = vec![
         Span::styled("liz", Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
-        Span::styled("  ", Style::default().fg(TEXT)),
+        Span::raw(" "),
         Span::styled(title, Style::default().fg(MUTED)),
     ];
 
-    let state = if view_model.pending_approval_count() > 0 {
-        ("approval", WARNING)
+    let right = if view_model.pending_approval_count() > 0 {
+        vec![Span::styled("Approval required", Style::default().fg(WARNING))]
     } else if view_model.streaming_preview().is_some() {
-        ("responding", ACCENT)
+        vec![Span::styled("Responding…", Style::default().fg(ACCENT))]
+    } else if !view_model.status_line.is_empty() {
+        vec![Span::styled(
+            view_model.status_line.as_str(),
+            Style::default().fg(status_color(view_model)),
+        )]
     } else if view_model.model_status.as_ref().map(|status| status.ready).unwrap_or(false) {
-        ("ready", SUCCESS)
+        vec![Span::styled("Ready", Style::default().fg(SUCCESS))]
     } else {
-        ("setup", MUTED)
+        vec![
+            Span::styled("Not configured", Style::default().fg(MUTED)),
+            Span::raw(" "),
+            Span::styled(server_url, Style::default().fg(SUBTLE)),
+        ]
     };
-
-    let right = vec![
-        Span::styled(state.0, Style::default().fg(state.1)),
-        Span::styled("  ", Style::default().fg(TEXT)),
-        Span::styled(server_url, Style::default().fg(SUBTLE)),
-    ];
 
     let sections = Layout::default()
         .direction(Direction::Horizontal)
@@ -104,12 +107,10 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) 
     }
 
     if view_model.transcript_entries.is_empty() && view_model.streaming_preview().is_none() {
+        lines
+            .push(Line::from(Span::styled("What should liz do next?", Style::default().fg(MUTED))));
         lines.push(Line::from(Span::styled(
-            "Start a conversation or type / for commands.",
-            Style::default().fg(MUTED),
-        )));
-        lines.push(Line::from(Span::styled(
-            "Config, status, memory, and conversation history open in overlays.",
+            "Type / to open commands.",
             Style::default().fg(SUBTLE),
         )));
     } else {
@@ -152,11 +153,7 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
         .constraints([Constraint::Min(2), Constraint::Length(1)])
         .split(inner);
 
-    let placeholder = if view_model.slash_mode {
-        "Type a command"
-    } else {
-        "Ask liz to inspect, explain, or act"
-    };
+    let placeholder = if view_model.slash_mode { "Type a command" } else { "Ask anything" };
 
     let body = if view_model.input_buffer.is_empty() {
         Text::from(Line::from(vec![
@@ -188,21 +185,19 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
     );
 
     let footer = vec![
-        Span::styled("Enter", Style::default().fg(MUTED)),
+        Span::styled("⏎", Style::default().fg(MUTED)),
         Span::styled(" send", Style::default().fg(SUBTLE)),
-        Span::raw("   "),
-        Span::styled("Shift+Enter", Style::default().fg(MUTED)),
+        Span::raw("  "),
+        Span::styled("⇧⏎", Style::default().fg(MUTED)),
         Span::styled(" newline", Style::default().fg(SUBTLE)),
-        Span::raw("   "),
+        Span::raw("  "),
         Span::styled("/", Style::default().fg(MUTED)),
         Span::styled(" commands", Style::default().fg(SUBTLE)),
-        Span::raw("   "),
-        Span::styled("Esc", Style::default().fg(MUTED)),
-        Span::styled(" close", Style::default().fg(SUBTLE)),
-        Span::raw("   "),
+        Span::raw("  "),
+        Span::styled("Tab", Style::default().fg(MUTED)),
         Span::styled(
-            view_model.status_line.as_str(),
-            Style::default().fg(status_color(view_model)),
+            if view_model.slash_mode { " complete" } else { " browse" },
+            Style::default().fg(SUBTLE),
         ),
     ];
 
