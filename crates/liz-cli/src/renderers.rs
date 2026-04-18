@@ -7,6 +7,7 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::block::Title;
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
+use std::env;
 
 const BORDER: Color = Color::DarkGray;
 const BORDER_ACTIVE: Color = Color::Gray;
@@ -35,20 +36,15 @@ impl Default for RendererSkeleton {
 pub fn render(frame: &mut Frame<'_>, view_model: &ViewModel, server_url: &str) {
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Min(8),
-            Constraint::Length(composer_height(view_model)),
-        ])
+        .constraints([Constraint::Min(8), Constraint::Length(composer_height(view_model))])
         .split(frame.area());
 
     let _ = server_url;
-    render_header(frame, layout[0], view_model);
-    render_transcript(frame, layout[1], view_model);
-    render_composer(frame, layout[2], view_model);
+    render_transcript(frame, layout[0], view_model);
+    render_composer(frame, layout[1], view_model);
 
     if view_model.active_overlay == Some(OverlayPanel::CommandPalette) {
-        render_command_palette_docked(frame, layout[2], view_model);
+        render_command_palette_docked(frame, layout[1], view_model);
     }
 
     if !view_model.pending_approvals.is_empty() {
@@ -62,19 +58,12 @@ pub fn render(frame: &mut Frame<'_>, view_model: &ViewModel, server_url: &str) {
     }
 }
 
-fn render_header(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
-    let title =
-        view_model.selected_thread().map(|thread| thread.title.as_str()).unwrap_or("new chat");
-
-    let header = Line::from(vec![
-        Span::styled("liz", Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
-        Span::raw(" "),
-        Span::styled(title, Style::default().fg(MUTED)),
-    ]);
-    frame.render_widget(Paragraph::new(header).alignment(Alignment::Left), area);
-}
-
 fn render_transcript(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
+    if view_model.transcript_entries.is_empty() && view_model.streaming_preview().is_none() {
+        render_empty_transcript(frame, area, view_model);
+        return;
+    }
+
     let mut lines = Vec::new();
 
     if let Some(summary) = wakeup_line(view_model) {
@@ -123,6 +112,62 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) 
             .wrap(Wrap { trim: false })
             .style(Style::default().fg(TEXT)),
         area,
+    );
+}
+
+fn render_empty_transcript(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
+    let popup = centered_rect(area, 78, 11);
+    let cwd = env::current_dir()
+        .ok()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| ".".to_owned());
+    let model_name = view_model
+        .model_status
+        .as_ref()
+        .and_then(|status| status.model_id.clone())
+        .unwrap_or_else(|| "Not configured".to_owned());
+    let provider_name = view_model
+        .model_status
+        .as_ref()
+        .and_then(|status| status.display_name.clone())
+        .unwrap_or_else(|| "Provider".to_owned());
+    let subtitle = format!("{provider_name} · {model_name}");
+    let state_line = wakeup_line(view_model).unwrap_or_else(|| {
+        if view_model.pending_approval_count() > 0 {
+            "Approval required before liz can continue".to_owned()
+        } else if !view_model.status_line.is_empty() {
+            view_model.status_line.clone()
+        } else {
+            "Use / to open commands".to_owned()
+        }
+    });
+    let lines = vec![
+        Line::from(Span::styled(
+            "Welcome to liz CLI",
+            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+        )),
+        Line::default(),
+        Line::from(Span::styled(subtitle, Style::default().fg(MUTED))),
+        Line::from(Span::styled(cwd, Style::default().fg(SUBTLE))),
+        Line::default(),
+        Line::from(Span::styled(state_line, Style::default().fg(status_line_color(view_model)))),
+    ];
+
+    frame.render_widget(
+        Paragraph::new(Text::from(lines))
+            .alignment(Alignment::Center)
+            .wrap(Wrap { trim: false })
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(BORDER_ACTIVE))
+                    .title(Title::from(Span::styled(
+                        format!(" liz CLI v{} ", env!("CARGO_PKG_VERSION")),
+                        Style::default().fg(TEXT),
+                    ))),
+            ),
+        popup,
     );
 }
 
@@ -753,6 +798,18 @@ fn status_line_spans(view_model: &ViewModel) -> Vec<Span<'static>> {
         spans.push(Span::styled(view_model.status_line.clone(), Style::default().fg(MUTED)));
     }
     spans
+}
+
+fn status_line_color(view_model: &ViewModel) -> Color {
+    if view_model.pending_approval_count() > 0 {
+        WARNING
+    } else if view_model.streaming_preview().is_some() {
+        ACCENT
+    } else if view_model.model_status.as_ref().map(|status| status.ready).unwrap_or(false) {
+        SUCCESS
+    } else {
+        MUTED
+    }
 }
 
 fn footer_left_spans(view_model: &ViewModel) -> Vec<Span<'static>> {
