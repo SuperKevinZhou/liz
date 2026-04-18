@@ -258,13 +258,16 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, panel: OverlayPanel, view_m
 }
 
 fn render_command_palette(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
-    let mut lines = vec![Line::from(vec![
-        Span::styled("/", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-        Span::styled(
-            view_model.slash_query().unwrap_or_default().to_owned(),
-            Style::default().fg(TEXT),
-        ),
-    ])];
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled("/", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                view_model.slash_query().unwrap_or_default().to_owned(),
+                Style::default().fg(TEXT),
+            ),
+        ]),
+        Line::from(Span::styled("Run a command", Style::default().fg(SUBTLE))),
+    ];
     lines.push(Line::default());
 
     for (index, suggestion) in view_model.command_suggestions.iter().take(6).enumerate() {
@@ -309,7 +312,11 @@ fn render_command_palette(frame: &mut Frame<'_>, area: Rect, view_model: &ViewMo
 
 fn render_config_overlay(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
     let draft = &view_model.config_draft;
-    let mut lines = Vec::new();
+    let mut lines = vec![Line::from(Span::styled(
+        "Configure provider defaults for this workspace",
+        Style::default().fg(SUBTLE),
+    ))];
+    lines.push(Line::default());
     lines.push(Line::from(vec![
         Span::styled("Config file", Style::default().fg(SUBTLE)),
         Span::raw("  "),
@@ -399,7 +406,9 @@ fn render_config_overlay(frame: &mut Frame<'_>, area: Rect, view_model: &ViewMod
 }
 
 fn render_status_overlay(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
-    let mut lines = Vec::new();
+    let mut lines =
+        vec![Line::from(Span::styled("Current provider readiness", Style::default().fg(SUBTLE)))];
+    lines.push(Line::default());
 
     if let Some(status) = &view_model.model_status {
         lines.push(Line::from(vec![
@@ -475,6 +484,10 @@ fn render_help_overlay(frame: &mut Frame<'_>, area: Rect, _view_model: &ViewMode
             "Slash commands",
             Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
         )),
+        Line::from(Span::styled(
+            "Use / in the composer to open the command palette",
+            Style::default().fg(SUBTLE),
+        )),
         Line::default(),
     ];
 
@@ -503,7 +516,11 @@ fn render_help_overlay(frame: &mut Frame<'_>, area: Rect, _view_model: &ViewMode
 }
 
 fn render_memory_overlay(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
-    let mut lines = Vec::new();
+    let mut lines = vec![Line::from(Span::styled(
+        "Wake-up, recent topics, and compiled context",
+        Style::default().fg(SUBTLE),
+    ))];
+    lines.push(Line::default());
 
     lines.push(Line::from(Span::styled(
         "Wake-up",
@@ -577,7 +594,9 @@ fn render_memory_overlay(frame: &mut Frame<'_>, area: Rect, view_model: &ViewMod
 }
 
 fn render_threads_overlay(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
-    let mut lines = Vec::new();
+    let mut lines =
+        vec![Line::from(Span::styled("Recent conversations", Style::default().fg(SUBTLE)))];
+    lines.push(Line::default());
     if view_model.threads.is_empty() {
         lines.push(Line::from(Span::styled("No conversations yet.", Style::default().fg(MUTED))));
     } else {
@@ -601,6 +620,15 @@ fn render_threads_overlay(frame: &mut Frame<'_>, area: Rect, view_model: &ViewMo
             }
         }
     }
+
+    lines.push(Line::default());
+    lines.push(Line::from(vec![
+        Span::styled("Enter", Style::default().fg(MUTED)),
+        Span::styled(" open", Style::default().fg(SUBTLE)),
+        Span::raw("   "),
+        Span::styled("Esc", Style::default().fg(MUTED)),
+        Span::styled(" close", Style::default().fg(SUBTLE)),
+    ]));
 
     frame.render_widget(
         Paragraph::new(Text::from(lines))
