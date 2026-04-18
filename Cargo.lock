@@ -1283,6 +1283,7 @@ dependencies = [
  "liz-app-server",
  "liz-protocol",
  "ratatui",
+ "serde",
  "serde_json",
  "tempfile",
  "tungstenite",
