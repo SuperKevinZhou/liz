@@ -47,11 +47,17 @@ pub fn render(frame: &mut Frame<'_>, view_model: &ViewModel, server_url: &str) {
     render_transcript(frame, layout[1], view_model);
     render_composer(frame, layout[2], view_model);
 
+    if view_model.active_overlay == Some(OverlayPanel::CommandPalette) {
+        render_command_palette_docked(frame, layout[2], view_model);
+    }
+
     if !view_model.pending_approvals.is_empty() {
         render_approval_notice(frame, frame.area(), view_model);
     }
 
-    if let Some(panel) = view_model.active_overlay {
+    if let Some(panel) =
+        view_model.active_overlay.filter(|panel| *panel != OverlayPanel::CommandPalette)
+    {
         render_overlay(frame, frame.area(), panel, view_model);
     }
 }
@@ -237,12 +243,12 @@ fn render_approval_notice(frame: &mut Frame<'_>, area: Rect, view_model: &ViewMo
 
 fn render_overlay(frame: &mut Frame<'_>, area: Rect, panel: OverlayPanel, view_model: &ViewModel) {
     let popup = match panel {
-        OverlayPanel::CommandPalette => centered_rect(area, 70, 10),
         OverlayPanel::Config => centered_rect(area, 78, 16),
         OverlayPanel::Status => centered_rect(area, 72, 12),
         OverlayPanel::Help => centered_rect(area, 74, 16),
         OverlayPanel::Memory => centered_rect(area, 78, 16),
         OverlayPanel::Threads => centered_rect(area, 70, 14),
+        OverlayPanel::CommandPalette => centered_rect(area, 70, 10),
     };
 
     frame.render_widget(Clear, popup);
@@ -255,6 +261,23 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, panel: OverlayPanel, view_m
         OverlayPanel::Memory => render_memory_overlay(frame, popup, view_model),
         OverlayPanel::Threads => render_threads_overlay(frame, popup, view_model),
     }
+}
+
+fn render_command_palette_docked(
+    frame: &mut Frame<'_>,
+    composer_area: Rect,
+    view_model: &ViewModel,
+) {
+    let height = 9.min(composer_area.height.saturating_add(7));
+    let width = composer_area.width.saturating_sub(2).max(36);
+    let popup = Rect::new(
+        composer_area.x + 1.min(composer_area.width.saturating_sub(1)),
+        composer_area.y.saturating_sub(height),
+        width.min(frame.area().width.saturating_sub(composer_area.x)),
+        height,
+    );
+    frame.render_widget(Clear, popup);
+    render_command_palette(frame, popup, view_model);
 }
 
 fn render_command_palette(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
