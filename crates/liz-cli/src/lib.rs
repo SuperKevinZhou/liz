@@ -2,6 +2,7 @@
 
 pub mod app_client;
 pub mod renderers;
+pub mod settings;
 pub mod tui;
 pub mod view_model;
 

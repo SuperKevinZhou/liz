@@ -56,8 +56,6 @@ pub struct TranscriptEntry {
 /// Overlay surfaces that can temporarily take focus without replacing the transcript.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OverlayPanel {
-    /// Command and keyboard help.
-    Help,
     /// Memory search result overlay.
     Search,
     /// Wake-up, recall, evidence, and compiled-experience overlay.

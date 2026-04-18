@@ -2,6 +2,7 @@
 
 use crate::app_client::{AppClientError, WebSocketAppClient};
 use crate::renderers;
+use crate::settings::{LizConfigFile, ProviderField, SettingsLocation};
 use crate::view_model::{OverlayPanel, ViewModel};
 use crossterm::event::{self, Event as CEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{
@@ -151,7 +152,9 @@ impl CliApp {
                 };
             }
             KeyCode::Esc => {
-                if self.view_model.active_overlay.is_some() {
+                if !self.view_model.pending_approvals.is_empty() {
+                    self.respond_to_first_approval(liz_protocol::ApprovalDecision::Deny)?;
+                } else if self.view_model.active_overlay.is_some() {
                     self.view_model.close_overlay();
                     self.view_model.status_line = "Overlay closed".to_owned();
                 } else if !self.view_model.input_buffer.is_empty() {
@@ -163,7 +166,13 @@ impl CliApp {
                 self.view_model.input_buffer.push('\n');
             }
             KeyCode::Enter => {
-                self.submit_input()?;
+                if !self.view_model.pending_approvals.is_empty()
+                    && self.view_model.input_buffer.trim().is_empty()
+                {
+                    self.respond_to_first_approval(liz_protocol::ApprovalDecision::ApproveOnce)?;
+                } else {
+                    self.submit_input()?;
+                }
             }
             KeyCode::Backspace => {
                 self.view_model.input_buffer.pop();
@@ -250,7 +259,7 @@ impl CliApp {
                 self.view_model.status_line = "Refreshing provider status".to_owned();
             }
             "/settings" => {
-                self.show_settings_in_transcript()?;
+                self.handle_settings_command(argument)?;
             }
             "/approve" => {
                 self.respond_to_first_approval(liz_protocol::ApprovalDecision::ApproveOnce)?;
@@ -339,9 +348,85 @@ impl CliApp {
             provider_id: None,
         }))?;
         self.send_request(ClientRequest::ModelStatus(ModelStatusRequest {}))?;
-        self.view_model.push_system_message(settings_message(&self.view_model));
+        self.view_model.push_system_message(settings_overview_message(&self.view_model));
         self.view_model.status_line = "Settings opened in transcript".to_owned();
         Ok(())
+    }
+
+    fn handle_settings_command(
+        &mut self,
+        argument: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if argument.is_empty() {
+            return self.show_settings_in_transcript();
+        }
+
+        let parts = argument.split_whitespace().collect::<Vec<_>>();
+        match parts.first().copied() {
+            Some("show") => self.show_settings_in_transcript(),
+            Some("path") => {
+                let location = SettingsLocation::discover();
+                self.view_model.push_system_message(format!(
+                    "liz settings paths\n\nConfig directory: {}\nConfig file: {}",
+                    location.config_dir.display(),
+                    location.config_file.display()
+                ));
+                self.view_model.status_line = "Settings path opened in transcript".to_owned();
+                Ok(())
+            }
+            Some("provider") if parts.len() >= 2 => {
+                let provider_id = parts[1].to_owned();
+                let location = SettingsLocation::discover();
+                let mut config = LizConfigFile::load(&location)?;
+                config.set_primary_provider(provider_id.clone());
+                config.save(&location)?;
+                self.view_model.push_system_message(format!(
+                    "Primary provider updated\n\nProvider: {provider_id}\nConfig file: {}",
+                    location.config_file.display()
+                ));
+                self.view_model.status_line = format!("Primary provider set to {provider_id}");
+                Ok(())
+            }
+            Some("set-provider") if parts.len() >= 4 => {
+                let provider_id = parts[1].to_owned();
+                let Some(field) = ProviderField::parse(parts[2]) else {
+                    self.view_model.push_system_message(
+                        "Unknown provider field. Use one of: base-url, api-key, model".to_owned(),
+                    );
+                    self.view_model.status_line = "Unknown settings field".to_owned();
+                    return Ok(());
+                };
+                let value =
+                    argument.splitn(4, char::is_whitespace).nth(3).unwrap_or("").trim().to_owned();
+                if value.is_empty() {
+                    self.view_model.push_system_message(format!(
+                        "Missing value for /settings set-provider {} {}",
+                        provider_id,
+                        field.display_name()
+                    ));
+                    self.view_model.status_line = "Missing settings value".to_owned();
+                    return Ok(());
+                }
+
+                let location = SettingsLocation::discover();
+                let mut config = LizConfigFile::load(&location)?;
+                let provider_id = config.upsert_provider(provider_id, field, value);
+                config.save(&location)?;
+                self.view_model.push_system_message(format!(
+                    "Provider override saved\n\nProvider: {provider_id}\nField: {}\nConfig file: {}",
+                    field.display_name(),
+                    location.config_file.display()
+                ));
+                self.view_model.status_line =
+                    format!("Saved {} for {}", field.display_name(), provider_id);
+                Ok(())
+            }
+            _ => {
+                self.view_model.push_system_message(settings_usage_message());
+                self.view_model.status_line = "Settings help opened in transcript".to_owned();
+                Ok(())
+            }
+        }
     }
 
     fn drain_transport(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -578,11 +663,13 @@ fn help_message() -> String {
     .join("\n")
 }
 
-fn settings_message(view_model: &ViewModel) -> String {
+fn settings_overview_message(view_model: &ViewModel) -> String {
     let mut lines = vec![
         "liz settings".to_owned(),
         "".to_owned(),
-        "Config root: .liz in the resolved workspace/runtime root".to_owned(),
+        "Use /settings path to inspect the resolved .liz config location.".to_owned(),
+        "Use /settings provider <provider-id> to switch the primary provider.".to_owned(),
+        "Use /settings set-provider <provider-id> <base-url|api-key|model> <value> to persist an override.".to_owned(),
     ];
 
     if let Some(status) = view_model.model_status.as_ref() {
@@ -611,10 +698,23 @@ fn settings_message(view_model: &ViewModel) -> String {
     }
 
     lines.push("".to_owned());
-    lines.push(
-        "Provider profile editing is being wired into local .liz config management.".to_owned(),
-    );
+    lines.push("Saved profiles come from auth storage. Provider overrides are persisted in .liz/config.json.".to_owned());
     lines.join("\n")
+}
+
+fn settings_usage_message() -> String {
+    [
+        "liz settings usage",
+        "",
+        "/settings",
+        "/settings show",
+        "/settings path",
+        "/settings provider <provider-id>",
+        "/settings set-provider <provider-id> base-url <url>",
+        "/settings set-provider <provider-id> api-key <secret>",
+        "/settings set-provider <provider-id> model <model-id>",
+    ]
+    .join("\n")
 }
 
 struct TerminalGuard {

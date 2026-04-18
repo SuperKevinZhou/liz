@@ -2,6 +2,7 @@
 
 mod websocket;
 
+use crate::config::LizConfigFile;
 use crate::events::EventBus;
 use crate::executor::ExecutorGateway;
 use crate::handlers;
@@ -49,7 +50,8 @@ pub struct AppServer {
 impl AppServer {
     /// Creates a new app server rooted at the provided storage paths.
     pub fn new(paths: StoragePaths) -> Self {
-        Self::new_with_model_gateway(paths, ModelGateway::default())
+        let model_gateway = model_gateway_from_paths(&paths);
+        Self::new_with_model_gateway(paths, model_gateway)
     }
 
     /// Creates a new app server rooted at the provided storage paths and explicit model gateway.
@@ -69,12 +71,7 @@ impl AppServer {
 
     /// Creates an app server using the default `.liz` storage layout.
     pub fn from_default_layout() -> Self {
-        Self {
-            runtime: RuntimeCoordinator::default(),
-            executor: ExecutorGateway::default(),
-            event_bus: EventBus::new(),
-            model_gateway: ModelGateway::default(),
-        }
+        Self::new(StoragePaths::from_default_layout())
     }
 
     /// Handles a single protocol request and returns the matching response envelope.
@@ -491,6 +488,12 @@ impl AppServer {
 
         gateway
     }
+}
+
+fn model_gateway_from_paths(paths: &StoragePaths) -> ModelGateway {
+    let env_config = crate::model::ModelGatewayConfig::from_env();
+    let file_config = LizConfigFile::load(paths);
+    ModelGateway::from_config(file_config.into_gateway_config(env_config))
 }
 
 fn model_status_from_gateway(gateway: &ModelGateway) -> ModelStatusResponse {

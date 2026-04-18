@@ -310,7 +310,6 @@ fn render_overlay(frame: &mut Frame<'_>, panel: OverlayPanel, view_model: &ViewM
     frame.render_widget(Clear, popup);
 
     let (title, body) = match panel {
-        OverlayPanel::Help => ("help", help_overlay_text()),
         OverlayPanel::Search => ("search", search_overlay_text(view_model)),
         OverlayPanel::Memory => ("memory", memory_overlay_text(view_model)),
     };
@@ -432,37 +431,6 @@ fn wakeup_capsule(view_model: &ViewModel) -> Option<String> {
     } else {
         Some(parts.join("  •  "))
     }
-}
-
-fn help_overlay_text() -> Text<'static> {
-    Text::from(vec![
-        Line::from(Span::styled(
-            "Conversation",
-            Style::default().fg(BRAND).add_modifier(Modifier::BOLD),
-        )),
-        Line::from("Type normally to continue the selected thread."),
-        Line::from("Use /new to start fresh without leaving the main terminal flow."),
-        Line::default(),
-        Line::from(Span::styled(
-            "Commands",
-            Style::default().fg(BRAND).add_modifier(Modifier::BOLD),
-        )),
-        Line::from("/new                open a fresh conversation"),
-        Line::from("/new <message>      start fresh and send the first message"),
-        Line::from("/resume             refresh the selected thread"),
-        Line::from("/refresh            reload the thread list"),
-        Line::from("/threads            toggle the conversation drawer"),
-        Line::from("/memory             inspect wake-up, evidence, and compiled memory"),
-        Line::from("/search <query>     search memory and recent conversations"),
-        Line::from("/approve            approve the first pending request"),
-        Line::from("/deny               deny the first pending request"),
-        Line::from("/wakeup             refresh wake-up for the selected thread"),
-        Line::from("/compile            compile memory for the selected thread"),
-        Line::default(),
-        Line::from(Span::styled("Keys", Style::default().fg(BRAND).add_modifier(Modifier::BOLD))),
-        Line::from("Enter send    Shift+Enter newline    Esc close/clear    Ctrl+C quit"),
-        Line::from("Up/Down switch threads when the conversation drawer is visible"),
-    ])
 }
 
 fn search_overlay_text(view_model: &ViewModel) -> Text<'static> {
@@ -617,7 +585,6 @@ fn composer_height(view_model: &ViewModel) -> u16 {
 
 fn overlay_rect(area: Rect, panel: OverlayPanel) -> Rect {
     match panel {
-        OverlayPanel::Help => anchored_overlay(area, 86, 18, OverlayAnchor::BottomRight),
         OverlayPanel::Search => anchored_overlay(area, 86, 20, OverlayAnchor::BottomRight),
         OverlayPanel::Memory => anchored_overlay(area, 82, 24, OverlayAnchor::Center),
     }
