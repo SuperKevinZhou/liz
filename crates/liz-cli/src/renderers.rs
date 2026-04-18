@@ -119,7 +119,19 @@ fn render_empty_transcript(frame: &mut Frame<'_>, area: Rect, view_model: &ViewM
         .as_ref()
         .and_then(|status| status.display_name.clone())
         .unwrap_or_else(|| "Provider".to_owned());
-    let border_title = format!(" liz CLI v{} ", env!("CARGO_PKG_VERSION"));
+    frame.render_widget(Clear, popup);
+
+    let outer = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(BORDER_ACTIVE))
+        .title(Title::from(Span::styled(
+            format!(" liz CLI v{} ", env!("CARGO_PKG_VERSION")),
+            Style::default().fg(TEXT),
+        )));
+    let outer_inner = outer.inner(popup);
+    frame.render_widget(outer, popup);
+
     let sections = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -127,15 +139,14 @@ fn render_empty_transcript(frame: &mut Frame<'_>, area: Rect, view_model: &ViewM
             Constraint::Length(1),
             Constraint::Percentage(52),
         ])
-        .split(popup);
+        .split(outer_inner);
 
-    let left_block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(BORDER_ACTIVE))
-        .title(Title::from(Span::styled(border_title, Style::default().fg(TEXT))));
-    let left_inner = left_block.inner(sections[0]);
-    frame.render_widget(left_block, sections[0]);
+    let left_inner = Rect::new(
+        sections[0].x.saturating_add(1),
+        sections[0].y,
+        sections[0].width.saturating_sub(2),
+        sections[0].height,
+    );
 
     let left_lines = vec![
         Line::default(),
@@ -206,22 +217,23 @@ fn render_feed_box(
     lines: Vec<String>,
     footer: Option<&str>,
 ) {
-    frame.render_widget(
-        Block::default()
-            .borders(Borders::BOTTOM)
-            .border_style(Style::default().fg(BORDER_ACTIVE))
-            .title(Title::from(Span::styled(title.to_owned(), Style::default().fg(TEXT)))),
-        area,
-    );
     let inner =
-        Rect::new(area.x, area.y.saturating_add(1), area.width, area.height.saturating_sub(1));
-    let mut text_lines = lines
-        .into_iter()
-        .map(|line| Line::from(Span::styled(line, Style::default().fg(MUTED))))
-        .collect::<Vec<_>>();
+        Rect::new(area.x.saturating_add(1), area.y, area.width.saturating_sub(2), area.height);
+    let inner =
+        Rect::new(inner.x, inner.y.saturating_add(1), inner.width, inner.height.saturating_sub(1));
+    let mut text_lines = vec![Line::from(Span::styled(
+        title.to_owned(),
+        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+    ))];
+    for line in lines {
+        text_lines.push(Line::from(Span::styled(line, Style::default().fg(MUTED))));
+    }
     if let Some(footer) = footer {
         text_lines.push(Line::default());
-        text_lines.push(Line::from(Span::styled(footer.to_owned(), Style::default().fg(SUBTLE))));
+        text_lines.push(Line::from(Span::styled(
+            footer.to_owned(),
+            Style::default().fg(SUBTLE).add_modifier(Modifier::ITALIC),
+        )));
     }
     frame.render_widget(Paragraph::new(Text::from(text_lines)).wrap(Wrap { trim: false }), inner);
 }
@@ -234,7 +246,7 @@ fn welcome_tips_lines(view_model: &ViewModel) -> Vec<String> {
     ];
     if let Some(wakeup) = &view_model.wakeup {
         for commitment in wakeup.open_commitments.iter().take(2) {
-            lines.push(format!("Open: {commitment}"));
+            lines.push(format!("• {commitment}"));
         }
     }
     lines
