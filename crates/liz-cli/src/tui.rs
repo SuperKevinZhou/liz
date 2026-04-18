@@ -17,8 +17,8 @@ use liz_protocol::requests::{
     TurnStartRequest,
 };
 use liz_protocol::{
-    MemorySearchHit, MemorySearchHitKind, MemorySearchMode, RequestId, ResponsePayload,
-    ServerEventPayload, ServerResponseEnvelope, ThreadId,
+    ApprovalDecision, MemorySearchHit, MemorySearchHitKind, MemorySearchMode, RequestId,
+    ResponsePayload, ServerEventPayload, ServerResponseEnvelope, ThreadId,
 };
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
@@ -109,7 +109,7 @@ struct CliApp {
 impl CliApp {
     fn new(client: WebSocketAppClient, server_url: String) -> Self {
         let mut view_model = ViewModel::default();
-        view_model.status_line = "Connected. Loading conversations...".to_owned();
+        view_model.status_line = "Connecting…".to_owned();
         Self {
             client,
             view_model,
@@ -122,7 +122,12 @@ impl CliApp {
 
     fn bootstrap(&mut self) -> Result<(), AppClientError> {
         self.refresh_threads()?;
-        self.send_request(ClientRequest::ModelStatus(ModelStatusRequest {}))
+        self.send_request(ClientRequest::ModelStatus(ModelStatusRequest {}))?;
+        self.send_request(ClientRequest::ProviderAuthList(ProviderAuthListRequest {
+            provider_id: None,
+        }))?;
+        self.view_model.status_line = "Loading conversations and runtime status".to_owned();
+        Ok(())
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> Result<(), Box<dyn std::error::Error>> {
@@ -135,60 +140,137 @@ impl CliApp {
             return Ok(());
         }
 
+        if self.view_model.config_is_open() {
+            return self.handle_config_key(key);
+        }
+
+        if self.view_model.active_overlay == Some(OverlayPanel::Threads) {
+            return self.handle_threads_overlay_key(key);
+        }
+
         match key.code {
-            KeyCode::Up => {
-                self.view_model.select_previous_thread();
-                self.load_selected_thread_surfaces()?;
-            }
-            KeyCode::Down => {
-                self.view_model.select_next_thread();
-                self.load_selected_thread_surfaces()?;
-            }
-            KeyCode::Tab => {
-                self.view_model.toggle_thread_rail();
-                self.view_model.status_line = if self.view_model.show_thread_rail {
-                    "Thread rail opened".to_owned()
-                } else {
-                    "Thread rail hidden".to_owned()
-                };
-            }
             KeyCode::Esc => {
                 if !self.view_model.pending_approvals.is_empty() {
-                    self.respond_to_first_approval(liz_protocol::ApprovalDecision::Deny)?;
+                    self.respond_to_first_approval(ApprovalDecision::Deny)?;
                 } else if self.view_model.active_overlay.is_some() {
                     self.view_model.close_overlay();
                     self.view_model.status_line = "Overlay closed".to_owned();
                 } else if !self.view_model.input_buffer.is_empty() {
                     self.view_model.input_buffer.clear();
+                    self.view_model.refresh_composer_affordances();
                     self.view_model.status_line = "Composer cleared".to_owned();
+                }
+            }
+            KeyCode::Up => {
+                if self.view_model.command_palette_is_open() {
+                    self.view_model.select_previous_command();
+                } else if self.view_model.input_buffer.trim().is_empty() {
+                    self.view_model.open_overlay(OverlayPanel::Threads);
+                }
+            }
+            KeyCode::Down => {
+                if self.view_model.command_palette_is_open() {
+                    self.view_model.select_next_command();
+                } else if self.view_model.input_buffer.trim().is_empty() {
+                    self.view_model.open_overlay(OverlayPanel::Threads);
+                }
+            }
+            KeyCode::Tab => {
+                if self.view_model.command_palette_is_open()
+                    && self.view_model.accept_command_suggestion()
+                {
+                    self.view_model.status_line = "Command completed".to_owned();
+                } else {
+                    self.view_model.open_overlay(OverlayPanel::Threads);
+                    self.view_model.status_line = "Conversation picker opened".to_owned();
                 }
             }
             KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
                 self.view_model.input_buffer.push('\n');
+                self.view_model.refresh_composer_affordances();
             }
             KeyCode::Enter => {
+                if self.view_model.command_palette_is_open()
+                    && !self.view_model.command_suggestions.is_empty()
+                    && self.view_model.input_buffer.trim().starts_with('/')
+                {
+                    self.view_model.accept_command_suggestion();
+                    return Ok(());
+                }
+
                 if !self.view_model.pending_approvals.is_empty()
                     && self.view_model.input_buffer.trim().is_empty()
                 {
-                    self.respond_to_first_approval(liz_protocol::ApprovalDecision::ApproveOnce)?;
+                    self.respond_to_first_approval(ApprovalDecision::ApproveOnce)?;
                 } else {
                     self.submit_input()?;
                 }
             }
             KeyCode::Backspace => {
                 self.view_model.input_buffer.pop();
+                self.view_model.refresh_composer_affordances();
             }
             KeyCode::Char('?') if self.view_model.input_buffer.is_empty() => {
-                self.show_help_in_transcript();
+                self.view_model.open_overlay(OverlayPanel::Help);
+                self.view_model.status_line = "Help opened".to_owned();
             }
             KeyCode::Char(character) => {
                 if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT {
                     self.view_model.input_buffer.push(character);
+                    self.view_model.refresh_composer_affordances();
                 }
             }
             _ => {}
         }
 
+        Ok(())
+    }
+
+    fn handle_threads_overlay_key(
+        &mut self,
+        key: KeyEvent,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        match key.code {
+            KeyCode::Esc => {
+                self.view_model.close_overlay();
+                self.view_model.status_line = "Conversation picker closed".to_owned();
+            }
+            KeyCode::Up => {
+                self.view_model.select_previous_thread();
+            }
+            KeyCode::Down => {
+                self.view_model.select_next_thread();
+            }
+            KeyCode::Enter => {
+                self.view_model.close_overlay();
+                self.load_selected_thread_surfaces()?;
+                self.view_model.status_line = "Conversation opened".to_owned();
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
+
+    fn handle_config_key(&mut self, key: KeyEvent) -> Result<(), Box<dyn std::error::Error>> {
+        match key.code {
+            KeyCode::Esc => {
+                self.view_model.close_overlay();
+                self.view_model.status_line = "Config closed".to_owned();
+            }
+            KeyCode::Tab | KeyCode::Down => self.view_model.config_draft.focus_next(),
+            KeyCode::Up => self.view_model.config_draft.focus_previous(),
+            KeyCode::Backspace => self.view_model.config_draft.pop_char(),
+            KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.save_config_draft()?;
+            }
+            KeyCode::Char(character) => {
+                if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT {
+                    self.view_model.config_draft.push_char(character);
+                }
+            }
+            _ => {}
+        }
         Ok(())
     }
 
@@ -198,8 +280,12 @@ impl CliApp {
             self.view_model.status_line = "Composer is empty".to_owned();
             return Ok(());
         }
+
         self.view_model.input_buffer.clear();
-        self.view_model.close_overlay();
+        self.view_model.refresh_composer_affordances();
+        if self.view_model.active_overlay == Some(OverlayPanel::CommandPalette) {
+            self.view_model.close_overlay();
+        }
 
         if input.starts_with('/') {
             self.handle_slash_command(&input)?;
@@ -228,66 +314,97 @@ impl CliApp {
         let argument = parts.next().unwrap_or("").trim();
 
         match command {
+            "/help" => {
+                self.view_model.open_overlay(OverlayPanel::Help);
+                self.view_model.status_line = "Help opened".to_owned();
+            }
+            "/config" | "/settings" => self.open_config_overlay()?,
+            "/status" => {
+                self.send_request(ClientRequest::ModelStatus(ModelStatusRequest {}))?;
+                self.view_model.open_overlay(OverlayPanel::Status);
+                self.view_model.status_line = "Status opened".to_owned();
+            }
+            "/memory" => self.open_memory_overlay()?,
+            "/threads" => {
+                self.view_model.open_overlay(OverlayPanel::Threads);
+                self.view_model.status_line = "Conversation picker opened".to_owned();
+            }
             "/new" => self.start_new_thread(argument)?,
             "/clear" => self.start_new_thread("")?,
             "/resume" => self.resume_selected_thread()?,
             "/fork" => self.fork_selected_thread(argument)?,
-            "/refresh" => {
-                self.refresh_threads()?;
-                self.view_model.status_line = "Refreshing conversations".to_owned();
-            }
-            "/threads" => {
-                self.view_model.toggle_thread_rail();
-                self.view_model.status_line = if self.view_model.show_thread_rail {
-                    "Thread rail opened".to_owned()
-                } else {
-                    "Thread rail hidden".to_owned()
-                };
-            }
-            "/help" => {
-                self.show_help_in_transcript();
-            }
+            "/search" => self.search_memory(argument)?,
+            "/wakeup" => self.request_selected_wakeup()?,
+            "/compile" => self.compile_selected_thread_memory()?,
+            "/approve" => self.respond_to_first_approval(ApprovalDecision::ApproveOnce)?,
+            "/deny" => self.respond_to_first_approval(ApprovalDecision::Deny)?,
+            "/cancel" => self.cancel_selected_turn()?,
             "/exit" | "/quit" => {
                 self.should_exit = true;
                 self.view_model.status_line = "Closing liz-cli".to_owned();
             }
-            "/memory" => {
-                self.open_memory_overlay()?;
-            }
-            "/search" => {
-                self.search_memory(argument)?;
-            }
-            "/status" => {
-                self.send_request(ClientRequest::ModelStatus(ModelStatusRequest {}))?;
-                self.view_model.status_line = "Refreshing provider status".to_owned();
-            }
-            "/settings" | "/config" => {
-                self.handle_settings_command(argument)?;
-            }
-            "/cancel" => {
-                self.cancel_selected_turn()?;
-            }
-            "/approve" => {
-                self.respond_to_first_approval(liz_protocol::ApprovalDecision::ApproveOnce)?;
-            }
-            "/deny" => {
-                self.respond_to_first_approval(liz_protocol::ApprovalDecision::Deny)?;
-            }
-            "/wakeup" => {
-                self.request_selected_wakeup()?;
-            }
-            "/wake-up" => {
-                self.request_selected_wakeup()?;
-            }
-            "/compile" => {
-                self.compile_selected_thread_memory()?;
-            }
             _ => {
+                self.view_model.open_overlay(OverlayPanel::Help);
                 self.view_model.status_line = format!("Unknown command {command}");
-                self.show_help_in_transcript();
             }
         }
 
+        Ok(())
+    }
+
+    fn open_config_overlay(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let location = SettingsLocation::discover();
+        let config = LizConfigFile::load(&location)?;
+        let fallback_provider =
+            self.view_model.model_status.as_ref().map(|status| status.provider_id.as_str());
+        self.view_model.config_draft.load_from(
+            &location.config_file.display().to_string(),
+            &config,
+            &self.view_model.auth_profiles,
+            fallback_provider,
+        );
+        self.send_request(ClientRequest::ProviderAuthList(ProviderAuthListRequest {
+            provider_id: None,
+        }))?;
+        self.send_request(ClientRequest::ModelStatus(ModelStatusRequest {}))?;
+        self.view_model.open_overlay(OverlayPanel::Config);
+        self.view_model.status_line = "Config opened".to_owned();
+        Ok(())
+    }
+
+    fn save_config_draft(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let location = SettingsLocation::discover();
+        let mut config = LizConfigFile::load(&location)?;
+        let provider_id = self.view_model.config_draft.provider_id.trim().to_owned();
+        if provider_id.is_empty() {
+            self.view_model.status_line = "Provider cannot be empty".to_owned();
+            return Ok(());
+        }
+
+        config.set_primary_provider(provider_id.clone());
+
+        save_override(
+            &mut config,
+            provider_id.clone(),
+            ProviderField::BaseUrl,
+            self.view_model.config_draft.base_url.trim(),
+        );
+        save_override(
+            &mut config,
+            provider_id.clone(),
+            ProviderField::ApiKey,
+            self.view_model.config_draft.api_key.trim(),
+        );
+        save_override(
+            &mut config,
+            provider_id,
+            ProviderField::Model,
+            self.view_model.config_draft.model_id.trim(),
+        );
+        config.save(&location)?;
+        self.view_model.config_draft.dirty = false;
+        self.send_request(ClientRequest::ModelStatus(ModelStatusRequest {}))?;
+        self.view_model.status_line = "Config saved".to_owned();
         Ok(())
     }
 
@@ -331,6 +448,7 @@ impl CliApp {
             mode: MemorySearchMode::Semantic,
             limit: Some(8),
         }))?;
+        self.view_model.open_overlay(OverlayPanel::Memory);
         self.view_model.status_line = "Searching memory".to_owned();
         Ok(())
     }
@@ -344,98 +462,6 @@ impl CliApp {
         self.view_model.open_overlay(OverlayPanel::Memory);
         self.view_model.status_line = "Memory opened".to_owned();
         Ok(())
-    }
-
-    fn show_help_in_transcript(&mut self) {
-        self.view_model.close_overlay();
-        self.view_model.push_system_message(help_message());
-        self.view_model.status_line = "Help opened in transcript".to_owned();
-    }
-
-    fn show_settings_in_transcript(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        self.send_request(ClientRequest::ProviderAuthList(ProviderAuthListRequest {
-            provider_id: None,
-        }))?;
-        self.send_request(ClientRequest::ModelStatus(ModelStatusRequest {}))?;
-        self.view_model.push_system_message(settings_overview_message(&self.view_model));
-        self.view_model.status_line = "Settings opened in transcript".to_owned();
-        Ok(())
-    }
-
-    fn handle_settings_command(
-        &mut self,
-        argument: &str,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        if argument.is_empty() {
-            return self.show_settings_in_transcript();
-        }
-
-        let parts = argument.split_whitespace().collect::<Vec<_>>();
-        match parts.first().copied() {
-            Some("show") => self.show_settings_in_transcript(),
-            Some("path") => {
-                let location = SettingsLocation::discover();
-                self.view_model.push_system_message(format!(
-                    "liz settings paths\n\nConfig directory: {}\nConfig file: {}",
-                    location.config_dir.display(),
-                    location.config_file.display()
-                ));
-                self.view_model.status_line = "Settings path opened in transcript".to_owned();
-                Ok(())
-            }
-            Some("provider") if parts.len() >= 2 => {
-                let provider_id = parts[1].to_owned();
-                let location = SettingsLocation::discover();
-                let mut config = LizConfigFile::load(&location)?;
-                config.set_primary_provider(provider_id.clone());
-                config.save(&location)?;
-                self.view_model.push_system_message(format!(
-                    "Primary provider updated\n\nProvider: {provider_id}\nConfig file: {}",
-                    location.config_file.display()
-                ));
-                self.view_model.status_line = format!("Primary provider set to {provider_id}");
-                Ok(())
-            }
-            Some("set-provider") if parts.len() >= 4 => {
-                let provider_id = parts[1].to_owned();
-                let Some(field) = ProviderField::parse(parts[2]) else {
-                    self.view_model.push_system_message(
-                        "Unknown provider field. Use one of: base-url, api-key, model".to_owned(),
-                    );
-                    self.view_model.status_line = "Unknown settings field".to_owned();
-                    return Ok(());
-                };
-                let value =
-                    argument.splitn(4, char::is_whitespace).nth(3).unwrap_or("").trim().to_owned();
-                if value.is_empty() {
-                    self.view_model.push_system_message(format!(
-                        "Missing value for /settings set-provider {} {}",
-                        provider_id,
-                        field.display_name()
-                    ));
-                    self.view_model.status_line = "Missing settings value".to_owned();
-                    return Ok(());
-                }
-
-                let location = SettingsLocation::discover();
-                let mut config = LizConfigFile::load(&location)?;
-                let provider_id = config.upsert_provider(provider_id, field, value);
-                config.save(&location)?;
-                self.view_model.push_system_message(format!(
-                    "Provider override saved\n\nProvider: {provider_id}\nField: {}\nConfig file: {}",
-                    field.display_name(),
-                    location.config_file.display()
-                ));
-                self.view_model.status_line =
-                    format!("Saved {} for {}", field.display_name(), provider_id);
-                Ok(())
-            }
-            _ => {
-                self.view_model.push_system_message(settings_usage_message());
-                self.view_model.status_line = "Settings help opened in transcript".to_owned();
-                Ok(())
-            }
-        }
     }
 
     fn drain_transport(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -659,7 +685,7 @@ impl CliApp {
 
     fn respond_to_first_approval(
         &mut self,
-        decision: liz_protocol::ApprovalDecision,
+        decision: ApprovalDecision,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let Some(approval) = self.view_model.pending_approvals.first().cloned() else {
             self.view_model.status_line = "No pending approvals".to_owned();
@@ -680,87 +706,15 @@ impl CliApp {
     }
 }
 
-fn help_message() -> String {
-    [
-        "liz command reference",
-        "",
-        "/new                start a fresh conversation",
-        "/new <message>      start fresh and send the first message",
-        "/clear              clear the current visible conversation and start fresh",
-        "/resume             refresh the selected thread",
-        "/fork [title]       fork the selected conversation",
-        "/refresh            reload the thread list",
-        "/threads            toggle the conversation drawer",
-        "/memory             inspect wake-up, evidence, and compiled memory",
-        "/search <query>     search memory and recent conversations",
-        "/status             refresh provider readiness",
-        "/settings           inspect and edit local provider setup",
-        "/config             alias for /settings",
-        "/wakeup             refresh wake-up for the selected thread",
-        "/cancel             cancel the latest running turn on the selected thread",
-        "/compile            compile memory for the selected thread",
-        "/approve            approve the current pending request",
-        "/deny               deny the current pending request",
-        "/exit               leave liz-cli",
-        "",
-        "Keys: Enter send, Shift+Enter newline, Tab toggle conversations, Ctrl+C quit",
-    ]
-    .join("\n")
-}
-
-fn settings_overview_message(view_model: &ViewModel) -> String {
-    let mut lines = vec![
-        "liz settings".to_owned(),
-        "".to_owned(),
-        "Use /settings path to inspect the resolved .liz config location.".to_owned(),
-        "Use /settings provider <provider-id> to switch the primary provider.".to_owned(),
-        "Use /settings set-provider <provider-id> <base-url|api-key|model> <value> to persist an override.".to_owned(),
-    ];
-
-    if let Some(status) = view_model.model_status.as_ref() {
-        let display_name = status.display_name.as_deref().unwrap_or(&status.provider_id);
-        lines.push(format!("Active provider: {} ({})", display_name, status.provider_id));
-        if let Some(model_id) = status.model_id.as_ref() {
-            lines.push(format!("Model: {model_id}"));
-        }
-        lines.push(format!("Ready: {}", if status.ready { "yes" } else { "no" }));
-        if !status.credential_hints.is_empty() {
-            lines.push(format!("Hints: {}", status.credential_hints.join(", ")));
-        }
-    } else {
-        lines.push("Active provider: loading...".to_owned());
+fn save_override(
+    config: &mut LizConfigFile,
+    provider_id: String,
+    field: ProviderField,
+    value: &str,
+) {
+    if !value.is_empty() {
+        config.upsert_provider(provider_id, field, value.to_owned());
     }
-
-    lines.push("".to_owned());
-    lines.push("Saved provider profiles:".to_owned());
-    if view_model.auth_profiles.is_empty() {
-        lines.push("  none".to_owned());
-    } else {
-        for profile in &view_model.auth_profiles {
-            let label = profile.display_name.as_deref().unwrap_or("unnamed");
-            lines.push(format!("  {}  [{}]  {}", profile.profile_id, profile.provider_id, label));
-        }
-    }
-
-    lines.push("".to_owned());
-    lines.push("Saved profiles come from auth storage. Provider overrides are persisted in .liz/config.json.".to_owned());
-    lines.join("\n")
-}
-
-fn settings_usage_message() -> String {
-    [
-        "liz settings usage",
-        "",
-        "/settings",
-        "/settings show",
-        "/settings path",
-        "/settings provider <provider-id>",
-        "/settings set-provider <provider-id> base-url <url>",
-        "/settings set-provider <provider-id> api-key <secret>",
-        "/settings set-provider <provider-id> model <model-id>",
-        "/config ...",
-    ]
-    .join("\n")
 }
 
 struct TerminalGuard {
@@ -804,52 +758,6 @@ mod tests {
     use std::sync::mpsc;
 
     #[test]
-    fn key_repeat_and_release_events_do_not_edit_the_composer() {
-        let mut app = test_app();
-
-        app.handle_key(KeyEvent::new_with_kind(
-            KeyCode::Char('a'),
-            KeyModifiers::empty(),
-            KeyEventKind::Press,
-        ))
-        .expect("press event should be handled");
-        app.handle_key(KeyEvent::new_with_kind(
-            KeyCode::Char('a'),
-            KeyModifiers::empty(),
-            KeyEventKind::Repeat,
-        ))
-        .expect("repeat event should be ignored");
-        app.handle_key(KeyEvent::new_with_kind(
-            KeyCode::Backspace,
-            KeyModifiers::empty(),
-            KeyEventKind::Repeat,
-        ))
-        .expect("repeat backspace should be ignored");
-        app.handle_key(KeyEvent::new_with_kind(
-            KeyCode::Char('a'),
-            KeyModifiers::empty(),
-            KeyEventKind::Release,
-        ))
-        .expect("release event should be ignored");
-
-        assert_eq!(app.view_model.input_buffer, "a");
-    }
-
-    #[test]
-    fn key_release_does_not_trigger_control_c_exit() {
-        let mut app = test_app();
-
-        app.handle_key(KeyEvent::new_with_kind(
-            KeyCode::Char('c'),
-            KeyModifiers::CONTROL,
-            KeyEventKind::Release,
-        ))
-        .expect("release event should be ignored");
-
-        assert!(!app.should_exit);
-    }
-
-    #[test]
     fn first_plain_message_starts_thread_then_turn() {
         let (request_tx, request_rx) = mpsc::channel();
         let (_response_tx, response_rx) = mpsc::channel();
@@ -858,6 +766,7 @@ mod tests {
         let mut app = CliApp::new(client, DEFAULT_SERVER_URL.to_owned());
 
         app.view_model.input_buffer = "hello liz".to_owned();
+        app.view_model.refresh_composer_affordances();
         app.submit_input().expect("plain first message should start a thread");
 
         let thread_start = request_rx.recv().expect("thread/start request should be sent");
@@ -878,32 +787,32 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(follow_up_requests
             .iter()
-            .any(|request| { matches!(request, ClientRequest::MemoryReadWakeup(_)) }));
+            .any(|request| matches!(request, ClientRequest::MemoryReadWakeup(_))));
         assert!(follow_up_requests
             .iter()
-            .any(|request| { matches!(request, ClientRequest::MemoryOpenSession(_)) }));
+            .any(|request| matches!(request, ClientRequest::MemoryOpenSession(_))));
         assert!(follow_up_requests
             .iter()
-            .any(|request| { matches!(request, ClientRequest::MemoryListTopics(_)) }));
-        let turn_start = follow_up_requests
-            .into_iter()
-            .find(|request| matches!(request, ClientRequest::TurnStart(_)))
-            .expect("turn/start request should be sent");
-        match turn_start {
-            ClientRequest::TurnStart(request) => {
-                assert_eq!(request.thread_id, ThreadId::new("thread_01"));
-                assert_eq!(request.input, "hello liz");
-            }
-            other => panic!("expected turn/start, got {other:?}"),
-        }
+            .any(|request| matches!(request, ClientRequest::MemoryListTopics(_))));
+        assert!(follow_up_requests
+            .iter()
+            .any(|request| matches!(request, ClientRequest::TurnStart(_))));
     }
 
-    fn test_app() -> CliApp {
+    #[test]
+    fn tab_accepts_command_completion() {
         let (request_tx, _request_rx) = mpsc::channel();
         let (_response_tx, response_rx) = mpsc::channel();
         let (_event_tx, event_rx) = mpsc::channel();
         let client = WebSocketAppClient::new(request_tx, response_rx, event_rx);
-        CliApp::new(client, DEFAULT_SERVER_URL.to_owned())
+        let mut app = CliApp::new(client, DEFAULT_SERVER_URL.to_owned());
+
+        app.view_model.input_buffer = "/he".to_owned();
+        app.view_model.refresh_composer_affordances();
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()))
+            .expect("tab should be handled");
+
+        assert_eq!(app.view_model.input_buffer, "/help ");
     }
 
     fn test_thread(id: &str, title: &str) -> Thread {

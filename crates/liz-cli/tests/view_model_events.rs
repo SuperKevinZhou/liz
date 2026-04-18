@@ -199,10 +199,12 @@ fn view_model_surfaces_missing_provider_configuration() {
         },
     )));
 
-    assert_eq!(view_model.transcript_entries.len(), 1);
-    assert_eq!(view_model.transcript_entries[0].kind, TranscriptEntryKind::System);
-    assert!(view_model.transcript_entries[0].body.contains("Model provider is not ready"));
-    assert!(view_model.transcript_entries[0].body.contains("OPENAI_API_KEY"));
+    assert!(view_model.transcript_entries.is_empty());
+    assert_eq!(view_model.status_line, "OpenAI needs configuration");
+    assert_eq!(
+        view_model.model_status.as_ref().and_then(|status| status.credential_hints.first()),
+        Some(&"OPENAI_API_KEY".to_owned())
+    );
 }
 
 fn thread(id: &str, title: &str) -> Thread {
