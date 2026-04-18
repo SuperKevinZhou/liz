@@ -11,8 +11,8 @@ use crossterm::{execute, ExecutableCommand};
 use liz_protocol::requests::{
     ClientRequest, ClientRequestEnvelope, MemoryCompileNowRequest, MemoryListTopicsRequest,
     MemoryOpenEvidenceRequest, MemoryOpenSessionRequest, MemoryReadWakeupRequest,
-    MemorySearchRequest, ModelStatusRequest, ThreadListRequest, ThreadResumeRequest,
-    ThreadStartRequest, TurnInputKind, TurnStartRequest,
+    MemorySearchRequest, ModelStatusRequest, ProviderAuthListRequest, ThreadListRequest,
+    ThreadResumeRequest, ThreadStartRequest, TurnInputKind, TurnStartRequest,
 };
 use liz_protocol::{
     MemorySearchHit, MemorySearchHitKind, MemorySearchMode, RequestId, ResponsePayload,
@@ -169,8 +169,7 @@ impl CliApp {
                 self.view_model.input_buffer.pop();
             }
             KeyCode::Char('?') if self.view_model.input_buffer.is_empty() => {
-                self.view_model.open_overlay(OverlayPanel::Help);
-                self.view_model.status_line = "Help opened".to_owned();
+                self.show_help_in_transcript();
             }
             KeyCode::Char(character) => {
                 if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT {
@@ -234,14 +233,24 @@ impl CliApp {
                 };
             }
             "/help" => {
-                self.view_model.open_overlay(OverlayPanel::Help);
-                self.view_model.status_line = "Help opened".to_owned();
+                self.show_help_in_transcript();
+            }
+            "/exit" | "/quit" => {
+                self.should_exit = true;
+                self.view_model.status_line = "Closing liz-cli".to_owned();
             }
             "/memory" => {
                 self.open_memory_overlay()?;
             }
             "/search" => {
                 self.search_memory(argument)?;
+            }
+            "/status" => {
+                self.send_request(ClientRequest::ModelStatus(ModelStatusRequest {}))?;
+                self.view_model.status_line = "Refreshing provider status".to_owned();
+            }
+            "/settings" => {
+                self.show_settings_in_transcript()?;
             }
             "/approve" => {
                 self.respond_to_first_approval(liz_protocol::ApprovalDecision::ApproveOnce)?;
@@ -257,7 +266,7 @@ impl CliApp {
             }
             _ => {
                 self.view_model.status_line = format!("Unknown command {command}");
-                self.view_model.open_overlay(OverlayPanel::Help);
+                self.show_help_in_transcript();
             }
         }
 
@@ -316,6 +325,22 @@ impl CliApp {
         }
         self.view_model.open_overlay(OverlayPanel::Memory);
         self.view_model.status_line = "Memory opened".to_owned();
+        Ok(())
+    }
+
+    fn show_help_in_transcript(&mut self) {
+        self.view_model.close_overlay();
+        self.view_model.push_system_message(help_message());
+        self.view_model.status_line = "Help opened in transcript".to_owned();
+    }
+
+    fn show_settings_in_transcript(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        self.send_request(ClientRequest::ProviderAuthList(ProviderAuthListRequest {
+            provider_id: None,
+        }))?;
+        self.send_request(ClientRequest::ModelStatus(ModelStatusRequest {}))?;
+        self.view_model.push_system_message(settings_message(&self.view_model));
+        self.view_model.status_line = "Settings opened in transcript".to_owned();
         Ok(())
     }
 
@@ -527,6 +552,69 @@ impl CliApp {
         self.next_request_number += 1;
         self.client.send_request(ClientRequestEnvelope { request_id, request })
     }
+}
+
+fn help_message() -> String {
+    [
+        "liz command reference",
+        "",
+        "/new                start a fresh conversation",
+        "/new <message>      start fresh and send the first message",
+        "/resume             refresh the selected thread",
+        "/refresh            reload the thread list",
+        "/threads            toggle the conversation drawer",
+        "/memory             inspect wake-up, evidence, and compiled memory",
+        "/search <query>     search memory and recent conversations",
+        "/status             refresh provider readiness",
+        "/settings           inspect provider setup and saved profiles",
+        "/wakeup             refresh wake-up for the selected thread",
+        "/compile            compile memory for the selected thread",
+        "/approve            approve the current pending request",
+        "/deny               deny the current pending request",
+        "/exit               leave liz-cli",
+        "",
+        "Keys: Enter send, Shift+Enter newline, Tab toggle conversations, Ctrl+C quit",
+    ]
+    .join("\n")
+}
+
+fn settings_message(view_model: &ViewModel) -> String {
+    let mut lines = vec![
+        "liz settings".to_owned(),
+        "".to_owned(),
+        "Config root: .liz in the resolved workspace/runtime root".to_owned(),
+    ];
+
+    if let Some(status) = view_model.model_status.as_ref() {
+        let display_name = status.display_name.as_deref().unwrap_or(&status.provider_id);
+        lines.push(format!("Active provider: {} ({})", display_name, status.provider_id));
+        if let Some(model_id) = status.model_id.as_ref() {
+            lines.push(format!("Model: {model_id}"));
+        }
+        lines.push(format!("Ready: {}", if status.ready { "yes" } else { "no" }));
+        if !status.credential_hints.is_empty() {
+            lines.push(format!("Hints: {}", status.credential_hints.join(", ")));
+        }
+    } else {
+        lines.push("Active provider: loading...".to_owned());
+    }
+
+    lines.push("".to_owned());
+    lines.push("Saved provider profiles:".to_owned());
+    if view_model.auth_profiles.is_empty() {
+        lines.push("  none".to_owned());
+    } else {
+        for profile in &view_model.auth_profiles {
+            let label = profile.display_name.as_deref().unwrap_or("unnamed");
+            lines.push(format!("  {}  [{}]  {}", profile.profile_id, profile.provider_id, label));
+        }
+    }
+
+    lines.push("".to_owned());
+    lines.push(
+        "Provider profile editing is being wired into local .liz config management.".to_owned(),
+    );
+    lines.join("\n")
 }
 
 struct TerminalGuard {

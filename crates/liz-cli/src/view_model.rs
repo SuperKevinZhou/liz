@@ -10,7 +10,7 @@ use liz_protocol::events::{
 };
 use liz_protocol::{
     ApprovalRequest, ArtifactKind, MemoryEvidenceView, MemorySearchHit, MemorySessionEntry,
-    MemorySessionView, MemoryTopicSummary, MemoryWakeup, ModelStatusResponse,
+    MemorySessionView, MemoryTopicSummary, MemoryWakeup, ModelStatusResponse, ProviderAuthProfile,
     RecentConversationWakeupView, ResponsePayload, ResumeSummary, ServerEvent, ServerEventPayload,
     ServerResponseEnvelope, Thread, ThreadId, ThreadStatus,
 };
@@ -99,6 +99,10 @@ pub struct ViewModel {
     pub candidate_procedures: Vec<String>,
     /// Dreaming or reflection summaries surfaced by the runtime.
     pub dreaming_summaries: Vec<String>,
+    /// The latest provider status snapshot returned by the server.
+    pub model_status: Option<ModelStatusResponse>,
+    /// Persisted provider auth profiles exposed by the server.
+    pub auth_profiles: Vec<ProviderAuthProfile>,
     /// The one-line status bar message.
     pub status_line: String,
     /// The active input buffer.
@@ -269,7 +273,25 @@ impl ViewModel {
                     self.status_line = response.summary.clone();
                 }
                 ResponsePayload::ModelStatus(response) => {
+                    self.model_status = Some(response.clone());
                     self.apply_model_status(response);
+                }
+                ResponsePayload::ProviderAuthList(response) => {
+                    self.auth_profiles = response.profiles.clone();
+                    self.status_line = match self.auth_profiles.len() {
+                        0 => "No saved provider profiles".to_owned(),
+                        1 => "Loaded 1 provider profile".to_owned(),
+                        count => format!("Loaded {count} provider profiles"),
+                    };
+                }
+                ResponsePayload::ProviderAuthUpsert(response) => {
+                    self.upsert_auth_profile(response.profile.clone());
+                    self.status_line =
+                        format!("Saved provider profile {}", response.profile.profile_id);
+                }
+                ResponsePayload::ProviderAuthDelete(response) => {
+                    self.auth_profiles.retain(|profile| profile.profile_id != response.profile_id);
+                    self.status_line = format!("Deleted provider profile {}", response.profile_id);
                 }
                 _ => {}
             },
@@ -438,6 +460,11 @@ impl ViewModel {
         self.push_entry_for_selected_thread(TranscriptEntryKind::User, message);
     }
 
+    /// Adds a system message to the transcript.
+    pub fn push_system_message(&mut self, message: String) {
+        self.push_entry_for_selected_thread(TranscriptEntryKind::System, message);
+    }
+
     /// Adds the first user message while a new thread request is still in flight.
     pub fn push_pending_thread_start_message(&mut self, message: String) {
         push_deduped_entry(
@@ -488,6 +515,17 @@ impl ViewModel {
         push_deduped_entry(self.thread_transcripts.entry(thread_id.clone()).or_default(), entry);
         if self.selected_thread_id().as_ref() == Some(&thread_id) {
             self.sync_visible_transcript();
+        }
+    }
+
+    fn upsert_auth_profile(&mut self, profile: ProviderAuthProfile) {
+        if let Some(existing) =
+            self.auth_profiles.iter_mut().find(|existing| existing.profile_id == profile.profile_id)
+        {
+            *existing = profile;
+        } else {
+            self.auth_profiles.push(profile);
+            self.auth_profiles.sort_by(|left, right| left.profile_id.cmp(&right.profile_id));
         }
     }
 
