@@ -3,7 +3,7 @@
 use crate::app_client::{AppClientError, WebSocketAppClient};
 use crate::renderers;
 use crate::view_model::{OverlayPanel, ViewModel};
-use crossterm::event::{self, Event as CEvent, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{self, Event as CEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -115,6 +115,10 @@ impl CliApp {
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> Result<(), Box<dyn std::error::Error>> {
+        if key.kind != KeyEventKind::Press {
+            return Ok(());
+        }
+
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
             self.should_exit = true;
             return Ok(());
@@ -525,5 +529,65 @@ impl Drop for TerminalGuard {
         let _ = disable_raw_mode();
         let _ = execute!(self.terminal.backend_mut(), LeaveAlternateScreen);
         let _ = self.terminal.show_cursor();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc;
+
+    #[test]
+    fn key_repeat_and_release_events_do_not_edit_the_composer() {
+        let mut app = test_app();
+
+        app.handle_key(KeyEvent::new_with_kind(
+            KeyCode::Char('a'),
+            KeyModifiers::empty(),
+            KeyEventKind::Press,
+        ))
+        .expect("press event should be handled");
+        app.handle_key(KeyEvent::new_with_kind(
+            KeyCode::Char('a'),
+            KeyModifiers::empty(),
+            KeyEventKind::Repeat,
+        ))
+        .expect("repeat event should be ignored");
+        app.handle_key(KeyEvent::new_with_kind(
+            KeyCode::Backspace,
+            KeyModifiers::empty(),
+            KeyEventKind::Repeat,
+        ))
+        .expect("repeat backspace should be ignored");
+        app.handle_key(KeyEvent::new_with_kind(
+            KeyCode::Char('a'),
+            KeyModifiers::empty(),
+            KeyEventKind::Release,
+        ))
+        .expect("release event should be ignored");
+
+        assert_eq!(app.view_model.input_buffer, "a");
+    }
+
+    #[test]
+    fn key_release_does_not_trigger_control_c_exit() {
+        let mut app = test_app();
+
+        app.handle_key(KeyEvent::new_with_kind(
+            KeyCode::Char('c'),
+            KeyModifiers::CONTROL,
+            KeyEventKind::Release,
+        ))
+        .expect("release event should be ignored");
+
+        assert!(!app.should_exit);
+    }
+
+    fn test_app() -> CliApp {
+        let (request_tx, _request_rx) = mpsc::channel();
+        let (_response_tx, response_rx) = mpsc::channel();
+        let (_event_tx, event_rx) = mpsc::channel();
+        let client = WebSocketAppClient::new(request_tx, response_rx, event_rx);
+        CliApp::new(client, DEFAULT_SERVER_URL.to_owned())
     }
 }
