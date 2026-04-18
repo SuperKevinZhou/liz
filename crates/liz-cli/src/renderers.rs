@@ -281,7 +281,13 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
         .constraints([Constraint::Length(1), Constraint::Min(1), Constraint::Length(1)])
         .split(inner);
 
-    let placeholder = if view_model.slash_mode { "Type a command" } else { "Ask anything" };
+    let placeholder = if view_model.slash_mode {
+        "Type a command"
+    } else if view_model.threads.is_empty() {
+        "How can liz help?"
+    } else {
+        "Reply to liz…"
+    };
     frame.render_widget(
         Paragraph::new(Line::from(status_line_spans(view_model)))
             .style(Style::default().fg(MUTED))
@@ -291,7 +297,7 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
 
     let body = if view_model.input_buffer.is_empty() {
         Text::from(Line::from(vec![
-            Span::styled("> ", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            prompt_indicator_span(view_model, true),
             Span::styled(placeholder, Style::default().fg(SUBTLE)),
         ]))
     } else {
@@ -302,10 +308,11 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
                 .enumerate()
                 .map(|(index, line)| {
                     Line::from(vec![
-                        Span::styled(
-                            if index == 0 { "> " } else { "  " },
-                            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-                        ),
+                        if index == 0 {
+                            prompt_indicator_span(view_model, false)
+                        } else {
+                            Span::raw("  ")
+                        },
                         Span::styled(line.to_owned(), Style::default().fg(TEXT)),
                     ])
                 })
@@ -910,6 +917,14 @@ fn status_line_color(view_model: &ViewModel) -> Color {
     } else {
         MUTED
     }
+}
+
+fn prompt_indicator_span(view_model: &ViewModel, dim_when_idle: bool) -> Span<'static> {
+    let mut style = Style::default().fg(ACCENT).add_modifier(Modifier::BOLD);
+    if dim_when_idle && view_model.streaming_preview().is_none() {
+        style = style.fg(MUTED);
+    }
+    Span::styled("❯ ", style)
 }
 
 fn footer_left_spans(view_model: &ViewModel) -> Vec<Span<'static>> {
