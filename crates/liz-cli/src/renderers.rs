@@ -1,25 +1,27 @@
 //! TUI renderers for the CLI chat shell.
 
 use crate::view_model::{OverlayPanel, TranscriptEntryKind, ViewModel};
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Constraint, Direction, Layout, Margin, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::block::Title;
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
-const BORDER_SOFT: Color = Color::Rgb(78, 82, 94);
+const BG: Color = Color::Rgb(12, 14, 18);
+const PANEL_BG: Color = Color::Rgb(15, 18, 24);
+const PANEL_BG_ELEVATED: Color = Color::Rgb(19, 22, 29);
+const BORDER_SOFT: Color = Color::Rgb(44, 49, 59);
+const BORDER_ACTIVE: Color = Color::Rgb(86, 95, 115);
 const TEXT_PRIMARY: Color = Color::Rgb(232, 234, 237);
-const TEXT_MUTED: Color = Color::Rgb(142, 146, 158);
-const BRAND: Color = Color::Rgb(222, 151, 92);
-const ACCENT: Color = Color::Rgb(120, 166, 255);
-const APPROVAL: Color = Color::Rgb(236, 190, 104);
-const RAIL_SELECTED: Color = Color::Rgb(184, 198, 255);
-const SYSTEM: Color = Color::Rgb(173, 179, 189);
-const COMPOSER_HINT: Color = Color::Rgb(118, 122, 136);
-const HELP_RULE: &str =
-    "Esc close  Up/Down switch thread  Tab threads  /help commands  /memory recall";
-const OVERLAY_SHADOW: Color = Color::Rgb(22, 24, 31);
+const TEXT_MUTED: Color = Color::Rgb(135, 141, 153);
+const TEXT_SUBTLE: Color = Color::Rgb(104, 109, 120);
+const BRAND: Color = Color::Rgb(230, 176, 116);
+const USER: Color = Color::Rgb(137, 175, 255);
+const APPROVAL: Color = Color::Rgb(234, 194, 112);
+const SUCCESS: Color = Color::Rgb(126, 191, 142);
+const SYSTEM: Color = Color::Rgb(160, 166, 178);
+const SHADOW: Color = Color::Rgb(8, 9, 12);
 
 /// Minimal renderer metadata for banner and smoke surfaces.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,26 +32,81 @@ pub struct RendererSkeleton {
 
 impl Default for RendererSkeleton {
     fn default() -> Self {
-        Self { renderer_stack: "ratatui+chat+overlay" }
+        Self { renderer_stack: "ratatui+transcript+drawer" }
     }
 }
 
 /// Draws the full CLI layout.
 pub fn render(frame: &mut Frame<'_>, view_model: &ViewModel, server_url: &str) {
+    frame.render_widget(Block::default().style(Style::default().bg(BG)), frame.area());
+
+    let show_sidebar = view_model.show_thread_rail && frame.area().width >= 112;
+    let columns = if show_sidebar {
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Length(30), Constraint::Min(40)])
+            .split(frame.area())
+    } else {
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(1)])
+            .split(frame.area())
+    };
+
+    if show_sidebar {
+        render_sidebar_shell(frame, columns[0], view_model);
+        render_main_shell(frame, columns[1], view_model, server_url);
+    } else {
+        render_main_shell(frame, columns[0], view_model, server_url);
+    }
+}
+
+fn render_sidebar_shell(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
+    let block = surface_block(Some("conversations"), true);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(2), Constraint::Min(4), Constraint::Length(2)])
+        .split(inner);
+
+    frame.render_widget(
+        Paragraph::new(Text::from(vec![
+            Line::from(Span::styled(
+                "liz",
+                Style::default().fg(BRAND).add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::styled("recent threads", Style::default().fg(TEXT_SUBTLE))),
+        ])),
+        layout[0],
+    );
+
+    render_thread_rail(frame, layout[1], view_model);
+
+    let footer = Line::from(vec![
+        Span::styled("↑↓", Style::default().fg(TEXT_MUTED)),
+        Span::styled(" switch", Style::default().fg(TEXT_SUBTLE)),
+        Span::raw("   "),
+        Span::styled("Tab", Style::default().fg(TEXT_MUTED)),
+        Span::styled(" hide", Style::default().fg(TEXT_SUBTLE)),
+    ]);
+    frame.render_widget(Paragraph::new(footer), layout[2]);
+}
+
+fn render_main_shell(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel, server_url: &str) {
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),
-            Constraint::Length(1),
+            Constraint::Length(2),
             Constraint::Min(10),
             Constraint::Length(composer_height(view_model)),
         ])
-        .split(frame.area());
+        .split(area);
 
     render_header(frame, layout[0], view_model, server_url);
-    render_rule(frame, layout[1]);
-    render_body(frame, layout[2], view_model);
-    render_composer(frame, layout[3], view_model);
+    render_transcript_panel(frame, layout[1], view_model);
+    render_composer_panel(frame, layout[2], view_model);
 
     if let Some(panel) = view_model.active_overlay {
         render_overlay(frame, panel, view_model);
@@ -58,100 +115,108 @@ pub fn render(frame: &mut Frame<'_>, view_model: &ViewModel, server_url: &str) {
 
 fn render_header(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel, server_url: &str) {
     let title =
-        view_model.selected_thread().map(|thread| thread.title.as_str()).unwrap_or("untitled");
-    let approval_badge = if view_model.pending_approval_count() > 0 {
-        format!("approval {}", view_model.pending_approval_count())
-    } else {
-        String::new()
-    };
-    let wakeup_badge = if view_model.has_wakeup_context() { "wake-up" } else { "" };
-    let mut header = vec![Span::styled(
-        format!("liz  {title}"),
+        view_model.selected_thread().map(|thread| thread.title.as_str()).unwrap_or("new thread");
+    let mut left = vec![Span::styled(
+        format!("liz / {title}"),
         Style::default().fg(TEXT_PRIMARY).add_modifier(Modifier::BOLD),
     )];
-    if !approval_badge.is_empty() {
-        header.push(Span::raw("   "));
-        header.push(Span::styled(approval_badge, Style::default().fg(APPROVAL)));
-    }
-    if !wakeup_badge.is_empty() {
-        header.push(Span::raw("   "));
-        header.push(Span::styled(wakeup_badge, Style::default().fg(ACCENT)));
-    }
-    header.push(Span::raw("   "));
-    header.push(Span::styled(server_url, Style::default().fg(TEXT_MUTED)));
 
-    frame.render_widget(Paragraph::new(Line::from(header)).wrap(Wrap { trim: false }), area);
-}
+    if view_model.has_wakeup_context() {
+        left.push(Span::raw("  "));
+        left.push(Span::styled("wake-up", Style::default().fg(USER)));
+    }
+    if view_model.pending_approval_count() > 0 {
+        left.push(Span::raw("  "));
+        left.push(Span::styled(
+            format!("approval {}", view_model.pending_approval_count()),
+            Style::default().fg(APPROVAL).add_modifier(Modifier::BOLD),
+        ));
+    }
 
-fn render_rule(frame: &mut Frame<'_>, area: Rect) {
+    let status = current_status_capsule(view_model, server_url);
+    let header = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(24), Constraint::Length(status.width as u16)])
+        .split(area);
+
+    frame.render_widget(Paragraph::new(Line::from(left)).wrap(Wrap { trim: false }), header[0]);
     frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            "─".repeat(area.width as usize),
-            Style::default().fg(BORDER_SOFT),
-        ))),
-        area,
+        Paragraph::new(Line::from(vec![
+            Span::styled(status.text, Style::default().fg(TEXT_MUTED)),
+            Span::raw("  "),
+            Span::styled(server_url, Style::default().fg(TEXT_SUBTLE)),
+        ]))
+        .alignment(ratatui::layout::Alignment::Right),
+        header[1],
     );
 }
 
-fn render_body(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
-    let show_thread_rail = view_model.show_thread_rail && area.width >= 88;
-    if show_thread_rail {
-        let columns = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Length(30), Constraint::Min(20)])
-            .split(area);
-        render_thread_rail(frame, columns[0], view_model);
-        render_vertical_rule(frame, columns[0].right(), area);
-        render_transcript(frame, columns[1], view_model);
-    } else {
-        render_transcript(frame, area, view_model);
-    }
-}
+fn render_transcript_panel(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
+    let block = Block::default().style(Style::default().bg(BG));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
 
-fn render_vertical_rule(frame: &mut Frame<'_>, x: u16, area: Rect) {
-    if x >= area.right() {
-        return;
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(8), Constraint::Length(1)])
+        .split(inner);
+
+    if let Some(capsule) = wakeup_capsule(view_model) {
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled("resume", Style::default().fg(USER).add_modifier(Modifier::BOLD)),
+                Span::raw("  "),
+                Span::styled(capsule, Style::default().fg(TEXT_MUTED)),
+            ])),
+            layout[0],
+        );
     }
 
-    let rule_area = Rect::new(x, area.y, 1, area.height);
-    let lines = (0..area.height)
-        .map(|_| Line::from(Span::styled("│", Style::default().fg(BORDER_SOFT))))
-        .collect::<Vec<_>>();
-    frame.render_widget(Paragraph::new(Text::from(lines)), rule_area);
+    render_transcript(frame, layout[1], view_model);
+
+    let footer = transcript_footer(view_model);
+    frame.render_widget(Paragraph::new(footer), layout[2]);
 }
 
 fn render_thread_rail(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
-    let mut lines = vec![Line::from(Span::styled(
-        "Threads",
-        Style::default().fg(TEXT_MUTED).add_modifier(Modifier::BOLD),
-    ))];
+    let mut lines = Vec::new();
 
     if view_model.threads.is_empty() {
-        lines.push(Line::default());
+        lines.push(Line::from(Span::styled("No threads yet.", Style::default().fg(TEXT_MUTED))));
         lines.push(Line::from(Span::styled(
-            "No threads yet. Start by typing a message.",
-            Style::default().fg(TEXT_MUTED),
+            "Type a message to open the first one.",
+            Style::default().fg(TEXT_SUBTLE),
         )));
     } else {
         for (index, thread) in view_model.threads.iter().enumerate() {
-            let marker = if index == view_model.selected_thread_index { "›" } else { " " };
-            let title_style = if index == view_model.selected_thread_index {
-                Style::default().fg(RAIL_SELECTED).add_modifier(Modifier::BOLD)
+            let is_selected = index == view_model.selected_thread_index;
+            let marker = if is_selected { "●" } else { "·" };
+            let title_style = if is_selected {
+                Style::default().fg(TEXT_PRIMARY).add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(TEXT_PRIMARY)
+                Style::default().fg(TEXT_MUTED)
             };
             let summary = thread
                 .active_summary
                 .clone()
                 .or_else(|| thread.active_goal.clone())
                 .unwrap_or_else(|| "No active summary yet".to_owned());
-            lines.push(Line::default());
+
+            if !lines.is_empty() {
+                lines.push(Line::default());
+            }
             lines.push(Line::from(vec![
-                Span::styled(marker, Style::default().fg(BRAND)),
+                Span::styled(
+                    marker,
+                    Style::default().fg(if is_selected { BRAND } else { TEXT_SUBTLE }),
+                ),
                 Span::raw(" "),
                 Span::styled(thread.title.clone(), title_style),
             ]));
-            lines.push(Line::from(Span::styled(summary, Style::default().fg(TEXT_MUTED))));
+            lines.push(Line::from(Span::styled(
+                truncate_for_panel(&summary, area.width.saturating_sub(2) as usize),
+                Style::default().fg(TEXT_SUBTLE),
+            )));
         }
     }
 
@@ -159,9 +224,8 @@ fn render_thread_rail(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel)
 }
 
 fn render_transcript(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
-    let mut lines = build_transcript_lines(view_model);
-    let visible = tail_lines(&lines, area.height.saturating_sub(1) as usize);
-    lines.clear();
+    let lines = build_transcript_lines(view_model, area.width.saturating_sub(2) as usize);
+    let visible = tail_lines(&lines, area.height as usize);
     frame.render_widget(
         Paragraph::new(Text::from(visible))
             .wrap(Wrap { trim: false })
@@ -170,17 +234,31 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) 
     );
 }
 
+fn render_composer_panel(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
+    let block = surface_block(None, false).style(Style::default().bg(PANEL_BG));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(1)])
+        .split(inner);
+
+    render_composer(frame, layout[0], view_model);
+    render_composer_footer(frame, layout[1], view_model);
+}
+
 fn render_composer(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
-    let placeholder = "What should liz do next?  /help for commands";
+    let placeholder = "Ask liz to continue, inspect, explain, or act";
     let body = if view_model.input_buffer.is_empty() {
         Text::from(Line::from(vec![
-            Span::styled("> ", Style::default().fg(BRAND).add_modifier(Modifier::BOLD)),
-            Span::styled(placeholder, Style::default().fg(TEXT_MUTED)),
+            Span::styled("› ", Style::default().fg(BRAND).add_modifier(Modifier::BOLD)),
+            Span::styled(placeholder, Style::default().fg(TEXT_SUBTLE)),
         ]))
     } else {
         let mut lines = Vec::new();
         for (index, line) in view_model.input_buffer.lines().enumerate() {
-            let prefix = if index == 0 { "> " } else { "  " };
+            let prefix = if index == 0 { "› " } else { "  " };
             lines.push(Line::from(vec![
                 Span::styled(prefix, Style::default().fg(BRAND).add_modifier(Modifier::BOLD)),
                 Span::styled(line.to_owned(), Style::default().fg(TEXT_PRIMARY)),
@@ -193,106 +271,141 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
         Paragraph::new(body).wrap(Wrap { trim: false }).style(Style::default().fg(TEXT_PRIMARY)),
         area,
     );
+}
 
-    let hint_area = Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1);
+fn render_composer_footer(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
+    let left = vec![
+        Span::styled("Enter", Style::default().fg(TEXT_MUTED)),
+        Span::styled(" send", Style::default().fg(TEXT_SUBTLE)),
+        Span::raw("   "),
+        Span::styled("Shift+Enter", Style::default().fg(TEXT_MUTED)),
+        Span::styled(" newline", Style::default().fg(TEXT_SUBTLE)),
+        Span::raw("   "),
+        Span::styled("/help", Style::default().fg(TEXT_MUTED)),
+        Span::styled(" commands", Style::default().fg(TEXT_SUBTLE)),
+    ];
+    let right = vec![Span::styled(
+        view_model.status_line.as_str(),
+        Style::default().fg(status_color(view_model)),
+    )];
+
+    let columns = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(24), Constraint::Length(visible_width(&right) as u16)])
+        .split(area);
+
+    frame.render_widget(Paragraph::new(Line::from(left)), columns[0]);
     frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled("Enter send", Style::default().fg(COMPOSER_HINT)),
-            Span::raw("   "),
-            Span::styled("Shift+Enter newline", Style::default().fg(COMPOSER_HINT)),
-            Span::raw("   "),
-            Span::styled(view_model.status_line.as_str(), Style::default().fg(ACCENT)),
-        ])),
-        hint_area,
+        Paragraph::new(Line::from(right)).alignment(ratatui::layout::Alignment::Right),
+        columns[1],
     );
 }
 
 fn render_overlay(frame: &mut Frame<'_>, panel: OverlayPanel, view_model: &ViewModel) {
     let popup = overlay_rect(frame.area(), panel);
     let shadow = shadow_rect(popup, frame.area());
-    frame.render_widget(Clear, popup);
     if let Some(shadow) = shadow {
-        frame.render_widget(Block::default().style(Style::default().bg(OVERLAY_SHADOW)), shadow);
+        frame.render_widget(Block::default().style(Style::default().bg(SHADOW)), shadow);
     }
+    frame.render_widget(Clear, popup);
 
     let (title, body) = match panel {
-        OverlayPanel::Help => ("Help", help_overlay_text()),
-        OverlayPanel::Search => ("Search", search_overlay_text(view_model)),
-        OverlayPanel::Memory => ("Memory", memory_overlay_text(view_model)),
+        OverlayPanel::Help => ("help", help_overlay_text()),
+        OverlayPanel::Search => ("search", search_overlay_text(view_model)),
+        OverlayPanel::Memory => ("memory", memory_overlay_text(view_model)),
     };
 
     frame.render_widget(
         Paragraph::new(body)
             .wrap(Wrap { trim: false })
-            .block(shell_block(title))
+            .block(surface_block(Some(title), true).style(Style::default().bg(PANEL_BG_ELEVATED)))
             .style(Style::default().fg(TEXT_PRIMARY)),
         popup,
     );
 }
 
-fn build_transcript_lines(view_model: &ViewModel) -> Vec<Line<'static>> {
+fn build_transcript_lines(view_model: &ViewModel, width: usize) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
-
-    if let Some(capsule) = wakeup_capsule(view_model) {
-        lines.push(Line::from(vec![
-            Span::styled("resume", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-            Span::raw(" "),
-            Span::styled(capsule, Style::default().fg(TEXT_MUTED)),
-        ]));
-        lines.push(Line::default());
-    }
 
     if view_model.transcript_entries.is_empty() && view_model.streaming_preview().is_none() {
         lines.push(Line::from(Span::styled(
-            "Start talking. The conversation will grow here like a terminal transcript.",
+            "Start talking. liz will keep the conversation here.",
             Style::default().fg(TEXT_MUTED),
+        )));
+        lines.push(Line::from(Span::styled(
+            "Secondary surfaces stay behind /help, /memory, and /search so the transcript remains primary.",
+            Style::default().fg(TEXT_SUBTLE),
         )));
         return lines;
     }
 
     for entry in &view_model.transcript_entries {
-        let label = match entry.kind {
-            TranscriptEntryKind::User => "you",
-            TranscriptEntryKind::Assistant => "liz",
-            TranscriptEntryKind::Tool => "tool",
-            TranscriptEntryKind::Approval => "approval",
-            TranscriptEntryKind::System => "system",
-        };
-        let label_style = match entry.kind {
-            TranscriptEntryKind::User => Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-            TranscriptEntryKind::Assistant => {
-                Style::default().fg(BRAND).add_modifier(Modifier::BOLD)
-            }
-            TranscriptEntryKind::Tool => Style::default().fg(TEXT_MUTED),
-            TranscriptEntryKind::Approval => {
-                Style::default().fg(APPROVAL).add_modifier(Modifier::BOLD)
-            }
-            TranscriptEntryKind::System => Style::default().fg(SYSTEM),
-        };
-        lines.push(Line::from(Span::styled(label, label_style)));
-        for body_line in entry.body.lines() {
-            lines.push(Line::from(vec![
-                Span::raw("  "),
-                Span::styled(body_line.to_owned(), Style::default().fg(TEXT_PRIMARY)),
-            ]));
-        }
+        append_entry_lines(&mut lines, entry.kind, &entry.body, width);
         lines.push(Line::default());
     }
 
     if let Some(streaming) = view_model.streaming_preview() {
-        lines.push(Line::from(vec![
-            Span::styled("liz", Style::default().fg(BRAND).add_modifier(Modifier::BOLD)),
-            Span::raw(""),
-        ]));
-        for body_line in streaming.lines() {
-            lines.push(Line::from(vec![
-                Span::raw("  "),
-                Span::styled(body_line.to_owned(), Style::default().fg(TEXT_PRIMARY)),
-            ]));
-        }
+        append_streaming_lines(&mut lines, streaming, width);
     }
 
     lines
+}
+
+fn append_entry_lines(
+    lines: &mut Vec<Line<'static>>,
+    kind: TranscriptEntryKind,
+    body: &str,
+    width: usize,
+) {
+    let (name, marker, label_style) = match kind {
+        TranscriptEntryKind::User => {
+            ("you", "›", Style::default().fg(USER).add_modifier(Modifier::BOLD))
+        }
+        TranscriptEntryKind::Assistant => {
+            ("liz", "●", Style::default().fg(BRAND).add_modifier(Modifier::BOLD))
+        }
+        TranscriptEntryKind::Tool => ("tool", "·", Style::default().fg(TEXT_MUTED)),
+        TranscriptEntryKind::Approval => {
+            ("approval", "!", Style::default().fg(APPROVAL).add_modifier(Modifier::BOLD))
+        }
+        TranscriptEntryKind::System => ("system", "·", Style::default().fg(SYSTEM)),
+    };
+
+    lines.push(Line::from(vec![
+        Span::styled(marker, Style::default().fg(label_style.fg.unwrap_or(TEXT_MUTED))),
+        Span::raw(" "),
+        Span::styled(name, label_style),
+    ]));
+
+    for paragraph in body.lines() {
+        let wrapped = wrap_plain_text(paragraph, width.saturating_sub(2).max(20));
+        if wrapped.is_empty() {
+            lines.push(Line::default());
+            continue;
+        }
+        for wrapped_line in wrapped {
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled(wrapped_line, Style::default().fg(TEXT_PRIMARY)),
+            ]));
+        }
+    }
+}
+
+fn append_streaming_lines(lines: &mut Vec<Line<'static>>, body: &str, width: usize) {
+    lines.push(Line::from(vec![
+        Span::styled("●", Style::default().fg(BRAND)),
+        Span::raw(" "),
+        Span::styled("liz is replying", Style::default().fg(BRAND).add_modifier(Modifier::BOLD)),
+    ]));
+    for paragraph in body.lines() {
+        for wrapped_line in wrap_plain_text(paragraph, width.saturating_sub(2).max(20)) {
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled(wrapped_line, Style::default().fg(TEXT_PRIMARY)),
+            ]));
+        }
+    }
 }
 
 fn wakeup_capsule(view_model: &ViewModel) -> Option<String> {
@@ -324,28 +437,31 @@ fn wakeup_capsule(view_model: &ViewModel) -> Option<String> {
 fn help_overlay_text() -> Text<'static> {
     Text::from(vec![
         Line::from(Span::styled(
-            "Chat first",
+            "Conversation",
             Style::default().fg(BRAND).add_modifier(Modifier::BOLD),
         )),
-        Line::from("Type normally to continue the current conversation."),
+        Line::from("Type normally to continue the selected thread."),
+        Line::from("Use /new to start fresh without leaving the main terminal flow."),
         Line::default(),
         Line::from(Span::styled(
             "Commands",
             Style::default().fg(BRAND).add_modifier(Modifier::BOLD),
         )),
         Line::from("/new                open a fresh conversation"),
-        Line::from("/new <message>      open a fresh conversation and send the first message"),
-        Line::from("/search <query>     search memory and recent conversations"),
-        Line::from("/memory             inspect wake-up, recall, and compiled experience"),
+        Line::from("/new <message>      start fresh and send the first message"),
         Line::from("/resume             refresh the selected thread"),
+        Line::from("/refresh            reload the thread list"),
+        Line::from("/threads            toggle the conversation drawer"),
+        Line::from("/memory             inspect wake-up, evidence, and compiled memory"),
+        Line::from("/search <query>     search memory and recent conversations"),
         Line::from("/approve            approve the first pending request"),
         Line::from("/deny               deny the first pending request"),
-        Line::from("/threads            toggle the thread rail"),
-        Line::from("/refresh            reload the thread list"),
+        Line::from("/wakeup             refresh wake-up for the selected thread"),
+        Line::from("/compile            compile memory for the selected thread"),
         Line::default(),
         Line::from(Span::styled("Keys", Style::default().fg(BRAND).add_modifier(Modifier::BOLD))),
-        Line::from("Enter send    Shift+Enter newline"),
-        Line::from(HELP_RULE),
+        Line::from("Enter send    Shift+Enter newline    Esc close/clear    Ctrl+C quit"),
+        Line::from("Up/Down switch threads when the conversation drawer is visible"),
     ])
 }
 
@@ -361,14 +477,12 @@ fn search_overlay_text(view_model: &ViewModel) -> Text<'static> {
         "Recent search results",
         Style::default().fg(BRAND).add_modifier(Modifier::BOLD),
     ))];
+
     for hit in view_model.recall_hits.iter().take(8) {
         lines.push(Line::default());
         lines.push(Line::from(vec![
-            Span::styled(
-                format!("{:?}", hit.kind),
-                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(" "),
+            Span::styled(format!("{:?}", hit.kind), Style::default().fg(USER)),
+            Span::raw("  "),
             Span::styled(
                 hit.title.clone(),
                 Style::default().fg(TEXT_PRIMARY).add_modifier(Modifier::BOLD),
@@ -376,6 +490,7 @@ fn search_overlay_text(view_model: &ViewModel) -> Text<'static> {
         ]));
         lines.push(Line::from(Span::styled(hit.summary.clone(), Style::default().fg(TEXT_MUTED))));
     }
+
     Text::from(lines)
 }
 
@@ -453,31 +568,58 @@ fn memory_overlay_text(view_model: &ViewModel) -> Text<'static> {
     Text::from(lines)
 }
 
+fn transcript_footer(view_model: &ViewModel) -> Line<'static> {
+    let mut spans = vec![
+        Span::styled("Tab", Style::default().fg(TEXT_MUTED)),
+        Span::styled(" conversations", Style::default().fg(TEXT_SUBTLE)),
+        Span::raw("   "),
+        Span::styled("/memory", Style::default().fg(TEXT_MUTED)),
+        Span::styled(" drawer", Style::default().fg(TEXT_SUBTLE)),
+        Span::raw("   "),
+        Span::styled("/search", Style::default().fg(TEXT_MUTED)),
+        Span::styled(" recall", Style::default().fg(TEXT_SUBTLE)),
+    ];
+
+    if view_model.pending_approval_count() > 0 {
+        spans.push(Span::raw("   "));
+        spans.push(Span::styled("/approve", Style::default().fg(APPROVAL)));
+        spans.push(Span::styled(" pending", Style::default().fg(TEXT_SUBTLE)));
+    }
+
+    Line::from(spans)
+}
+
 fn first_non_empty_line(text: &str) -> String {
     text.lines().find(|line| !line.trim().is_empty()).unwrap_or(text).to_owned()
 }
 
-fn shell_block<'a, T>(title: T) -> Block<'a>
-where
-    T: Into<Title<'a>>,
-{
-    Block::default()
-        .title(title)
-        .borders(Borders::TOP | Borders::LEFT)
+fn surface_block<'a>(title: Option<&'a str>, elevated: bool) -> Block<'a> {
+    let mut block = Block::default()
+        .borders(Borders::ALL)
         .border_type(BorderType::Plain)
-        .border_style(Style::default().fg(BORDER_SOFT))
+        .border_style(Style::default().fg(if elevated { BORDER_ACTIVE } else { BORDER_SOFT }))
+        .style(Style::default().bg(if elevated { PANEL_BG_ELEVATED } else { PANEL_BG }));
+
+    if let Some(title) = title {
+        block = block.title(Title::from(Span::styled(
+            format!(" {title} "),
+            Style::default().fg(TEXT_MUTED),
+        )));
+    }
+
+    block
 }
 
 fn composer_height(view_model: &ViewModel) -> u16 {
     let input_lines = view_model.input_buffer.lines().count().max(1) as u16;
-    input_lines.saturating_add(1).clamp(2, 7)
+    input_lines.saturating_add(3).clamp(5, 9)
 }
 
 fn overlay_rect(area: Rect, panel: OverlayPanel) -> Rect {
     match panel {
-        OverlayPanel::Help => anchored_overlay(area, 92, 16, OverlayAnchor::Bottom),
-        OverlayPanel::Search => anchored_overlay(area, 92, 18, OverlayAnchor::Bottom),
-        OverlayPanel::Memory => anchored_overlay(area, 90, 22, OverlayAnchor::Center),
+        OverlayPanel::Help => anchored_overlay(area, 86, 18, OverlayAnchor::BottomRight),
+        OverlayPanel::Search => anchored_overlay(area, 86, 20, OverlayAnchor::BottomRight),
+        OverlayPanel::Memory => anchored_overlay(area, 82, 24, OverlayAnchor::Center),
     }
 }
 
@@ -497,17 +639,21 @@ fn shadow_rect(popup: Rect, bounds: Rect) -> Option<Rect> {
 
 enum OverlayAnchor {
     Center,
-    Bottom,
+    BottomRight,
 }
 
 fn anchored_overlay(area: Rect, width_percent: u16, height: u16, anchor: OverlayAnchor) -> Rect {
-    let width = (area.width.saturating_mul(width_percent)).saturating_div(100).max(40);
-    let width = width.min(area.width.saturating_sub(2).max(1));
-    let height = height.min(area.height.saturating_sub(2).max(1));
-    let x = area.x + area.width.saturating_sub(width) / 2;
+    let safe = area.inner(Margin { vertical: 1, horizontal: 2 });
+    let width = (safe.width.saturating_mul(width_percent)).saturating_div(100).max(44);
+    let width = width.min(safe.width.max(1));
+    let height = height.min(safe.height.max(1));
+    let x = match anchor {
+        OverlayAnchor::Center => safe.x + safe.width.saturating_sub(width) / 2,
+        OverlayAnchor::BottomRight => safe.right().saturating_sub(width),
+    };
     let y = match anchor {
-        OverlayAnchor::Center => area.y + area.height.saturating_sub(height) / 2,
-        OverlayAnchor::Bottom => area.bottom().saturating_sub(height + 2),
+        OverlayAnchor::Center => safe.y + safe.height.saturating_sub(height) / 2,
+        OverlayAnchor::BottomRight => safe.bottom().saturating_sub(height),
     };
     Rect::new(x, y, width, height)
 }
@@ -517,4 +663,96 @@ fn tail_lines(lines: &[Line<'static>], limit: usize) -> Vec<Line<'static>> {
         return lines.to_vec();
     }
     lines[lines.len() - limit..].to_vec()
+}
+
+fn wrap_plain_text(text: &str, width: usize) -> Vec<String> {
+    if text.is_empty() {
+        return vec![String::new()];
+    }
+
+    let mut lines = Vec::new();
+    let mut current = String::new();
+
+    for word in text.split_whitespace() {
+        if current.is_empty() {
+            current.push_str(word);
+            continue;
+        }
+
+        if current.len() + 1 + word.len() <= width {
+            current.push(' ');
+            current.push_str(word);
+        } else {
+            lines.push(current);
+            current = word.to_owned();
+        }
+    }
+
+    if !current.is_empty() {
+        lines.push(current);
+    }
+
+    if lines.is_empty() {
+        vec![text.to_owned()]
+    } else {
+        lines
+    }
+}
+
+fn visible_width(spans: &[Span<'_>]) -> usize {
+    spans.iter().map(|span| span.content.chars().count()).sum()
+}
+
+fn current_status_capsule(view_model: &ViewModel, server_url: &str) -> StatusCapsule {
+    if view_model.pending_approval_count() > 0 {
+        return StatusCapsule::new("needs attention", server_url);
+    }
+    if view_model.streaming_preview().is_some() {
+        return StatusCapsule::new("replying", server_url);
+    }
+    if view_model.status_line.is_empty() {
+        return StatusCapsule::new("ready", server_url);
+    }
+    StatusCapsule::new(view_model.status_line.as_str(), server_url)
+}
+
+fn status_color(view_model: &ViewModel) -> Color {
+    if view_model.pending_approval_count() > 0 {
+        APPROVAL
+    } else if view_model.streaming_preview().is_some() {
+        BRAND
+    } else if view_model.status_line.to_ascii_lowercase().contains("ready")
+        || view_model.status_line.to_ascii_lowercase().contains("loaded")
+        || view_model.status_line.to_ascii_lowercase().contains("opened")
+        || view_model.status_line.to_ascii_lowercase().contains("finished")
+    {
+        SUCCESS
+    } else {
+        TEXT_MUTED
+    }
+}
+
+fn truncate_for_panel(text: &str, max_chars: usize) -> String {
+    let mut out = String::new();
+    for character in text.chars() {
+        if out.chars().count() >= max_chars.saturating_sub(1) {
+            out.push('…');
+            return out;
+        }
+        out.push(character);
+    }
+    out
+}
+
+struct StatusCapsule {
+    text: String,
+    width: usize,
+}
+
+impl StatusCapsule {
+    fn new(text: &str, server_url: &str) -> Self {
+        let text = truncate_for_panel(text, 36);
+        let width = text.chars().count() + 2 + server_url.chars().count();
+        Self { text, width }
+    }
 }
