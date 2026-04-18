@@ -450,6 +450,14 @@ impl ViewModel {
         self.selected_command_suggestion().map(|suggestion| suggestion.spec.usage)
     }
 
+    /// Returns whether the composer currently names a complete known slash command.
+    pub fn has_exact_slash_command(&self) -> bool {
+        let Some(query) = self.slash_query() else {
+            return false;
+        };
+        BUILTIN_COMMANDS.iter().any(|spec| spec.name == query)
+    }
+
     /// Returns the currently typed slash command fragment, without the slash.
     pub fn slash_query(&self) -> Option<&str> {
         let input = self.input_buffer.trim_start();

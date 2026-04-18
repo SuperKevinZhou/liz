@@ -196,6 +196,7 @@ impl CliApp {
                 if self.view_model.command_palette_is_open()
                     && !self.view_model.command_suggestions.is_empty()
                     && self.view_model.input_buffer.trim().starts_with('/')
+                    && !self.view_model.has_exact_slash_command()
                 {
                     self.view_model.accept_command_suggestion();
                     return Ok(());
@@ -818,6 +819,22 @@ mod tests {
             .expect("tab should be handled");
 
         assert_eq!(app.view_model.input_buffer, "/help ");
+    }
+
+    #[test]
+    fn enter_runs_exact_exit_command_without_second_press() {
+        let (request_tx, _request_rx) = mpsc::channel();
+        let (_response_tx, response_rx) = mpsc::channel();
+        let (_event_tx, event_rx) = mpsc::channel();
+        let client = WebSocketAppClient::new(request_tx, response_rx, event_rx);
+        let mut app = CliApp::new(client, DEFAULT_SERVER_URL.to_owned());
+
+        app.view_model.input_buffer = "/exit".to_owned();
+        app.view_model.refresh_composer_affordances();
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()))
+            .expect("enter should be handled");
+
+        assert!(app.should_exit);
     }
 
     fn test_thread(id: &str, title: &str) -> Thread {
