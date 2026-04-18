@@ -111,6 +111,9 @@ fn render_main_shell(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel, 
     if let Some(panel) = view_model.active_overlay {
         render_overlay(frame, panel, view_model);
     }
+    if !view_model.pending_approvals.is_empty() {
+        render_approval_bar(frame, area, view_model);
+    }
 }
 
 fn render_header(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel, server_url: &str) {
@@ -276,10 +279,19 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
 fn render_composer_footer(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
     let left = vec![
         Span::styled("Enter", Style::default().fg(TEXT_MUTED)),
-        Span::styled(" send", Style::default().fg(TEXT_SUBTLE)),
+        Span::styled(
+            if view_model.pending_approvals.is_empty() { " send" } else { " approve" },
+            Style::default().fg(TEXT_SUBTLE),
+        ),
         Span::raw("   "),
-        Span::styled("Shift+Enter", Style::default().fg(TEXT_MUTED)),
-        Span::styled(" newline", Style::default().fg(TEXT_SUBTLE)),
+        Span::styled(
+            if view_model.pending_approvals.is_empty() { "Shift+Enter" } else { "Esc" },
+            Style::default().fg(TEXT_MUTED),
+        ),
+        Span::styled(
+            if view_model.pending_approvals.is_empty() { " newline" } else { " deny" },
+            Style::default().fg(TEXT_SUBTLE),
+        ),
         Span::raw("   "),
         Span::styled("/help", Style::default().fg(TEXT_MUTED)),
         Span::styled(" commands", Style::default().fg(TEXT_SUBTLE)),
@@ -298,6 +310,50 @@ fn render_composer_footer(frame: &mut Frame<'_>, area: Rect, view_model: &ViewMo
     frame.render_widget(
         Paragraph::new(Line::from(right)).alignment(ratatui::layout::Alignment::Right),
         columns[1],
+    );
+}
+
+fn render_approval_bar(frame: &mut Frame<'_>, area: Rect, view_model: &ViewModel) {
+    let Some(approval) = view_model.pending_approvals.first() else {
+        return;
+    };
+
+    let width = area.width.min(88).max(52);
+    let height = 5;
+    let popup = Rect::new(
+        area.x + area.width.saturating_sub(width) / 2,
+        area.bottom().saturating_sub(height + 2),
+        width,
+        height,
+    );
+    let shadow = shadow_rect(popup, area);
+    if let Some(shadow) = shadow {
+        frame.render_widget(Block::default().style(Style::default().bg(SHADOW)), shadow);
+    }
+    frame.render_widget(Clear, popup);
+    frame.render_widget(
+        Paragraph::new(Text::from(vec![
+            Line::from(vec![
+                Span::styled(
+                    "approval required",
+                    Style::default().fg(APPROVAL).add_modifier(Modifier::BOLD),
+                ),
+                Span::raw("  "),
+                Span::styled(approval.id.to_string(), Style::default().fg(TEXT_MUTED)),
+            ]),
+            Line::from(Span::styled(approval.reason.clone(), Style::default().fg(TEXT_PRIMARY))),
+            Line::default(),
+            Line::from(vec![
+                Span::styled("Enter", Style::default().fg(TEXT_MUTED)),
+                Span::styled(" approve", Style::default().fg(TEXT_SUBTLE)),
+                Span::raw("   "),
+                Span::styled("Esc", Style::default().fg(TEXT_MUTED)),
+                Span::styled(" deny", Style::default().fg(TEXT_SUBTLE)),
+            ]),
+        ]))
+        .wrap(Wrap { trim: false })
+        .block(surface_block(Some("approval"), true).style(Style::default().bg(PANEL_BG_ELEVATED))),
+        popup,
     );
 }
 
