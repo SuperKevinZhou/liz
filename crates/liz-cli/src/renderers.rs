@@ -1,4 +1,4 @@
-﻿//! Crossterm renderers for the CLI chat shell.
+//! Crossterm renderers for the CLI chat shell.
 
 use crate::view_model::{ConfigFocus, OverlayPanel, TranscriptEntryKind, ViewModel};
 use crossterm::cursor::{Hide, MoveTo, Show};
@@ -505,6 +505,20 @@ fn memory_lines(view_model: &ViewModel, width: usize) -> Vec<ScreenLine> {
             Color::Grey,
         ));
     }
+    if !view_model.recall_hits.is_empty() {
+        lines.push(ScreenLine::blank());
+        lines.push(ScreenLine::colored("Recall", Color::White));
+        for hit in view_model.recall_hits.iter().take(3) {
+            lines.push(ScreenLine::colored(
+                format!("{:?}  {}", hit.kind, truncate(&hit.title, width.saturating_sub(10))),
+                Color::Grey,
+            ));
+            lines.push(ScreenLine::colored(
+                format!("  {}", truncate(&hit.summary, width.saturating_sub(2))),
+                Color::DarkGrey,
+            ));
+        }
+    }
     if let Some(session) = &view_model.session_view {
         lines.push(ScreenLine::blank());
         lines.push(ScreenLine::colored(format!("Session  {}", session.title), Color::White));
@@ -512,6 +526,48 @@ fn memory_lines(view_model: &ViewModel, width: usize) -> Vec<ScreenLine> {
             lines.push(ScreenLine::colored(
                 format!("  {}", truncate(&entry.summary, width.saturating_sub(2))),
                 Color::DarkGrey,
+            ));
+        }
+    }
+    if let Some(evidence) = &view_model.evidence_view {
+        lines.push(ScreenLine::blank());
+        lines.push(ScreenLine::colored("Evidence", Color::White));
+        if let Some(title) = &evidence.thread_title {
+            lines.push(ScreenLine::colored(
+                format!("Thread  {}", truncate(title, width.saturating_sub(8))),
+                Color::Grey,
+            ));
+        }
+        if let Some(summary) = &evidence.turn_summary {
+            lines.push(ScreenLine::colored(
+                format!("Turn    {}", truncate(summary, width.saturating_sub(8))),
+                Color::DarkGrey,
+            ));
+        }
+        if let Some(value) = &evidence.fact_value {
+            lines.push(ScreenLine::colored(
+                format!("Fact    {}", truncate(value, width.saturating_sub(8))),
+                Color::DarkGrey,
+            ));
+        }
+    }
+    if !view_model.candidate_procedures.is_empty() {
+        lines.push(ScreenLine::blank());
+        lines.push(ScreenLine::colored("Compiled experience", Color::White));
+        for procedure in view_model.candidate_procedures.iter().take(3) {
+            lines.push(ScreenLine::colored(
+                format!("- {}", truncate(procedure, width.saturating_sub(2))),
+                Color::Grey,
+            ));
+        }
+    }
+    if !view_model.dreaming_summaries.is_empty() {
+        lines.push(ScreenLine::blank());
+        lines.push(ScreenLine::colored("Dreaming / reflection", Color::White));
+        for summary in view_model.dreaming_summaries.iter().take(3) {
+            lines.push(ScreenLine::colored(
+                format!("- {}", truncate(summary, width.saturating_sub(2))),
+                Color::Grey,
             ));
         }
     }
