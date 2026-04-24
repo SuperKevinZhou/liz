@@ -208,17 +208,13 @@ fn render_empty_transcript(
     write_centered(stdout, left, 8, Color::DarkGrey, &truncate(&cwd, left.width as usize))?;
 
     put(stdout, right.x, right.y, Color::White, "Tips for getting started")?;
-    put(
-        stdout,
-        right.x,
-        right.y + 1,
-        Color::DarkGrey,
-        &truncate("Run /config to configure provider access", right.width as usize),
-    )?;
-    put(stdout, right.x, right.y + 2, Color::DarkGrey, &repeat('─', right.width as usize))?;
-    put(stdout, right.x, right.y + 3, Color::White, "Recent activity")?;
+    put(stdout, right.x, right.y + 1, Color::DarkGrey, "Run /config to configure provider access")?;
+    put(stdout, right.x, right.y + 2, Color::DarkGrey, "Run /memory for continuity and recall")?;
+    put(stdout, right.x, right.y + 3, Color::DarkGrey, "Run /compile to distill experience")?;
+    put(stdout, right.x, right.y + 4, Color::DarkGrey, &repeat('─', right.width as usize))?;
+    put(stdout, right.x, right.y + 5, Color::White, "Recent activity")?;
     let activity = recent_activity_line(view_model);
-    put(stdout, right.x, right.y + 4, Color::DarkGrey, &truncate(&activity, right.width as usize))?;
+    put(stdout, right.x, right.y + 6, Color::DarkGrey, &truncate(&activity, right.width as usize))?;
 
     Ok(())
 }
