@@ -308,9 +308,9 @@ fn render_slash_page(
 ) -> io::Result<()> {
     let page = Rect {
         x: screen.x,
-        y: screen.y + 1,
+        y: screen.y,
         width: screen.width,
-        height: screen.height.saturating_sub(5),
+        height: screen.height.saturating_sub(4),
     };
     clear_rect(stdout, page)?;
     let rule = repeat('─', page.width as usize);
