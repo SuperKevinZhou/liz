@@ -240,7 +240,12 @@ fn render_composer(stdout: &mut Stdout, area: Rect, view_model: &ViewModel) -> i
     }
 
     if area.height > 3 {
-        let left = if !view_model.status_line.is_empty() {
+        let left = if view_model.transcript_entries.is_empty()
+            && view_model.active_overlay.is_none()
+            && view_model.input_buffer.is_empty()
+        {
+            "? for shortcuts"
+        } else if !view_model.status_line.is_empty() {
             view_model.status_line.as_str()
         } else {
             "? for shortcuts"
