@@ -78,17 +78,21 @@ pub fn run_tui(server_url: &str) -> Result<(), Box<dyn std::error::Error>> {
     let mut app = CliApp::new(client, server_url.to_owned());
     let mut terminal = TerminalGuard::enter()?;
     app.bootstrap()?;
+    let mut redraw = true;
 
     loop {
-        app.drain_transport()?;
-        terminal.draw(&app.view_model, &app.server_url)?;
+        redraw |= app.drain_transport()?;
+        if redraw {
+            terminal.draw(&app.view_model, &app.server_url)?;
+            redraw = false;
+        }
         if app.should_exit {
             return Ok(());
         }
 
         if event::poll(UI_TICK_INTERVAL)? {
             if let CEvent::Key(key) = event::read()? {
-                app.handle_key(key)?;
+                redraw |= app.handle_key(key)?;
             }
         }
     }
@@ -128,22 +132,24 @@ impl CliApp {
         Ok(())
     }
 
-    fn handle_key(&mut self, key: KeyEvent) -> Result<(), Box<dyn std::error::Error>> {
+    fn handle_key(&mut self, key: KeyEvent) -> Result<bool, Box<dyn std::error::Error>> {
         if key.kind != KeyEventKind::Press {
-            return Ok(());
+            return Ok(false);
         }
 
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
             self.should_exit = true;
-            return Ok(());
+            return Ok(true);
         }
 
         if self.view_model.config_is_open() {
-            return self.handle_config_key(key);
+            self.handle_config_key(key)?;
+            return Ok(true);
         }
 
         if self.view_model.active_overlay == Some(OverlayPanel::Threads) {
-            return self.handle_threads_overlay_key(key);
+            self.handle_threads_overlay_key(key)?;
+            return Ok(true);
         }
 
         match key.code {
@@ -197,7 +203,7 @@ impl CliApp {
                     && !self.view_model.has_exact_slash_command()
                 {
                     self.view_model.accept_command_suggestion();
-                    return Ok(());
+                    return Ok(true);
                 }
 
                 if !self.view_model.pending_approvals.is_empty()
@@ -225,7 +231,7 @@ impl CliApp {
             _ => {}
         }
 
-        Ok(())
+        Ok(true)
     }
 
     fn handle_threads_overlay_key(
@@ -468,18 +474,21 @@ impl CliApp {
         Ok(())
     }
 
-    fn drain_transport(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    fn drain_transport(&mut self) -> Result<bool, Box<dyn std::error::Error>> {
+        let mut changed = false;
         while let Some(response) = self.client.try_recv_response()? {
             self.view_model.apply_response(&response);
             self.follow_up_after_response(&response)?;
+            changed = true;
         }
 
         while let Some(event) = self.client.try_recv_event()? {
             self.view_model.apply_event(&event);
             self.follow_up_after_event(&event.payload, event.thread_id.clone())?;
+            changed = true;
         }
 
-        Ok(())
+        Ok(changed)
     }
 
     fn follow_up_after_response(
