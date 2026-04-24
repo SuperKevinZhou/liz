@@ -151,7 +151,7 @@ fn render_empty_transcript(
     let box_width = area.width.saturating_sub(2).min(100).max(54);
     let box_height = 11.min(area.height.saturating_sub(1)).max(9);
     let x = area.x + area.width.saturating_sub(box_width) / 2;
-    let y = area.y + area.height.saturating_sub(box_height) / 2;
+    let y = area.y + 1;
     let rect = Rect { x, y, width: box_width, height: box_height };
     let title = format!(" liz CLI v{} ", env!("CARGO_PKG_VERSION"));
     draw_box(stdout, rect, &title)?;
@@ -195,9 +195,9 @@ fn render_empty_transcript(
     };
 
     write_centered(stdout, left, 1, Color::White, "Welcome back!")?;
-    write_centered(stdout, left, 3, Color::DarkGrey, "▐▛███▜▌")?;
-    write_centered(stdout, left, 4, Color::DarkGrey, "▝▜█████▛▘")?;
-    write_centered(stdout, left, 5, Color::DarkGrey, "▘▘ ▝▝")?;
+    write_centered(stdout, left, 3, Color::DarkGrey, "        ")?;
+    write_centered(stdout, left, 4, Color::DarkGrey, "        ")?;
+    write_centered(stdout, left, 5, Color::DarkGrey, "        ")?;
     write_centered(
         stdout,
         left,
@@ -213,7 +213,7 @@ fn render_empty_transcript(
         right.x,
         right.y + 1,
         Color::DarkGrey,
-        &truncate("Use /config to configure provider access", right.width as usize),
+        &truncate("Run /config to configure provider access", right.width as usize),
     )?;
     put(stdout, right.x, right.y + 2, Color::DarkGrey, &repeat('─', right.width as usize))?;
     put(stdout, right.x, right.y + 3, Color::White, "Recent activity")?;
