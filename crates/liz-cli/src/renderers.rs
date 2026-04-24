@@ -312,6 +312,7 @@ fn render_slash_page(
         width: screen.width,
         height: screen.height.saturating_sub(5),
     };
+    clear_rect(stdout, page)?;
     let rule = repeat('─', page.width as usize);
     put(stdout, page.x, page.y, Color::DarkGrey, &rule)?;
     let tabs = "   Status   Config   Usage   Stats";
@@ -886,6 +887,14 @@ fn draw_lines(
             used += consumed;
             col += consumed as u16;
         }
+    }
+    Ok(())
+}
+
+fn clear_rect(stdout: &mut Stdout, rect: Rect) -> io::Result<()> {
+    let blank = repeat(' ', rect.width as usize);
+    for row in rect.y..rect.y + rect.height {
+        put(stdout, rect.x, row, Color::White, &blank)?;
     }
     Ok(())
 }
