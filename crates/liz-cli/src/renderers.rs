@@ -276,6 +276,10 @@ fn render_overlay(
     panel: OverlayPanel,
     view_model: &ViewModel,
 ) -> io::Result<()> {
+    if matches!(panel, OverlayPanel::Config | OverlayPanel::Status) {
+        return render_slash_page(stdout, screen, panel, view_model);
+    }
+
     let (width, height, title) = match panel {
         OverlayPanel::Config => (78, 16, "Config"),
         OverlayPanel::Status => (72, 12, "Status"),
@@ -294,6 +298,38 @@ fn render_overlay(
     };
     let lines = overlay_lines(panel, view_model, body.width as usize);
     draw_lines(stdout, body.x, body.y, body.width, &tail_lines(&lines, body.height as usize))
+}
+
+fn render_slash_page(
+    stdout: &mut Stdout,
+    screen: Rect,
+    panel: OverlayPanel,
+    view_model: &ViewModel,
+) -> io::Result<()> {
+    let page = Rect {
+        x: screen.x,
+        y: screen.y + 1,
+        width: screen.width,
+        height: screen.height.saturating_sub(5),
+    };
+    let rule = repeat('─', page.width as usize);
+    put(stdout, page.x, page.y, Color::DarkGrey, &rule)?;
+    let tabs = "   Status   Config   Usage   Stats";
+    put(stdout, page.x + 1, page.y, Color::White, tabs)?;
+
+    let body = Rect {
+        x: page.x + 2,
+        y: page.y + 2,
+        width: page.width.saturating_sub(4),
+        height: page.height.saturating_sub(3),
+    };
+    let lines = match panel {
+        OverlayPanel::Config => config_page_lines(view_model, body.width as usize),
+        OverlayPanel::Status => status_page_lines(view_model),
+        _ => Vec::new(),
+    };
+    draw_lines(stdout, body.x, body.y, body.width, &tail_lines(&lines, body.height as usize))?;
+    put(stdout, body.x, page.y + page.height.saturating_sub(1), Color::DarkGrey, "Esc to cancel")
 }
 
 fn render_command_palette_docked(
@@ -426,6 +462,49 @@ fn config_lines(view_model: &ViewModel) -> Vec<ScreenLine> {
     lines
 }
 
+fn config_page_lines(view_model: &ViewModel, width: usize) -> Vec<ScreenLine> {
+    let draft = &view_model.config_draft;
+    let search_width = width.saturating_sub(4).max(20);
+    let mut lines = vec![
+        ScreenLine::plain(format!("╭{}╮", repeat('─', search_width))),
+        ScreenLine::plain(format!(
+            "│ ⌕ Search settings…{}│",
+            repeat(' ', search_width.saturating_sub(18))
+        )),
+        ScreenLine::plain(format!("╰{}╯", repeat('─', search_width))),
+        ScreenLine::blank(),
+    ];
+
+    lines.push(setting_row("Provider", &draft.provider_id, draft.focus == ConfigFocus::Provider));
+    lines.push(setting_row(
+        "Base URL",
+        empty_as_unset(&draft.base_url),
+        draft.focus == ConfigFocus::BaseUrl,
+    ));
+    lines.push(setting_row(
+        "API key",
+        if draft.api_key.is_empty() { "not set" } else { "********" },
+        draft.focus == ConfigFocus::ApiKey,
+    ));
+    lines.push(setting_row(
+        "Model",
+        empty_as_unset(&draft.model_id),
+        draft.focus == ConfigFocus::Model,
+    ));
+    lines.push(setting_row("Config file", &draft.config_path, false));
+    lines.push(setting_row("Saved profiles", &draft.auth_profiles.len().to_string(), false));
+    lines.push(ScreenLine::blank());
+    lines.push(ScreenLine::colored(
+        if draft.dirty {
+            "Tab to move · type to edit · Ctrl+S to save · unsaved changes"
+        } else {
+            "Tab to move · type to edit · Ctrl+S to save"
+        },
+        if draft.dirty { Color::Yellow } else { Color::DarkGrey },
+    ));
+    lines
+}
+
 fn status_lines(view_model: &ViewModel) -> Vec<ScreenLine> {
     let mut lines = vec![
         ScreenLine::colored("Current provider readiness", Color::DarkGrey),
@@ -455,6 +534,84 @@ fn status_lines(view_model: &ViewModel) -> Vec<ScreenLine> {
         lines.push(ScreenLine::colored("Provider status has not loaded yet.", Color::DarkGrey));
     }
     lines
+}
+
+fn status_page_lines(view_model: &ViewModel) -> Vec<ScreenLine> {
+    let cwd = env::current_dir()
+        .ok()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| ".".to_owned());
+    let mut lines = vec![
+        setting_row("Version:", env!("CARGO_PKG_VERSION"), false),
+        setting_row("Session name:", "/rename to add a name", false),
+        setting_row("cwd:", &cwd, false),
+    ];
+
+    if let Some(status) = &view_model.model_status {
+        lines.push(setting_row(
+            "Auth token:",
+            status.credential_hints.first().map(String::as_str).unwrap_or("not configured"),
+            false,
+        ));
+        lines.push(setting_row(
+            "Provider:",
+            &status.display_name.clone().unwrap_or_else(|| status.provider_id.clone()),
+            false,
+        ));
+        lines.push(ScreenLine::blank());
+        lines.push(setting_row("Model:", status.model_id.as_deref().unwrap_or("unknown"), false));
+        lines.push(setting_row(
+            "Setting sources:",
+            if status.credential_configured {
+                "Workspace settings"
+            } else {
+                "Workspace settings, environment"
+            },
+            false,
+        ));
+        if !status.ready || !status.notes.is_empty() {
+            lines.push(ScreenLine::blank());
+            lines.push(ScreenLine::colored("System diagnostics", Color::White));
+            if !status.ready {
+                lines.push(ScreenLine::colored(
+                    " ‼ Provider credentials are not ready",
+                    Color::Yellow,
+                ));
+            }
+            for note in &status.notes {
+                lines.push(ScreenLine::colored(format!(" ‼ {note}"), Color::Yellow));
+            }
+        }
+    } else {
+        lines.push(setting_row("Auth token:", "not loaded", false));
+        lines.push(setting_row("Model:", "not loaded", false));
+    }
+    lines
+}
+
+fn setting_row(label: &str, value: &str, selected: bool) -> ScreenLine {
+    let mut line = ScreenLine::blank();
+    line.push(Segment::colored(
+        if selected { "› " } else { "  " },
+        if selected { Color::White } else { Color::DarkGrey },
+    ));
+    line.push(Segment::colored(
+        format!("{label:<22}"),
+        if selected { Color::White } else { Color::Grey },
+    ));
+    line.push(Segment::colored(
+        value.to_owned(),
+        if selected { Color::White } else { Color::DarkGrey },
+    ));
+    line
+}
+
+fn empty_as_unset(value: &str) -> &str {
+    if value.is_empty() {
+        "not set"
+    } else {
+        value
+    }
 }
 
 fn help_lines() -> Vec<ScreenLine> {
