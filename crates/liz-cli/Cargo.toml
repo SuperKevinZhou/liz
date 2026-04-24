@@ -10,7 +10,6 @@ workspace = true
 [dependencies]
 crossterm = "0.28.1"
 liz-protocol = { path = "../liz-protocol" }
-ratatui = "0.29.0"
 serde.workspace = true
 serde_json.workspace = true
 tungstenite = "0.24.0"

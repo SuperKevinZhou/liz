@@ -1,4 +1,4 @@
-//! Interactive ratatui shell for the CLI chat client.
+//! Interactive terminal shell for the CLI chat client.
 
 use crate::app_client::{AppClientError, WebSocketAppClient};
 use crate::renderers;
@@ -20,8 +20,6 @@ use liz_protocol::{
     ApprovalDecision, MemorySearchHit, MemorySearchHitKind, MemorySearchMode, RequestId,
     ResponsePayload, ServerEventPayload, ServerResponseEnvelope, ThreadId,
 };
-use ratatui::backend::CrosstermBackend;
-use ratatui::Terminal;
 use std::io::{self, Stdout};
 use std::time::Duration;
 
@@ -83,7 +81,7 @@ pub fn run_tui(server_url: &str) -> Result<(), Box<dyn std::error::Error>> {
 
     loop {
         app.drain_transport()?;
-        terminal.draw(|frame| renderers::render(frame, &app.view_model, &app.server_url))?;
+        terminal.draw(&app.view_model, &app.server_url)?;
         if app.should_exit {
             return Ok(());
         }
@@ -724,7 +722,7 @@ fn save_override(
 }
 
 struct TerminalGuard {
-    terminal: Terminal<CrosstermBackend<Stdout>>,
+    stdout: Stdout,
 }
 
 impl TerminalGuard {
@@ -732,25 +730,18 @@ impl TerminalGuard {
         enable_raw_mode()?;
         let mut stdout = io::stdout();
         stdout.execute(EnterAlternateScreen)?;
-        let backend = CrosstermBackend::new(stdout);
-        let terminal = Terminal::new(backend)?;
-        Ok(Self { terminal })
+        Ok(Self { stdout })
     }
 
-    fn draw<F>(&mut self, f: F) -> io::Result<()>
-    where
-        F: FnOnce(&mut ratatui::Frame<'_>),
-    {
-        self.terminal.draw(f)?;
-        Ok(())
+    fn draw(&mut self, view_model: &ViewModel, server_url: &str) -> io::Result<()> {
+        renderers::render(&mut self.stdout, view_model, server_url)
     }
 }
 
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
-        let _ = execute!(self.terminal.backend_mut(), LeaveAlternateScreen);
-        let _ = self.terminal.show_cursor();
+        let _ = execute!(self.stdout, LeaveAlternateScreen);
     }
 }
 
