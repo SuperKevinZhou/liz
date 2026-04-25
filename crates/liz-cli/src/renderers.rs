@@ -288,28 +288,7 @@ fn render_overlay(
     panel: OverlayPanel,
     view_model: &ViewModel,
 ) -> io::Result<()> {
-    if matches!(panel, OverlayPanel::Config | OverlayPanel::Status) {
-        return render_slash_page(stdout, screen, panel, view_model);
-    }
-
-    let (width, height, title) = match panel {
-        OverlayPanel::Config => (78, 16, "Config"),
-        OverlayPanel::Status => (72, 12, "Status"),
-        OverlayPanel::Help => (74, 16, "Help"),
-        OverlayPanel::Memory => (78, 16, "Memory"),
-        OverlayPanel::Threads => (70, 14, "Conversations"),
-        OverlayPanel::CommandPalette => (70, 10, "Commands"),
-    };
-    let rect = centered_rect(screen, width, height);
-    draw_box(stdout, rect, title)?;
-    let body = Rect {
-        x: rect.x + 2,
-        y: rect.y + 1,
-        width: rect.width.saturating_sub(4),
-        height: rect.height.saturating_sub(2),
-    };
-    let lines = overlay_lines(panel, view_model, body.width as usize);
-    draw_lines(stdout, body.x, body.y, body.width, &tail_lines(&lines, body.height as usize))
+    render_slash_page(stdout, screen, panel, view_model)
 }
 
 fn render_slash_page(
@@ -327,8 +306,7 @@ fn render_slash_page(
     clear_rect(stdout, page)?;
     let rule = repeat('─', page.width as usize);
     put(stdout, page.x, page.y, Color::DarkGrey, &rule)?;
-    let tabs = "   Status   Config   Usage   Stats";
-    put(stdout, page.x + 1, page.y, Color::White, tabs)?;
+    put(stdout, page.x + 1, page.y, Color::White, slash_page_header(panel))?;
 
     let body = Rect {
         x: page.x + 2,
@@ -339,10 +317,21 @@ fn render_slash_page(
     let lines = match panel {
         OverlayPanel::Config => config_page_lines(view_model, body.width as usize),
         OverlayPanel::Status => status_page_lines(view_model),
-        _ => Vec::new(),
+        _ => overlay_lines(panel, view_model, body.width as usize),
     };
     draw_lines(stdout, body.x, body.y, body.width, &tail_lines(&lines, body.height as usize))?;
     put(stdout, body.x, page.y + page.height.saturating_sub(1), Color::DarkGrey, "Esc to cancel")
+}
+
+fn slash_page_header(panel: OverlayPanel) -> &'static str {
+    match panel {
+        OverlayPanel::Config => "   Config   Status   Usage   Stats",
+        OverlayPanel::Status => "   Status   Config   Usage   Stats",
+        OverlayPanel::Help => "   Help",
+        OverlayPanel::Memory => "   Memory",
+        OverlayPanel::Threads => "   Conversations",
+        OverlayPanel::CommandPalette => "   Commands",
+    }
 }
 
 fn render_command_palette_docked(
@@ -844,17 +833,6 @@ fn status_color(view_model: &ViewModel) -> Color {
 
 fn composer_height(view_model: &ViewModel) -> u16 {
     view_model.input_buffer.lines().count().max(1).clamp(1, 6) as u16 + 3
-}
-
-fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
-    let width = width.min(area.width.saturating_sub(2)).max(40.min(area.width));
-    let height = height.min(area.height.saturating_sub(2)).max(6.min(area.height));
-    Rect {
-        x: area.x + area.width.saturating_sub(width) / 2,
-        y: area.y + area.height.saturating_sub(height) / 2,
-        width,
-        height,
-    }
 }
 
 fn draw_box(stdout: &mut Stdout, rect: Rect, title: &str) -> io::Result<()> {
