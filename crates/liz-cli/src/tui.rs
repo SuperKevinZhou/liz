@@ -534,18 +534,9 @@ impl CliApp {
     fn follow_up_after_event(
         &mut self,
         payload: &ServerEventPayload,
-        thread_id: ThreadId,
+        _thread_id: ThreadId,
     ) -> Result<(), Box<dyn std::error::Error>> {
         match payload {
-            ServerEventPayload::DiffAvailable(event) => {
-                self.send_request(ClientRequest::MemoryOpenEvidence(MemoryOpenEvidenceRequest {
-                    thread_id,
-                    turn_id: Some(event.artifact.turn_id.clone()),
-                    artifact_id: Some(event.artifact.id.clone()),
-                    fact_id: None,
-                }))?;
-                self.view_model.open_overlay(OverlayPanel::Memory);
-            }
             ServerEventPayload::MemoryCompilationApplied(_) => {
                 self.list_topics()?;
             }
@@ -775,9 +766,11 @@ impl Drop for TerminalGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use liz_protocol::events::DiffAvailableEvent;
     use liz_protocol::{
-        ClientRequest, ResponsePayload, ServerResponseEnvelope, SuccessResponseEnvelope, Thread,
-        ThreadListResponse, ThreadStartResponse, ThreadStatus, Timestamp,
+        ArtifactId, ArtifactKind, ArtifactRef, ClientRequest, ResponsePayload, ServerEventPayload,
+        ServerResponseEnvelope, SuccessResponseEnvelope, Thread, ThreadListResponse,
+        ThreadStartResponse, ThreadStatus, Timestamp, TurnId,
     };
     use std::sync::mpsc;
 
@@ -878,6 +871,36 @@ mod tests {
         assert!(
             request_rx.try_recv().is_err(),
             "thread/list should not enqueue wake-up or session requests"
+        );
+    }
+
+    #[test]
+    fn diff_events_do_not_open_memory_automatically() {
+        let (request_tx, request_rx) = mpsc::channel();
+        let (_response_tx, response_rx) = mpsc::channel();
+        let (_event_tx, event_rx) = mpsc::channel();
+        let client = WebSocketAppClient::new(request_tx, response_rx, event_rx);
+        let mut app = CliApp::new(client, DEFAULT_SERVER_URL.to_owned());
+        let thread_id = ThreadId::new("thread_diff");
+        let payload = ServerEventPayload::DiffAvailable(DiffAvailableEvent {
+            artifact: ArtifactRef {
+                id: ArtifactId::new("artifact_diff"),
+                thread_id: thread_id.clone(),
+                turn_id: TurnId::new("turn_diff"),
+                kind: ArtifactKind::Diff,
+                summary: "Updated CLI layout".to_owned(),
+                locator: "memory://artifact_diff".to_owned(),
+                created_at: Timestamp::new("2026-04-18T00:00:00Z"),
+            },
+        });
+
+        app.follow_up_after_event(&payload, thread_id)
+            .expect("diff follow-up should not force-open memory");
+
+        assert!(app.view_model.active_overlay.is_none());
+        assert!(
+            request_rx.try_recv().is_err(),
+            "diff events should not enqueue evidence lookups until the user asks"
         );
     }
 
