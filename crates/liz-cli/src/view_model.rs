@@ -356,6 +356,8 @@ pub struct ViewModel {
     pub threads: Vec<Thread>,
     /// The selected thread index inside the picker.
     pub selected_thread_index: usize,
+    /// The conversation currently receiving messages and contextual requests.
+    pub active_thread_id: Option<ThreadId>,
     /// Transcript entries shown in the primary chat flow.
     pub transcript_entries: Vec<TranscriptEntry>,
     /// Transcript entries keyed by their owning thread.
@@ -422,7 +424,21 @@ impl ViewModel {
 
     /// Returns the selected thread identifier.
     pub fn selected_thread_id(&self) -> Option<ThreadId> {
-        self.selected_thread().map(|thread| thread.id.clone())
+        self.active_thread_id.clone()
+    }
+
+    /// Returns the currently active thread, if one is available.
+    pub fn active_thread(&self) -> Option<&Thread> {
+        let active_thread_id = self.active_thread_id.as_ref()?;
+        self.threads.iter().find(|thread| &thread.id == active_thread_id)
+    }
+
+    /// Makes the picker-selected thread the active conversation.
+    pub fn activate_selected_thread(&mut self) -> Option<ThreadId> {
+        let thread_id = self.selected_thread()?.id.clone();
+        self.active_thread_id = Some(thread_id.clone());
+        self.sync_visible_transcript();
+        Some(thread_id)
     }
 
     /// Returns the in-progress assistant preview, if any.
@@ -589,25 +605,32 @@ impl ViewModel {
         match response {
             ServerResponseEnvelope::Success(success) => match &success.response {
                 ResponsePayload::ThreadStart(response) => {
+                    self.active_thread_id = Some(response.thread.id.clone());
                     self.upsert_thread(response.thread.clone());
                     self.attach_pending_entries_to_thread(&response.thread.id);
                     self.status_line = format!("Started {}", response.thread.title);
                 }
                 ResponsePayload::ThreadResume(response) => {
+                    self.active_thread_id = Some(response.thread.id.clone());
                     self.upsert_thread(response.thread.clone());
                     self.resume_summary = response.resume_summary.clone();
                     self.sync_visible_transcript();
                     self.status_line = format!("Resumed {}", response.thread.title);
                 }
                 ResponsePayload::ThreadList(response) => {
-                    let selected_thread_id = self.selected_thread_id();
+                    let selected_picker_thread_id =
+                        self.selected_thread().map(|thread| thread.id.clone());
+                    let active_thread_id = self.active_thread_id.clone().filter(|thread_id| {
+                        response.threads.iter().any(|thread| &thread.id == thread_id)
+                    });
                     self.threads = response.threads.clone();
                     self.thread_statuses = self
                         .threads
                         .iter()
                         .map(|thread| (thread.id.clone(), thread.status))
                         .collect();
-                    self.selected_thread_index = selected_thread_id
+                    self.active_thread_id = active_thread_id;
+                    self.selected_thread_index = selected_picker_thread_id
                         .and_then(|selected_id| {
                             self.threads.iter().position(|thread| thread.id == selected_id)
                         })
@@ -620,6 +643,7 @@ impl ViewModel {
                     };
                 }
                 ResponsePayload::ThreadFork(response) => {
+                    self.active_thread_id = Some(response.thread.id.clone());
                     self.upsert_thread(response.thread.clone());
                     self.sync_visible_transcript();
                     self.status_line = format!("Forked {}", response.thread.title);
@@ -919,7 +943,10 @@ impl ViewModel {
     }
 
     fn upsert_thread(&mut self, thread: Thread) {
-        let selected_thread_id = self.selected_thread_id();
+        let selected_picker_thread_id = self.selected_thread().map(|thread| thread.id.clone());
+        if self.active_thread_id.is_none() {
+            self.active_thread_id = Some(thread.id.clone());
+        }
         if let Some(existing) = self.threads.iter_mut().find(|existing| existing.id == thread.id) {
             *existing = thread.clone();
         } else {
@@ -927,7 +954,7 @@ impl ViewModel {
         }
         self.thread_statuses.insert(thread.id.clone(), thread.status);
         self.threads.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
-        self.selected_thread_index = selected_thread_id
+        self.selected_thread_index = selected_picker_thread_id
             .or(Some(thread.id))
             .and_then(|selected_id| self.threads.iter().position(|item| item.id == selected_id))
             .unwrap_or(0);

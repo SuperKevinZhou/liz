@@ -516,11 +516,7 @@ impl CliApp {
                     self.refresh_threads()?;
                     self.load_thread_surfaces(&response.thread.id)?;
                 }
-                ResponsePayload::ThreadList(_) => {
-                    if let Some(thread_id) = self.view_model.selected_thread_id() {
-                        self.load_thread_surfaces(&thread_id)?;
-                    }
-                }
+                ResponsePayload::ThreadList(_) => {}
                 ResponsePayload::MemorySearch(response) => {
                     if let Some(hit) = response.hits.first().cloned() {
                         self.expand_search_hit(&hit)?;
@@ -559,7 +555,7 @@ impl CliApp {
     }
 
     fn load_selected_thread_surfaces(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        if let Some(thread_id) = self.view_model.selected_thread_id() {
+        if let Some(thread_id) = self.view_model.activate_selected_thread() {
             self.load_thread_surfaces(&thread_id)?;
         }
         Ok(())
@@ -612,7 +608,8 @@ impl CliApp {
     }
 
     fn resume_selected_thread(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        let Some(thread_id) = self.view_model.selected_thread_id() else {
+        let Some(thread_id) = self.view_model.selected_thread().map(|thread| thread.id.clone())
+        else {
             self.view_model.status_line = "No conversation selected".to_owned();
             return Ok(());
         };
@@ -637,7 +634,7 @@ impl CliApp {
     }
 
     fn cancel_selected_turn(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        let Some(thread) = self.view_model.selected_thread().cloned() else {
+        let Some(thread) = self.view_model.active_thread().cloned() else {
             self.view_model.status_line = "No conversation selected".to_owned();
             return Ok(());
         };
@@ -780,7 +777,7 @@ mod tests {
     use super::*;
     use liz_protocol::{
         ClientRequest, ResponsePayload, ServerResponseEnvelope, SuccessResponseEnvelope, Thread,
-        ThreadStartResponse, ThreadStatus, Timestamp,
+        ThreadListResponse, ThreadStartResponse, ThreadStatus, Timestamp,
     };
     use std::sync::mpsc;
 
@@ -856,6 +853,32 @@ mod tests {
             .expect("enter should be handled");
 
         assert!(app.should_exit);
+    }
+
+    #[test]
+    fn thread_list_does_not_resume_recent_thread() {
+        let (request_tx, request_rx) = mpsc::channel();
+        let (_response_tx, response_rx) = mpsc::channel();
+        let (_event_tx, event_rx) = mpsc::channel();
+        let client = WebSocketAppClient::new(request_tx, response_rx, event_rx);
+        let mut app = CliApp::new(client, DEFAULT_SERVER_URL.to_owned());
+        let response = ServerResponseEnvelope::Success(Box::new(SuccessResponseEnvelope {
+            ok: true,
+            request_id: RequestId::new("test_thread_list"),
+            response: ResponsePayload::ThreadList(ThreadListResponse {
+                threads: vec![test_thread("thread_recent", "recent work")],
+            }),
+        }));
+
+        app.view_model.apply_response(&response);
+        app.follow_up_after_response(&response)
+            .expect("thread/list follow-up should not auto-load thread surfaces");
+
+        assert!(app.view_model.selected_thread_id().is_none());
+        assert!(
+            request_rx.try_recv().is_err(),
+            "thread/list should not enqueue wake-up or session requests"
+        );
     }
 
     fn test_thread(id: &str, title: &str) -> Thread {
