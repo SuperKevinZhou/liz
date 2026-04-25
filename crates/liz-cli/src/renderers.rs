@@ -9,7 +9,8 @@ use std::env;
 use std::io::{self, Stdout, Write};
 
 const MIN_WIDTH: u16 = 60;
-const MIN_HEIGHT: u16 = 16;
+/// Minimum vertical space reserved for the anchored terminal surface.
+pub const MIN_HEIGHT: u16 = 16;
 
 /// Minimal renderer metadata for banner and smoke surfaces.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,17 +73,26 @@ struct Rect {
 }
 
 /// Draws the full CLI layout.
-pub fn render(stdout: &mut Stdout, view_model: &ViewModel, server_url: &str) -> io::Result<()> {
-    let (width, height) = terminal::size()?;
+pub fn render(
+    stdout: &mut Stdout,
+    view_model: &ViewModel,
+    server_url: &str,
+    origin_y: u16,
+) -> io::Result<u16> {
+    let (width, terminal_height) = terminal::size()?;
     let width = width.max(MIN_WIDTH);
-    let height = height.max(MIN_HEIGHT);
-    queue!(stdout, Hide, Clear(ClearType::All))?;
+    let height = terminal_height.saturating_sub(origin_y).max(MIN_HEIGHT);
+    queue!(stdout, Hide, MoveTo(0, origin_y), Clear(ClearType::FromCursorDown))?;
 
     let composer_height = composer_height(view_model).min(height.saturating_sub(1));
     let transcript_area =
-        Rect { x: 0, y: 0, width, height: height.saturating_sub(composer_height) };
-    let composer_area =
-        Rect { x: 0, y: height.saturating_sub(composer_height), width, height: composer_height };
+        Rect { x: 0, y: origin_y, width, height: height.saturating_sub(composer_height) };
+    let composer_area = Rect {
+        x: 0,
+        y: origin_y + height.saturating_sub(composer_height),
+        width,
+        height: composer_height,
+    };
 
     let _ = server_url;
     render_transcript(stdout, transcript_area, view_model)?;
@@ -103,7 +113,8 @@ pub fn render(stdout: &mut Stdout, view_model: &ViewModel, server_url: &str) -> 
     }
 
     queue!(stdout, Show)?;
-    stdout.flush()
+    stdout.flush()?;
+    Ok(height)
 }
 
 fn render_transcript(stdout: &mut Stdout, area: Rect, view_model: &ViewModel) -> io::Result<()> {

@@ -4,11 +4,11 @@ use crate::app_client::{AppClientError, WebSocketAppClient};
 use crate::renderers;
 use crate::settings::{LizConfigFile, ProviderField, SettingsLocation};
 use crate::view_model::{OverlayPanel, ViewModel};
+use crossterm::cursor::{self, MoveTo, Show};
 use crossterm::event::{self, Event as CEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
-};
-use crossterm::{execute, ExecutableCommand};
+use crossterm::style::Print;
+use crossterm::terminal::{self, disable_raw_mode, enable_raw_mode};
+use crossterm::{execute, queue};
 use liz_protocol::requests::{
     ClientRequest, ClientRequestEnvelope, MemoryCompileNowRequest, MemoryListTopicsRequest,
     MemoryOpenEvidenceRequest, MemoryOpenSessionRequest, MemoryReadWakeupRequest,
@@ -20,7 +20,7 @@ use liz_protocol::{
     ApprovalDecision, MemorySearchHit, MemorySearchHitKind, MemorySearchMode, RequestId,
     ResponsePayload, ServerEventPayload, ServerResponseEnvelope, ThreadId,
 };
-use std::io::{self, Stdout};
+use std::io::{self, Stdout, Write};
 use std::time::Duration;
 
 const DEFAULT_SERVER_URL: &str = "ws://127.0.0.1:7777";
@@ -732,25 +732,46 @@ fn save_override(
 
 struct TerminalGuard {
     stdout: Stdout,
+    origin_y: u16,
+    last_drawn_height: u16,
 }
 
 impl TerminalGuard {
     fn enter() -> io::Result<Self> {
         enable_raw_mode()?;
         let mut stdout = io::stdout();
-        stdout.execute(EnterAlternateScreen)?;
-        Ok(Self { stdout })
+        let (cursor_x, mut origin_y) = cursor::position()?;
+        if cursor_x > 0 {
+            queue!(stdout, Print("\r\n"))?;
+            origin_y = cursor::position()?.1;
+        }
+
+        let (_, terminal_height) = terminal::size()?;
+        let available_height = terminal_height.saturating_sub(origin_y);
+        if available_height < renderers::MIN_HEIGHT {
+            let missing = renderers::MIN_HEIGHT - available_height;
+            for _ in 0..missing {
+                queue!(stdout, Print("\r\n"))?;
+            }
+            origin_y = terminal_height.saturating_sub(renderers::MIN_HEIGHT);
+        }
+        stdout.flush()?;
+
+        Ok(Self { stdout, origin_y, last_drawn_height: 0 })
     }
 
     fn draw(&mut self, view_model: &ViewModel, server_url: &str) -> io::Result<()> {
-        renderers::render(&mut self.stdout, view_model, server_url)
+        self.last_drawn_height =
+            renderers::render(&mut self.stdout, view_model, server_url, self.origin_y)?;
+        Ok(())
     }
 }
 
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
-        let _ = execute!(self.stdout, LeaveAlternateScreen);
+        let target_y = self.origin_y.saturating_add(self.last_drawn_height);
+        let _ = execute!(self.stdout, MoveTo(0, target_y), Show, Print("\r\n"));
     }
 }
 
