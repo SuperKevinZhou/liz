@@ -11,6 +11,7 @@ use std::io::{self, Stdout, Write};
 const MIN_WIDTH: u16 = 60;
 /// Minimum vertical space reserved for the anchored terminal surface.
 pub const MIN_HEIGHT: u16 = 16;
+const THEME_COLOR: Color = Color::Rgb { r: 0x2b, g: 0xda, b: 0x7f };
 
 /// Minimal renderer metadata for banner and smoke surfaces.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,13 +104,13 @@ pub fn render(
     }
 
     if !view_model.pending_approvals.is_empty() {
-        render_approval_notice(stdout, width, height, view_model)?;
+        render_approval_notice(stdout, Rect { x: 0, y: origin_y, width, height }, view_model)?;
     }
 
     if let Some(panel) =
         view_model.active_overlay.filter(|panel| *panel != OverlayPanel::CommandPalette)
     {
-        render_overlay(stdout, Rect { x: 0, y: 0, width, height }, panel, view_model)?;
+        render_overlay(stdout, Rect { x: 0, y: origin_y, width, height }, panel, view_model)?;
     }
 
     queue!(stdout, Show)?;
@@ -126,7 +127,7 @@ fn render_transcript(stdout: &mut Stdout, area: Rect, view_model: &ViewModel) ->
     if let Some(summary) = wakeup_line(view_model) {
         lines.push(ScreenLine {
             segments: vec![
-                Segment::colored("resume", Color::Cyan),
+                Segment::colored("resume", THEME_COLOR),
                 Segment::plain("  "),
                 Segment::colored(summary, Color::DarkGrey),
             ],
@@ -141,7 +142,7 @@ fn render_transcript(stdout: &mut Stdout, area: Rect, view_model: &ViewModel) ->
 
     if let Some(streaming) = view_model.streaming_preview() {
         let mut line = ScreenLine::blank();
-        line.push(Segment::colored("liz", Color::Cyan));
+        line.push(Segment::colored("liz", THEME_COLOR));
         line.push(Segment::plain("  "));
         line.push(Segment::colored("responding", Color::DarkGrey));
         lines.push(line);
@@ -159,9 +160,9 @@ fn render_empty_transcript(
     area: Rect,
     view_model: &ViewModel,
 ) -> io::Result<()> {
-    let box_width = area.width.saturating_sub(2).min(100).max(54);
+    let box_width = area.width.saturating_sub(2).max(54);
     let box_height = 11.min(area.height.saturating_sub(1)).max(9);
-    let x = area.x + area.width.saturating_sub(box_width) / 2;
+    let x = area.x + 1;
     let y = area.y + 1;
     let rect = Rect { x, y, width: box_width, height: box_height };
     let title = format!(" liz CLI v{} ", env!("CARGO_PKG_VERSION"));
@@ -367,16 +368,19 @@ fn render_command_palette_docked(
 
 fn render_approval_notice(
     stdout: &mut Stdout,
-    width: u16,
-    height: u16,
+    screen: Rect,
     view_model: &ViewModel,
 ) -> io::Result<()> {
     let text = format!(
         "Approval required: Enter approves once, Esc denies · {} pending",
         view_model.pending_approval_count()
     );
-    let rect =
-        Rect { x: 2, y: height.saturating_sub(6), width: width.saturating_sub(4), height: 3 };
+    let rect = Rect {
+        x: screen.x + 2,
+        y: screen.y + screen.height.saturating_sub(6),
+        width: screen.width.saturating_sub(4),
+        height: 3,
+    };
     draw_box(stdout, rect, "Approval")?;
     put(
         stdout,
@@ -469,7 +473,7 @@ fn config_lines(view_model: &ViewModel) -> Vec<ScreenLine> {
         } else {
             "Tab move   Ctrl+S save   saved"
         },
-        if draft.dirty { Color::Yellow } else { Color::Green },
+        if draft.dirty { Color::Yellow } else { THEME_COLOR },
     ));
     lines
 }
@@ -784,8 +788,8 @@ fn append_transcript_entry(
     width: usize,
 ) {
     let color = match kind {
-        TranscriptEntryKind::User => Color::Blue,
-        TranscriptEntryKind::Assistant => Color::Cyan,
+        TranscriptEntryKind::User => THEME_COLOR,
+        TranscriptEntryKind::Assistant => THEME_COLOR,
         TranscriptEntryKind::Tool => Color::DarkGrey,
         TranscriptEntryKind::Approval => Color::Yellow,
         TranscriptEntryKind::System => Color::Grey,
@@ -867,13 +871,13 @@ fn draw_box(stdout: &mut Stdout, rect: Rect, title: &str) -> io::Result<()> {
         title,
         repeat('─', remaining.saturating_sub(3))
     );
-    put(stdout, rect.x, rect.y, Color::Grey, &top)?;
+    put(stdout, rect.x, rect.y, THEME_COLOR, &top)?;
     for row in rect.y + 1..rect.y + rect.height.saturating_sub(1) {
-        put(stdout, rect.x, row, Color::Grey, "│")?;
-        put(stdout, rect.x + rect.width.saturating_sub(1), row, Color::Grey, "│")?;
+        put(stdout, rect.x, row, THEME_COLOR, "│")?;
+        put(stdout, rect.x + rect.width.saturating_sub(1), row, THEME_COLOR, "│")?;
     }
     let bottom = format!("╰{}╯", repeat('─', inner_width));
-    put(stdout, rect.x, rect.y + rect.height.saturating_sub(1), Color::Grey, &bottom)
+    put(stdout, rect.x, rect.y + rect.height.saturating_sub(1), THEME_COLOR, &bottom)
 }
 
 fn draw_lines(
