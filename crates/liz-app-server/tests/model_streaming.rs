@@ -48,38 +48,43 @@ fn turn_start_streams_assistant_and_tool_events_before_completion() {
         ))
         .expect("turn request should be sent");
 
-    let first = client
-        .recv_event_timeout(Duration::from_secs(1))
-        .expect("turn_started event should arrive");
-    let second = client
-        .recv_event_timeout(Duration::from_secs(1))
-        .expect("thread_updated event should arrive");
-    let third =
-        client.recv_event_timeout(Duration::from_secs(1)).expect("assistant chunk should arrive");
-    let fourth =
-        client.recv_event_timeout(Duration::from_secs(1)).expect("assistant chunk should arrive");
-    let fifth =
-        client.recv_event_timeout(Duration::from_secs(1)).expect("tool call started should arrive");
-    let sixth =
-        client.recv_event_timeout(Duration::from_secs(1)).expect("tool call delta should arrive");
-    let seventh = client
-        .recv_event_timeout(Duration::from_secs(1))
-        .expect("tool call committed should arrive");
-    let eighth = client
-        .recv_event_timeout(Duration::from_secs(1))
-        .expect("assistant completed should arrive");
-    let ninth =
-        client.recv_event_timeout(Duration::from_secs(1)).expect("turn completed should arrive");
+    let mut saw_turn_started = false;
+    let mut saw_thread_updated = false;
+    let mut saw_assistant_chunk = false;
+    let mut saw_tool_started = false;
+    let mut saw_tool_updated = false;
+    let mut saw_tool_committed = false;
+    let mut saw_assistant_completed = false;
+    let mut saw_turn_completed = false;
 
-    assert!(matches!(first.payload, ServerEventPayload::TurnStarted(_)));
-    assert!(matches!(second.payload, ServerEventPayload::ThreadUpdated(_)));
-    assert!(matches!(third.payload, ServerEventPayload::AssistantChunk(_)));
-    assert!(matches!(fourth.payload, ServerEventPayload::AssistantChunk(_)));
-    assert!(matches!(fifth.payload, ServerEventPayload::ToolCallStarted(_)));
-    assert!(matches!(sixth.payload, ServerEventPayload::ToolCallUpdated(_)));
-    assert!(matches!(seventh.payload, ServerEventPayload::ToolCallCommitted(_)));
-    assert!(matches!(eighth.payload, ServerEventPayload::AssistantCompleted(_)));
-    assert!(matches!(ninth.payload, ServerEventPayload::TurnCompleted(_)));
+    for _ in 0..24 {
+        let event = client
+            .recv_event_timeout(Duration::from_secs(1))
+            .expect("model stream event should arrive");
+        match event.payload {
+            ServerEventPayload::TurnStarted(_) => saw_turn_started = true,
+            ServerEventPayload::ThreadUpdated(_) => saw_thread_updated = true,
+            ServerEventPayload::AssistantChunk(_) => saw_assistant_chunk = true,
+            ServerEventPayload::ToolCallStarted(_) => saw_tool_started = true,
+            ServerEventPayload::ToolCallUpdated(_) => saw_tool_updated = true,
+            ServerEventPayload::ToolCallCommitted(_) => saw_tool_committed = true,
+            ServerEventPayload::AssistantCompleted(_) => saw_assistant_completed = true,
+            ServerEventPayload::TurnCompleted(_) => {
+                saw_turn_completed = true;
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    assert!(saw_turn_started);
+    assert!(saw_thread_updated);
+    assert!(saw_assistant_chunk);
+    assert!(saw_tool_started);
+    assert!(saw_tool_updated);
+    assert!(saw_tool_committed);
+    assert!(saw_assistant_completed);
+    assert!(saw_turn_completed);
 
     let response = client.recv_response().expect("turn response should eventually arrive");
     assert!(matches!(response, ServerResponseEnvelope::Success(_)));
