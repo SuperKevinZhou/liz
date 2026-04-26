@@ -11,7 +11,9 @@ use crate::model::gateway::{ModelError, ModelRunSummary, ModelTurnRequest};
 use crate::model::http::{build_client, post_json};
 use crate::model::invocation::{InvocationTransport, ProviderInvocationPlan};
 use crate::model::normalized_stream::{NormalizedTurnEvent, UsageDelta};
-use crate::model::{OutputBudget, PromptCachePolicy, ToolSurfaceSpec};
+use crate::model::{
+    OutputBudget, PromptCachePolicy, ProviderToolCall, ProviderToolProtocol, ToolSurfaceSpec,
+};
 use serde_json::json;
 
 /// Provider-family adapter for OpenAI-style runtimes.
@@ -157,32 +159,43 @@ fn execute_live_http(
     provider: &ResolvedProvider,
     plan: &ProviderInvocationPlan,
     request: ModelTurnRequest,
-    _tool_surface: ToolSurfaceSpec,
+    tool_surface: ToolSurfaceSpec,
     sink: &mut dyn FnMut(NormalizedTurnEvent),
 ) -> Result<ModelRunSummary, ModelError> {
-    let instruction_prompt = request.instruction_prompt();
+    let mut instruction_prompt = request.instruction_prompt();
     let output_budget = OutputBudget::for_provider(provider);
     let prompt_cache = PromptCachePolicy::for_provider(provider);
+    if matches!(tool_surface.protocol, ProviderToolProtocol::StructuredFallback) {
+        instruction_prompt = format!(
+            "{instruction_prompt}\n\nstructured_tool_protocol:\n{}",
+            tool_surface.structured_fallback_instructions()
+        );
+    }
+
     let (url, body, headers) = match &plan.transport {
         InvocationTransport::HttpJson { base_url, path, .. } => {
             let mut body = match plan.family {
                 ModelProviderFamily::OpenAiResponses => json!({
                     "model": provider.model_id,
                     "instructions": instruction_prompt,
-                    "input": request.user_prompt,
+                    "input": openai_responses_input_payload(&request, &tool_surface),
                     "max_output_tokens": output_budget.max_output_tokens,
                     "stream": false,
                 }),
                 _ => json!({
                     "model": provider.model_id,
                     "max_tokens": output_budget.max_output_tokens,
-                    "messages": [
-                        {"role": "system", "content": instruction_prompt},
-                        {"role": "user", "content": request.user_prompt}
-                    ],
+                    "messages": openai_chat_messages_payload(
+                        &instruction_prompt,
+                        &request,
+                        &tool_surface,
+                    ),
                     "stream": false,
                 }),
             };
+            if matches!(tool_surface.protocol, ProviderToolProtocol::Native) {
+                body["tools"] = openai_native_tools_payload(&tool_surface);
+            }
             if let Some(cache_retention) = prompt_cache.openai_cache_retention.clone() {
                 body["prompt_cache_retention"] = json!(cache_retention);
             }
@@ -233,41 +246,57 @@ fn execute_live_http(
                     headers
                         .entry("anthropic-beta".to_owned())
                         .or_insert_with(|| "interleaved-thinking-2025-05-14".to_owned());
+                    let mut body = json!({
+                        "model": provider.model_id,
+                        "system": instruction_prompt,
+                        "max_tokens": output_budget.max_output_tokens,
+                        "messages": [{
+                            "role": "user",
+                            "content": anthropic_like_user_prompt_with_results(&request, &tool_surface)
+                        }],
+                        "stream": false,
+                    });
+                    if matches!(tool_surface.protocol, ProviderToolProtocol::Native) {
+                        body["tools"] = anthropic_native_tools_payload(&tool_surface);
+                    }
                     (
                         format!("{}/v1/messages", trim_trailing_slash(&runtime.base_url)),
-                        json!({
-                            "model": provider.model_id,
-                            "system": instruction_prompt,
-                            "max_tokens": output_budget.max_output_tokens,
-                            "messages": [{"role": "user", "content": request.user_prompt}],
-                            "stream": false,
-                        }),
+                        body,
                         headers,
                     )
                 } else if should_use_copilot_responses_api(&provider.model_id) {
+                    let mut body = json!({
+                        "model": provider.model_id,
+                        "instructions": instruction_prompt,
+                        "input": openai_responses_input_payload(&request, &tool_surface),
+                        "max_output_tokens": output_budget.max_output_tokens,
+                        "stream": false,
+                    });
+                    if matches!(tool_surface.protocol, ProviderToolProtocol::Native) {
+                        body["tools"] = openai_native_tools_payload(&tool_surface);
+                    }
                     (
                         format!("{}/v1/responses", trim_trailing_slash(&runtime.base_url)),
-                        json!({
-                            "model": provider.model_id,
-                            "instructions": instruction_prompt,
-                            "input": request.user_prompt,
-                            "max_output_tokens": output_budget.max_output_tokens,
-                            "stream": false,
-                        }),
+                        body,
                         headers,
                     )
                 } else {
+                    let mut body = json!({
+                        "model": provider.model_id,
+                        "max_tokens": output_budget.max_output_tokens,
+                        "messages": openai_chat_messages_payload(
+                            &instruction_prompt,
+                            &request,
+                            &tool_surface,
+                        ),
+                        "stream": false,
+                    });
+                    if matches!(tool_surface.protocol, ProviderToolProtocol::Native) {
+                        body["tools"] = openai_native_tools_payload(&tool_surface);
+                    }
                     (
                         format!("{}/v1/chat/completions", trim_trailing_slash(&runtime.base_url)),
-                        json!({
-                            "model": provider.model_id,
-                            "max_tokens": output_budget.max_output_tokens,
-                            "messages": [
-                                {"role": "system", "content": instruction_prompt},
-                                {"role": "user", "content": request.user_prompt}
-                            ],
-                            "stream": false,
-                        }),
+                        body,
                         headers,
                     )
                 }
@@ -315,7 +344,7 @@ fn execute_live_http(
                 (
                     gitlab_chat_endpoint(base_url),
                     json!({
-                        "content": request.prompt,
+                        "content": gitlab_structured_prompt(&request, &tool_surface),
                     }),
                     headers,
                 )
@@ -334,26 +363,53 @@ fn execute_live_http(
     };
 
     let response = post_json(&build_client()?, &url, &headers, &body)?;
-    let assistant_message = extract_openai_style_text(&response).unwrap_or_else(|| {
-        format!("{} response received for {}.", plan.display_name, plan.model_id)
-    });
+    let response_text = extract_openai_style_text(&response).unwrap_or_default();
+    let tool_calls = parse_provider_tool_calls(plan, &response, &tool_surface, &response_text);
+    let assistant_message = clean_structured_fallback_text(&response_text);
 
-    sink(NormalizedTurnEvent::AssistantDelta {
-        chunk: format!("Live response from {}.", plan.display_name),
-    });
-    sink(NormalizedTurnEvent::AssistantMessage { message: assistant_message.clone() });
+    for call in &tool_calls {
+        sink(NormalizedTurnEvent::ToolCallStarted {
+            call_id: call.call_id.clone(),
+            tool_name: call.tool_name.clone(),
+            summary: format!("{} requested {}", plan.display_name, call.tool_name),
+        });
+        sink(NormalizedTurnEvent::ToolCallCommitted {
+            call_id: call.call_id.clone(),
+            tool_name: call.tool_name.clone(),
+            arguments: call.arguments.to_string(),
+        });
+    }
+
+    if !assistant_message.trim().is_empty() && tool_calls.is_empty() {
+        sink(NormalizedTurnEvent::AssistantDelta {
+            chunk: format!("Live response from {}.", plan.display_name),
+        });
+        sink(NormalizedTurnEvent::AssistantMessage {
+            message: assistant_message.clone(),
+        });
+    }
+
+    let final_message = if tool_calls.is_empty() {
+        Some(if assistant_message.trim().is_empty() {
+            format!("{} response received for {}.", plan.display_name, plan.model_id)
+        } else {
+            assistant_message
+        })
+    } else {
+        None
+    };
 
     Ok(ModelRunSummary {
-        assistant_message: Some(assistant_message),
+        assistant_message: final_message,
         usage: extract_openai_style_usage(&request, plan, &response),
-        tool_calls: Vec::new(),
+        tool_calls,
     })
 }
 
 fn simulate_stream(
     plan: ProviderInvocationPlan,
     request: ModelTurnRequest,
-    _tool_surface: ToolSurfaceSpec,
+    tool_surface: ToolSurfaceSpec,
     sink: &mut dyn FnMut(NormalizedTurnEvent),
 ) -> Result<ModelRunSummary, ModelError> {
     let first_chunk = format!("Using {} via ", plan.display_name);
@@ -367,8 +423,18 @@ fn simulate_stream(
     sink(NormalizedTurnEvent::AssistantDelta { chunk: first_chunk });
     sink(NormalizedTurnEvent::AssistantDelta { chunk: second_chunk });
 
-    if needs_tool_call(&request.user_prompt) {
+    let mut tool_calls = Vec::new();
+    if request.tool_result_injections.is_empty() && needs_tool_call(&request.user_prompt) {
         let tool_name = infer_tool_name(&request.user_prompt);
+        let provider_tool_name =
+            tool_surface.name_map.provider_name(&tool_name).unwrap_or(tool_name.as_str()).to_owned();
+        let arguments = synthesize_tool_arguments(
+            &request.user_prompt,
+            request.thread.id.as_str(),
+            &plan.provider_id,
+        );
+        let parsed_arguments =
+            serde_json::from_str::<serde_json::Value>(&arguments).unwrap_or_else(|_| json!({}));
         sink(NormalizedTurnEvent::ToolCallStarted {
             call_id: "call_01".to_owned(),
             tool_name: tool_name.clone(),
@@ -388,12 +454,14 @@ fn simulate_stream(
         }
         sink(NormalizedTurnEvent::ToolCallCommitted {
             call_id: "call_01".to_owned(),
+            tool_name: tool_name.clone(),
+            arguments,
+        });
+        tool_calls.push(ProviderToolCall {
+            call_id: "call_01".to_owned(),
             tool_name,
-            arguments: synthesize_tool_arguments(
-                &request.user_prompt,
-                request.thread.id.as_str(),
-                &plan.provider_id,
-            ),
+            provider_tool_name,
+            arguments: parsed_arguments,
         });
     }
 
@@ -410,15 +478,359 @@ fn simulate_stream(
     };
     sink(NormalizedTurnEvent::UsageDelta(usage.clone()));
 
-    let final_message = format!(
-        "{} request prepared for {} using {}.",
-        plan.display_name,
-        plan.model_id,
-        plan.family.transport_label()
-    );
-    sink(NormalizedTurnEvent::AssistantMessage { message: final_message.clone() });
+    let final_message = if tool_calls.is_empty() {
+        let message = format!(
+            "{} request prepared for {} using {}.",
+            plan.display_name,
+            plan.model_id,
+            plan.family.transport_label()
+        );
+        sink(NormalizedTurnEvent::AssistantMessage {
+            message: message.clone(),
+        });
+        Some(message)
+    } else {
+        None
+    };
 
-    Ok(ModelRunSummary { assistant_message: Some(final_message), usage, tool_calls: Vec::new() })
+    Ok(ModelRunSummary { assistant_message: final_message, usage, tool_calls })
+}
+
+fn openai_native_tools_payload(tool_surface: &ToolSurfaceSpec) -> serde_json::Value {
+    serde_json::Value::Array(
+        tool_surface
+            .tools
+            .iter()
+            .map(|tool| {
+                json!({
+                    "type":"function",
+                    "function":{
+                        "name":tool.provider_name,
+                        "description":tool.description,
+                        "parameters":tool.input_json_schema,
+                    }
+                })
+            })
+            .collect(),
+    )
+}
+
+fn anthropic_native_tools_payload(tool_surface: &ToolSurfaceSpec) -> serde_json::Value {
+    serde_json::Value::Array(
+        tool_surface
+            .tools
+            .iter()
+            .map(|tool| {
+                json!({
+                    "name": tool.provider_name,
+                    "description": tool.description,
+                    "input_schema": tool.input_json_schema,
+                })
+            })
+            .collect(),
+    )
+}
+
+fn openai_responses_input_payload(
+    request: &ModelTurnRequest,
+    tool_surface: &ToolSurfaceSpec,
+) -> serde_json::Value {
+    if request.tool_result_injections.is_empty() {
+        return json!(request.user_prompt);
+    }
+
+    let mut items = vec![json!({
+        "type":"message",
+        "role":"user",
+        "content":[{"type":"input_text","text":request.user_prompt}]
+    })];
+    for injection in &request.tool_result_injections {
+        let provider_tool_name = tool_surface
+            .name_map
+            .provider_name(&injection.tool_name)
+            .unwrap_or(injection.provider_tool_name.as_str())
+            .to_owned();
+        items.push(json!({
+            "type":"function_call_output",
+            "call_id": injection.call_id,
+            "name": provider_tool_name,
+            "output": injection.result.to_string(),
+            "is_error": injection.is_error,
+        }));
+    }
+    serde_json::Value::Array(items)
+}
+
+fn openai_chat_messages_payload(
+    instruction_prompt: &str,
+    request: &ModelTurnRequest,
+    tool_surface: &ToolSurfaceSpec,
+) -> serde_json::Value {
+    let mut messages = vec![
+        json!({"role":"system","content":instruction_prompt}),
+        json!({"role":"user","content":request.user_prompt}),
+    ];
+    for injection in &request.tool_result_injections {
+        let provider_tool_name = tool_surface
+            .name_map
+            .provider_name(&injection.tool_name)
+            .unwrap_or(injection.provider_tool_name.as_str())
+            .to_owned();
+        messages.push(json!({
+            "role":"tool",
+            "tool_call_id": injection.call_id,
+            "name": provider_tool_name,
+            "content": injection.result.to_string(),
+        }));
+    }
+    serde_json::Value::Array(messages)
+}
+
+fn anthropic_like_user_prompt_with_results(
+    request: &ModelTurnRequest,
+    tool_surface: &ToolSurfaceSpec,
+) -> String {
+    if request.tool_result_injections.is_empty() {
+        return request.user_prompt.clone();
+    }
+
+    let mut prompt = request.user_prompt.clone();
+    for injection in &request.tool_result_injections {
+        let provider_tool_name = tool_surface
+            .name_map
+            .provider_name(&injection.tool_name)
+            .unwrap_or(injection.provider_tool_name.as_str());
+        prompt.push_str("\n<liz_tool_result>");
+        prompt.push_str(
+            &json!({
+                "call_id":injection.call_id,
+                "tool_name":provider_tool_name,
+                "result":injection.result,
+                "is_error":injection.is_error,
+                "summary":injection.summary,
+            })
+            .to_string(),
+        );
+        prompt.push_str("</liz_tool_result>");
+    }
+    prompt
+}
+
+fn gitlab_structured_prompt(request: &ModelTurnRequest, tool_surface: &ToolSurfaceSpec) -> String {
+    if matches!(tool_surface.protocol, ProviderToolProtocol::Native) {
+        return request.prompt.clone();
+    }
+    let mut prompt = request.prompt.clone();
+    prompt.push_str("\n\nstructured_tool_protocol:\n");
+    prompt.push_str(&tool_surface.structured_fallback_instructions());
+    for injection in &request.tool_result_injections {
+        let provider_tool_name = tool_surface
+            .name_map
+            .provider_name(&injection.tool_name)
+            .unwrap_or(injection.provider_tool_name.as_str());
+        prompt.push_str("\n<liz_tool_result>");
+        prompt.push_str(
+            &json!({
+                "call_id":injection.call_id,
+                "tool_name":provider_tool_name,
+                "result":injection.result,
+                "is_error":injection.is_error,
+                "summary":injection.summary,
+            })
+            .to_string(),
+        );
+        prompt.push_str("</liz_tool_result>");
+    }
+    prompt
+}
+
+fn parse_provider_tool_calls(
+    plan: &ProviderInvocationPlan,
+    response: &serde_json::Value,
+    tool_surface: &ToolSurfaceSpec,
+    response_text: &str,
+) -> Vec<ProviderToolCall> {
+    if matches!(tool_surface.protocol, ProviderToolProtocol::StructuredFallback) {
+        return parse_structured_fallback_tool_calls(response_text, tool_surface);
+    }
+
+    let mut calls = parse_openai_native_tool_calls_from_response(response, tool_surface);
+    if calls.is_empty() {
+        calls = parse_chat_tool_calls_from_response(response, tool_surface);
+    }
+    if calls.is_empty() && copilot_uses_anthropic_messages_model(&plan.model_id) {
+        calls = parse_anthropic_tool_calls_from_response(response, tool_surface);
+    }
+    calls
+}
+
+fn parse_openai_native_tool_calls_from_response(
+    response: &serde_json::Value,
+    tool_surface: &ToolSurfaceSpec,
+) -> Vec<ProviderToolCall> {
+    response
+        .get("output")
+        .and_then(|value| value.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            let item_type = item.get("type").and_then(|value| value.as_str()).unwrap_or_default();
+            if item_type != "function_call" {
+                return None;
+            }
+            let call_id = item
+                .get("call_id")
+                .or_else(|| item.get("id"))
+                .and_then(|value| value.as_str())
+                .unwrap_or("call_auto")
+                .to_owned();
+            let provider_tool_name = item.get("name").and_then(|value| value.as_str())?.to_owned();
+            let canonical_name = normalize_tool_name(tool_surface, &provider_tool_name)?;
+            let arguments = parse_tool_call_arguments(item.get("arguments"))?;
+            Some(ProviderToolCall {
+                call_id,
+                tool_name: canonical_name,
+                provider_tool_name,
+                arguments,
+            })
+        })
+        .collect()
+}
+
+fn parse_chat_tool_calls_from_response(
+    response: &serde_json::Value,
+    tool_surface: &ToolSurfaceSpec,
+) -> Vec<ProviderToolCall> {
+    response
+        .get("choices")
+        .and_then(|value| value.as_array())
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("tool_calls"))
+        .and_then(|calls| calls.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|call| {
+            let call_id =
+                call.get("id").and_then(|value| value.as_str()).unwrap_or("call_auto").to_owned();
+            let provider_tool_name = call
+                .get("function")
+                .and_then(|function| function.get("name"))
+                .and_then(|value| value.as_str())?
+                .to_owned();
+            let canonical_name = normalize_tool_name(tool_surface, &provider_tool_name)?;
+            let arguments = parse_tool_call_arguments(
+                call.get("function").and_then(|function| function.get("arguments")),
+            )?;
+            Some(ProviderToolCall {
+                call_id,
+                tool_name: canonical_name,
+                provider_tool_name,
+                arguments,
+            })
+        })
+        .collect()
+}
+
+fn parse_anthropic_tool_calls_from_response(
+    response: &serde_json::Value,
+    tool_surface: &ToolSurfaceSpec,
+) -> Vec<ProviderToolCall> {
+    response
+        .get("content")
+        .and_then(|value| value.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            if item.get("type").and_then(|value| value.as_str()) != Some("tool_use") {
+                return None;
+            }
+            let call_id =
+                item.get("id").and_then(|value| value.as_str()).unwrap_or("call_auto").to_owned();
+            let provider_tool_name = item.get("name").and_then(|value| value.as_str())?.to_owned();
+            let canonical_name = normalize_tool_name(tool_surface, &provider_tool_name)?;
+            let arguments = item.get("input").cloned().unwrap_or_else(|| json!({}));
+            Some(ProviderToolCall {
+                call_id,
+                tool_name: canonical_name,
+                provider_tool_name,
+                arguments,
+            })
+        })
+        .collect()
+}
+
+fn parse_structured_fallback_tool_calls(
+    response_text: &str,
+    tool_surface: &ToolSurfaceSpec,
+) -> Vec<ProviderToolCall> {
+    let mut calls = Vec::new();
+    let mut cursor = response_text;
+    while let Some(start) = cursor.find("<liz_tool_call>") {
+        let after_start = &cursor[start + "<liz_tool_call>".len()..];
+        let Some(end) = after_start.find("</liz_tool_call>") else {
+            break;
+        };
+        let payload = after_start[..end].trim();
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) {
+            if let (Some(provider_tool_name), Some(arguments)) = (
+                value.get("tool_name").and_then(|value| value.as_str()),
+                value.get("arguments"),
+            ) {
+                if let Some(canonical_name) = normalize_tool_name(tool_surface, provider_tool_name) {
+                    let call_id = value
+                        .get("call_id")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("call_structured")
+                        .to_owned();
+                    calls.push(ProviderToolCall {
+                        call_id,
+                        tool_name: canonical_name,
+                        provider_tool_name: provider_tool_name.to_owned(),
+                        arguments: arguments.clone(),
+                    });
+                }
+            }
+        }
+        cursor = &after_start[end + "</liz_tool_call>".len()..];
+    }
+    calls
+}
+
+fn parse_tool_call_arguments(value: Option<&serde_json::Value>) -> Option<serde_json::Value> {
+    let value = value?;
+    if let Some(raw) = value.as_str() {
+        return serde_json::from_str::<serde_json::Value>(raw).ok();
+    }
+    Some(value.clone())
+}
+
+fn normalize_tool_name(tool_surface: &ToolSurfaceSpec, provider_tool_name: &str) -> Option<String> {
+    tool_surface
+        .name_map
+        .canonical_name(provider_tool_name)
+        .map(str::to_owned)
+        .or_else(|| {
+            tool_surface
+                .name_map
+                .provider_name(provider_tool_name)
+                .map(|_| provider_tool_name.to_owned())
+        })
+}
+
+fn clean_structured_fallback_text(value: &str) -> String {
+    let mut cleaned = value.to_owned();
+    loop {
+        let Some(start) = cleaned.find("<liz_tool_call>") else {
+            break;
+        };
+        let Some(end) = cleaned[start..].find("</liz_tool_call>") else {
+            break;
+        };
+        let end_index = start + end + "</liz_tool_call>".len();
+        cleaned.replace_range(start..end_index, "");
+    }
+    cleaned.trim().to_owned()
 }
 
 fn provider_supports_patching(family: &ModelProviderFamily) -> bool {
