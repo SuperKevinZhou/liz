@@ -800,11 +800,13 @@ impl ViewModel {
                 ..
             }) => {
                 self.surfaced_tool_updates.remove(call_id);
-                let timeline = format!(
-                    "{tool_name}: started · {}",
-                    compact_tool_text(summary, 120)
+                let timeline =
+                    format!("{tool_name}: started · {}", compact_tool_text(summary, 120));
+                self.push_thread_entry(
+                    event.thread_id.clone(),
+                    TranscriptEntryKind::Tool,
+                    timeline,
                 );
-                self.push_thread_entry(event.thread_id.clone(), TranscriptEntryKind::Tool, timeline);
                 self.status_line = format!("{tool_name}: {}", compact_tool_text(summary, 80));
             }
             ServerEventPayload::ToolCallUpdated(ToolCallUpdatedEvent {
@@ -842,7 +844,8 @@ impl ViewModel {
                     TranscriptEntryKind::Tool,
                     format!("{tool_name}: committed · {compact}"),
                 );
-                self.status_line = format!("{tool_name}: {}", compact_tool_text(arguments_summary, 80));
+                self.status_line =
+                    format!("{tool_name}: {}", compact_tool_text(arguments_summary, 80));
             }
             ServerEventPayload::ToolCompleted(ToolCompletedEvent {
                 tool_name, summary, ..

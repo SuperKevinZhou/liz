@@ -551,9 +551,13 @@ fn render_approval_notice(
 
 fn overlay_lines(panel: OverlayPanel, view_model: &ViewModel, width: usize) -> Vec<ScreenLine> {
     match panel {
-        OverlayPanel::CommandPalette => {
-            command_palette_lines(view_model, width, command_palette_row_limit(terminal::size().map(|(_, height)| height).unwrap_or(MIN_HEIGHT)))
-        }
+        OverlayPanel::CommandPalette => command_palette_lines(
+            view_model,
+            width,
+            command_palette_row_limit(
+                terminal::size().map(|(_, height)| height).unwrap_or(MIN_HEIGHT),
+            ),
+        ),
         OverlayPanel::Config => config_lines(view_model),
         OverlayPanel::Status => status_lines(view_model),
         OverlayPanel::Help => help_lines(),
@@ -562,7 +566,11 @@ fn overlay_lines(panel: OverlayPanel, view_model: &ViewModel, width: usize) -> V
     }
 }
 
-fn command_palette_lines(view_model: &ViewModel, width: usize, row_limit: usize) -> Vec<ScreenLine> {
+fn command_palette_lines(
+    view_model: &ViewModel,
+    width: usize,
+    row_limit: usize,
+) -> Vec<ScreenLine> {
     let suggestions = if view_model.command_suggestions.is_empty() {
         ViewModel::slash_commands()
             .iter()
