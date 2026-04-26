@@ -3,7 +3,8 @@
 use liz_cli::view_model::{TranscriptEntryKind, ViewModel};
 use liz_protocol::events::{
     MemoryCompilationAppliedEvent, MemoryDreamingCompletedEvent, MemoryWakeupLoadedEvent,
-    ThreadStartedEvent, TurnCancelledEvent, TurnStartedEvent,
+    ThreadStartedEvent, ToolCallCommittedEvent, ToolCallStartedEvent, ToolCallUpdatedEvent,
+    TurnCancelledEvent, TurnStartedEvent,
 };
 use liz_protocol::{
     EventId, MemoryCompilationSummary, MemoryOpenSessionResponse, MemorySessionEntry,
@@ -205,6 +206,71 @@ fn view_model_surfaces_missing_provider_configuration() {
         view_model.model_status.as_ref().and_then(|status| status.credential_hints.first()),
         Some(&"OPENAI_API_KEY".to_owned())
     );
+}
+
+#[test]
+fn view_model_surfaces_tool_timeline_without_long_argument_noise() {
+    let thread_id = ThreadId::new("thread_tool");
+    let mut view_model = ViewModel::default();
+    view_model.apply_event(&ServerEvent {
+        event_id: EventId::new("event_tool_thread"),
+        thread_id: thread_id.clone(),
+        turn_id: None,
+        created_at: Timestamp::new("2026-04-18T00:00:00Z"),
+        payload: ServerEventPayload::ThreadStarted(ThreadStartedEvent {
+            thread: thread("thread_tool", "Tool timeline"),
+        }),
+    });
+
+    view_model.apply_event(&ServerEvent {
+        event_id: EventId::new("event_tool_started"),
+        thread_id: thread_id.clone(),
+        turn_id: Some(TurnId::new("turn_tool")),
+        created_at: Timestamp::new("2026-04-18T00:00:01Z"),
+        payload: ServerEventPayload::ToolCallStarted(ToolCallStartedEvent {
+            call_id: "call_tool_1".to_owned(),
+            tool_name: "workspace.apply_patch".to_owned(),
+            summary: "Apply targeted edit for tool timeline projection".to_owned(),
+        }),
+    });
+
+    view_model.apply_event(&ServerEvent {
+        event_id: EventId::new("event_tool_updated"),
+        thread_id: thread_id.clone(),
+        turn_id: Some(TurnId::new("turn_tool")),
+        created_at: Timestamp::new("2026-04-18T00:00:02Z"),
+        payload: ServerEventPayload::ToolCallUpdated(ToolCallUpdatedEvent {
+            call_id: "call_tool_1".to_owned(),
+            tool_name: "workspace.apply_patch".to_owned(),
+            delta_summary: "Collecting arguments".to_owned(),
+            preview: Some("{\"path\":\"src/app.rs\",\"operations\":[...]}".to_owned()),
+        }),
+    });
+
+    view_model.apply_event(&ServerEvent {
+        event_id: EventId::new("event_tool_committed"),
+        thread_id,
+        turn_id: Some(TurnId::new("turn_tool")),
+        created_at: Timestamp::new("2026-04-18T00:00:03Z"),
+        payload: ServerEventPayload::ToolCallCommitted(ToolCallCommittedEvent {
+            call_id: "call_tool_1".to_owned(),
+            tool_name: "workspace.apply_patch".to_owned(),
+            arguments_summary: "{\"path\":\"src/app.rs\",\"operations\":[{\"type\":\"update\",\"content\":\"very long payload that should be compacted in transcript output\"}]}".to_owned(),
+            risk_hint: None,
+        }),
+    });
+
+    let tool_entries = view_model
+        .transcript_entries
+        .iter()
+        .filter(|entry| entry.kind == TranscriptEntryKind::Tool)
+        .collect::<Vec<_>>();
+
+    assert_eq!(tool_entries.len(), 3);
+    assert!(tool_entries[0].body.contains("started"));
+    assert!(tool_entries[1].body.contains("updated"));
+    assert!(tool_entries[2].body.contains("committed"));
+    assert!(tool_entries[2].body.chars().count() <= 180);
 }
 
 fn thread(id: &str, title: &str) -> Thread {
