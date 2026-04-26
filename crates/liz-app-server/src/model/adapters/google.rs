@@ -7,7 +7,7 @@ use crate::model::gateway::{ModelError, ModelRunSummary, ModelTurnRequest};
 use crate::model::http::{build_client, post_json};
 use crate::model::invocation::{InvocationTransport, ProviderInvocationPlan};
 use crate::model::normalized_stream::{NormalizedTurnEvent, UsageDelta};
-use crate::model::{OutputBudget, PromptCachePolicy};
+use crate::model::{OutputBudget, PromptCachePolicy, ToolSurfaceSpec};
 use serde_json::json;
 
 /// Google-family adapter for direct Gemini and Vertex providers.
@@ -20,6 +20,7 @@ impl GoogleAdapter {
         &self,
         provider: &ResolvedProvider,
         request: ModelTurnRequest,
+        tool_surface: ToolSurfaceSpec,
         simulate: bool,
         sink: &mut dyn FnMut(NormalizedTurnEvent),
     ) -> Result<ModelRunSummary, ModelError> {
@@ -94,10 +95,14 @@ impl GoogleAdapter {
             );
             sink(NormalizedTurnEvent::AssistantMessage { message: final_message.clone() });
 
-            return Ok(ModelRunSummary { assistant_message: Some(final_message), usage });
+            return Ok(ModelRunSummary {
+                assistant_message: Some(final_message),
+                usage,
+                tool_calls: Vec::new(),
+            });
         }
 
-        execute_live_http(provider, &plan, request, sink)
+        execute_live_http(provider, &plan, request, tool_surface, sink)
     }
 }
 
@@ -105,6 +110,7 @@ fn execute_live_http(
     provider: &ResolvedProvider,
     plan: &ProviderInvocationPlan,
     request: ModelTurnRequest,
+    _tool_surface: ToolSurfaceSpec,
     sink: &mut dyn FnMut(NormalizedTurnEvent),
 ) -> Result<ModelRunSummary, ModelError> {
     let instruction_prompt = request.instruction_prompt();
@@ -205,6 +211,7 @@ fn execute_live_http(
     Ok(ModelRunSummary {
         assistant_message: Some(assistant_message),
         usage: extract_google_usage(plan, &request, &response),
+        tool_calls: Vec::new(),
     })
 }
 

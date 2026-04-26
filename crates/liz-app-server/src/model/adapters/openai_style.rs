@@ -11,7 +11,7 @@ use crate::model::gateway::{ModelError, ModelRunSummary, ModelTurnRequest};
 use crate::model::http::{build_client, post_json};
 use crate::model::invocation::{InvocationTransport, ProviderInvocationPlan};
 use crate::model::normalized_stream::{NormalizedTurnEvent, UsageDelta};
-use crate::model::{OutputBudget, PromptCachePolicy};
+use crate::model::{OutputBudget, PromptCachePolicy, ToolSurfaceSpec};
 use serde_json::json;
 
 /// Provider-family adapter for OpenAI-style runtimes.
@@ -24,15 +24,16 @@ impl OpenAiStyleAdapter {
         &self,
         provider: &ResolvedProvider,
         request: ModelTurnRequest,
+        tool_surface: ToolSurfaceSpec,
         simulate: bool,
         sink: &mut dyn FnMut(NormalizedTurnEvent),
     ) -> Result<ModelRunSummary, ModelError> {
         let plan = self.build_plan(provider, &request)?;
         if simulate {
-            return simulate_stream(plan, request, sink);
+            return simulate_stream(plan, request, tool_surface, sink);
         }
 
-        execute_live_http(provider, &plan, request, sink)
+        execute_live_http(provider, &plan, request, tool_surface, sink)
     }
 
     fn build_plan(
@@ -156,6 +157,7 @@ fn execute_live_http(
     provider: &ResolvedProvider,
     plan: &ProviderInvocationPlan,
     request: ModelTurnRequest,
+    _tool_surface: ToolSurfaceSpec,
     sink: &mut dyn FnMut(NormalizedTurnEvent),
 ) -> Result<ModelRunSummary, ModelError> {
     let instruction_prompt = request.instruction_prompt();
@@ -344,12 +346,14 @@ fn execute_live_http(
     Ok(ModelRunSummary {
         assistant_message: Some(assistant_message),
         usage: extract_openai_style_usage(&request, plan, &response),
+        tool_calls: Vec::new(),
     })
 }
 
 fn simulate_stream(
     plan: ProviderInvocationPlan,
     request: ModelTurnRequest,
+    _tool_surface: ToolSurfaceSpec,
     sink: &mut dyn FnMut(NormalizedTurnEvent),
 ) -> Result<ModelRunSummary, ModelError> {
     let first_chunk = format!("Using {} via ", plan.display_name);
@@ -414,7 +418,7 @@ fn simulate_stream(
     );
     sink(NormalizedTurnEvent::AssistantMessage { message: final_message.clone() });
 
-    Ok(ModelRunSummary { assistant_message: Some(final_message), usage })
+    Ok(ModelRunSummary { assistant_message: Some(final_message), usage, tool_calls: Vec::new() })
 }
 
 fn provider_supports_patching(family: &ModelProviderFamily) -> bool {

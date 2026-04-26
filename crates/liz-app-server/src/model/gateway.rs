@@ -8,6 +8,9 @@ use crate::model::config::{ModelGatewayConfig, ProviderOverride, ResolvedProvide
 use crate::model::family::ModelProviderFamily;
 use crate::model::normalized_stream::{NormalizedTurnEvent, UsageDelta};
 use crate::model::registry::ProviderRegistry;
+use crate::model::{
+    ProviderToolCall, ProviderToolProtocol, ToolResultInjection, ToolSurfaceSpec,
+};
 use liz_protocol::{Thread, Turn};
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -28,6 +31,8 @@ pub struct ModelTurnRequest {
     pub user_prompt: String,
     /// The flattened prompt transcript used by fallback and simulation paths.
     pub prompt: String,
+    /// Structured tool results injected into continuation requests.
+    pub tool_result_injections: Vec<ToolResultInjection>,
 }
 
 impl ModelTurnRequest {
@@ -40,22 +45,41 @@ impl ModelTurnRequest {
         user_prompt: String,
     ) -> Self {
         let prompt = render_flattened_prompt(&system_prompt, &developer_prompt, &user_prompt);
-        Self { thread, turn, system_prompt, developer_prompt, user_prompt, prompt }
+        Self {
+            thread,
+            turn,
+            system_prompt,
+            developer_prompt,
+            user_prompt,
+            prompt,
+            tool_result_injections: Vec::new(),
+        }
     }
 
     /// Returns the instruction block that should stay above user input at transport time.
     pub fn instruction_prompt(&self) -> String {
         render_instruction_prompt(&self.system_prompt, &self.developer_prompt)
     }
+
+    /// Returns a copy with tool-result injections appended for continuation.
+    pub fn with_tool_result_injections(
+        mut self,
+        tool_result_injections: Vec<ToolResultInjection>,
+    ) -> Self {
+        self.tool_result_injections = tool_result_injections;
+        self
+    }
 }
 
 /// A normalized summary of a completed provider run.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ModelRunSummary {
     /// The final assistant message, if one was produced.
     pub assistant_message: Option<String>,
     /// The accumulated token and cache accounting.
     pub usage: UsageDelta,
+    /// Tool calls committed during this provider invocation.
+    pub tool_calls: Vec<ProviderToolCall>,
 }
 
 /// Errors emitted while driving a provider adapter.
@@ -216,23 +240,30 @@ impl ModelGateway {
         F: FnMut(NormalizedTurnEvent),
     {
         let provider = self.resolve_primary_provider()?;
+        let tool_surface = ToolSurfaceSpec::standard(provider_tool_protocol(&provider));
         match provider.spec.family {
             ModelProviderFamily::AnthropicMessages => {
-                self.anthropic.stream_turn(&provider, request, self.simulate, &mut sink)
+                self.anthropic.stream_turn(&provider, request, tool_surface, self.simulate, &mut sink)
             }
             ModelProviderFamily::AwsBedrockConverse => {
-                self.bedrock.stream_turn(&provider, request, self.simulate, &mut sink)
+                self.bedrock.stream_turn(&provider, request, tool_surface, self.simulate, &mut sink)
             }
             ModelProviderFamily::GoogleGenerativeAi
             | ModelProviderFamily::GoogleVertex
             | ModelProviderFamily::GoogleVertexAnthropic => {
-                self.google.stream_turn(&provider, request, self.simulate, &mut sink)
+                self.google.stream_turn(&provider, request, tool_surface, self.simulate, &mut sink)
             }
             ModelProviderFamily::OpenAiResponses
             | ModelProviderFamily::OpenAiCompatible
             | ModelProviderFamily::GitHubCopilot
             | ModelProviderFamily::GitLabDuo => {
-                self.openai_style.stream_turn(&provider, request, self.simulate, &mut sink)
+                self.openai_style.stream_turn(
+                    &provider,
+                    request,
+                    tool_surface,
+                    self.simulate,
+                    &mut sink,
+                )
             }
         }
     }
@@ -268,5 +299,18 @@ impl ModelGateway {
         }
 
         Ok(ResolvedProvider::from_spec(spec, self.config.overrides.get(self.primary_provider_id())))
+    }
+}
+
+fn provider_tool_protocol(provider: &ResolvedProvider) -> ProviderToolProtocol {
+    if matches!(provider.spec.family, ModelProviderFamily::GitLabDuo)
+        && provider.spec.capabilities.structured_tool_protocol
+    {
+        return ProviderToolProtocol::StructuredFallback;
+    }
+    if provider.spec.capabilities.native_tool_calls {
+        ProviderToolProtocol::Native
+    } else {
+        ProviderToolProtocol::StructuredFallback
     }
 }
