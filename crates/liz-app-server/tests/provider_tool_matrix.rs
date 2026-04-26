@@ -1,8 +1,8 @@
 //! Provider tool-surface readiness and continuation coverage.
 
 use liz_app_server::model::{
-    ModelGateway, ModelGatewayConfig, ModelProviderFamily, ModelTurnRequest, ProviderToolProtocol,
-    ProviderRegistry, ToolResultInjection, ToolSurfaceSpec,
+    ModelGateway, ModelGatewayConfig, ModelProviderFamily, ModelTurnRequest, ProviderRegistry,
+    ProviderToolProtocol, ToolResultInjection, ToolSurfaceSpec,
 };
 use liz_protocol::{Thread, ThreadId, ThreadStatus, Timestamp, Turn, TurnId, TurnKind, TurnStatus};
 use std::collections::BTreeMap;
@@ -123,4 +123,3 @@ fn demo_request(input: &str) -> ModelTurnRequest {
         input.to_owned(),
     )
 }
-

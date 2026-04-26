@@ -6,9 +6,7 @@ use crate::model::gateway::{ModelError, ModelRunSummary, ModelTurnRequest};
 use crate::model::http::{build_client, post_json};
 use crate::model::invocation::{InvocationTransport, ProviderInvocationPlan};
 use crate::model::normalized_stream::{NormalizedTurnEvent, UsageDelta};
-use crate::model::{
-    OutputBudget, ProviderToolCall, ProviderToolProtocol, ToolSurfaceSpec,
-};
+use crate::model::{OutputBudget, ProviderToolCall, ProviderToolProtocol, ToolSurfaceSpec};
 use reqwest::Url;
 use serde_json::json;
 
@@ -100,9 +98,7 @@ impl AwsBedrockAdapter {
                     "{} request prepared for {} using aws-bedrock-converse.",
                     plan.display_name, plan.model_id
                 );
-                sink(NormalizedTurnEvent::AssistantMessage {
-                    message: final_message.clone(),
-                });
+                sink(NormalizedTurnEvent::AssistantMessage { message: final_message.clone() });
                 Some(final_message)
             } else {
                 None
@@ -216,7 +212,8 @@ fn execute_live_http(
                 .and_then(|value| value.as_str())
                 .unwrap_or_default()
                 .to_owned();
-            if let Some(canonical_name) = tool_surface.name_map.canonical_name(&provider_tool_name) {
+            if let Some(canonical_name) = tool_surface.name_map.canonical_name(&provider_tool_name)
+            {
                 let call_id = tool_use
                     .get("toolUseId")
                     .and_then(|value| value.as_str())
@@ -253,9 +250,7 @@ fn execute_live_http(
         sink(NormalizedTurnEvent::AssistantDelta {
             chunk: format!("Live response from {}.", plan.display_name),
         });
-        sink(NormalizedTurnEvent::AssistantMessage {
-            message: assistant_message.clone(),
-        });
+        sink(NormalizedTurnEvent::AssistantMessage { message: assistant_message.clone() });
     }
 
     Ok(ModelRunSummary {

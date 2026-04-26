@@ -122,9 +122,7 @@ impl GoogleAdapter {
                     plan.model_id,
                     plan.family.transport_label()
                 );
-                sink(NormalizedTurnEvent::AssistantMessage {
-                    message: final_message.clone(),
-                });
+                sink(NormalizedTurnEvent::AssistantMessage { message: final_message.clone() });
                 Some(final_message)
             } else {
                 None
@@ -264,9 +262,7 @@ fn execute_live_http(
         sink(NormalizedTurnEvent::AssistantDelta {
             chunk: format!("Live response from {}.", plan.display_name),
         });
-        sink(NormalizedTurnEvent::AssistantMessage {
-            message: assistant_message.clone(),
-        });
+        sink(NormalizedTurnEvent::AssistantMessage { message: assistant_message.clone() });
     }
 
     Ok(ModelRunSummary {

@@ -1,9 +1,7 @@
 //! Per-family live request-shape coverage for tool schemas and fallback protocol.
 
 use liz_app_server::model::{ModelGateway, ModelGatewayConfig, ModelTurnRequest, ProviderOverride};
-use liz_protocol::{
-    Thread, ThreadId, ThreadStatus, Timestamp, Turn, TurnId, TurnKind, TurnStatus,
-};
+use liz_protocol::{Thread, ThreadId, ThreadStatus, Timestamp, Turn, TurnId, TurnKind, TurnStatus};
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::TcpListener;

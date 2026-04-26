@@ -860,14 +860,14 @@ fn parse_tool_invocation(
 ) -> Result<liz_protocol::ToolInvocation, String> {
     let value = arguments;
     match tool_name {
-        "workspace.list" => Ok(liz_protocol::ToolInvocation::WorkspaceList(
-            liz_protocol::WorkspaceListRequest {
+        "workspace.list" => {
+            Ok(liz_protocol::ToolInvocation::WorkspaceList(liz_protocol::WorkspaceListRequest {
                 root: required_string_field(value, "root")?,
                 recursive: optional_bool_field(value, "recursive").unwrap_or(false),
                 include_hidden: optional_bool_field(value, "include_hidden").unwrap_or(false),
                 max_entries: optional_usize_field(value, "max_entries"),
-            },
-        )),
+            }))
+        }
         "workspace.search" => Ok(liz_protocol::ToolInvocation::WorkspaceSearch(
             liz_protocol::WorkspaceSearchRequest {
                 root: required_string_field(value, "root")?,
@@ -877,13 +877,13 @@ fn parse_tool_invocation(
                 max_results: optional_usize_field(value, "max_results"),
             },
         )),
-        "workspace.read" => Ok(liz_protocol::ToolInvocation::WorkspaceRead(
-            liz_protocol::WorkspaceReadRequest {
+        "workspace.read" => {
+            Ok(liz_protocol::ToolInvocation::WorkspaceRead(liz_protocol::WorkspaceReadRequest {
                 path: required_string_field(value, "path")?,
                 start_line: optional_usize_field(value, "start_line"),
                 end_line: optional_usize_field(value, "end_line"),
-            },
-        )),
+            }))
+        }
         "workspace.write_text" => Ok(liz_protocol::ToolInvocation::WorkspaceWriteText(
             liz_protocol::WorkspaceWriteTextRequest {
                 path: required_string_field(value, "path")?,
@@ -898,31 +898,35 @@ fn parse_tool_invocation(
                 replace_all: optional_bool_field(value, "replace_all").unwrap_or(false),
             },
         )),
-        "shell.exec" => Ok(liz_protocol::ToolInvocation::ShellExec(liz_protocol::ShellExecRequest {
-            command: required_string_field(value, "command")?,
-            working_dir: optional_string_field(value, "working_dir"),
-            sandbox: parse_shell_sandbox_request(value.get("sandbox")),
-        })),
-        "shell.spawn" => Ok(liz_protocol::ToolInvocation::ShellSpawn(
-            liz_protocol::ShellSpawnRequest {
+        "shell.exec" => {
+            Ok(liz_protocol::ToolInvocation::ShellExec(liz_protocol::ShellExecRequest {
                 command: required_string_field(value, "command")?,
                 working_dir: optional_string_field(value, "working_dir"),
                 sandbox: parse_shell_sandbox_request(value.get("sandbox")),
-            },
-        )),
-        "shell.wait" => Ok(liz_protocol::ToolInvocation::ShellWait(liz_protocol::ShellWaitRequest {
-            task_id: ExecutorTaskId::new(required_string_field(value, "task_id")?),
-        })),
+            }))
+        }
+        "shell.spawn" => {
+            Ok(liz_protocol::ToolInvocation::ShellSpawn(liz_protocol::ShellSpawnRequest {
+                command: required_string_field(value, "command")?,
+                working_dir: optional_string_field(value, "working_dir"),
+                sandbox: parse_shell_sandbox_request(value.get("sandbox")),
+            }))
+        }
+        "shell.wait" => {
+            Ok(liz_protocol::ToolInvocation::ShellWait(liz_protocol::ShellWaitRequest {
+                task_id: ExecutorTaskId::new(required_string_field(value, "task_id")?),
+            }))
+        }
         "shell.read_output" => Ok(liz_protocol::ToolInvocation::ShellReadOutput(
             liz_protocol::ShellReadOutputRequest {
                 task_id: ExecutorTaskId::new(required_string_field(value, "task_id")?),
             },
         )),
-        "shell.terminate" => Ok(liz_protocol::ToolInvocation::ShellTerminate(
-            liz_protocol::ShellTerminateRequest {
+        "shell.terminate" => {
+            Ok(liz_protocol::ToolInvocation::ShellTerminate(liz_protocol::ShellTerminateRequest {
                 task_id: ExecutorTaskId::new(required_string_field(value, "task_id")?),
-            },
-        )),
+            }))
+        }
         _ => Err(format!("unknown tool name: {tool_name}")),
     }
 }

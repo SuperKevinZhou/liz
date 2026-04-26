@@ -8,9 +8,7 @@ use crate::model::config::{ModelGatewayConfig, ProviderOverride, ResolvedProvide
 use crate::model::family::ModelProviderFamily;
 use crate::model::normalized_stream::{NormalizedTurnEvent, UsageDelta};
 use crate::model::registry::ProviderRegistry;
-use crate::model::{
-    ProviderToolCall, ProviderToolProtocol, ToolResultInjection, ToolSurfaceSpec,
-};
+use crate::model::{ProviderToolCall, ProviderToolProtocol, ToolResultInjection, ToolSurfaceSpec};
 use liz_protocol::{Thread, Turn};
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -242,9 +240,13 @@ impl ModelGateway {
         let provider = self.resolve_primary_provider()?;
         let tool_surface = ToolSurfaceSpec::standard(provider_tool_protocol(&provider));
         match provider.spec.family {
-            ModelProviderFamily::AnthropicMessages => {
-                self.anthropic.stream_turn(&provider, request, tool_surface, self.simulate, &mut sink)
-            }
+            ModelProviderFamily::AnthropicMessages => self.anthropic.stream_turn(
+                &provider,
+                request,
+                tool_surface,
+                self.simulate,
+                &mut sink,
+            ),
             ModelProviderFamily::AwsBedrockConverse => {
                 self.bedrock.stream_turn(&provider, request, tool_surface, self.simulate, &mut sink)
             }
@@ -256,15 +258,13 @@ impl ModelGateway {
             ModelProviderFamily::OpenAiResponses
             | ModelProviderFamily::OpenAiCompatible
             | ModelProviderFamily::GitHubCopilot
-            | ModelProviderFamily::GitLabDuo => {
-                self.openai_style.stream_turn(
-                    &provider,
-                    request,
-                    tool_surface,
-                    self.simulate,
-                    &mut sink,
-                )
-            }
+            | ModelProviderFamily::GitLabDuo => self.openai_style.stream_turn(
+                &provider,
+                request,
+                tool_surface,
+                self.simulate,
+                &mut sink,
+            ),
         }
     }
 

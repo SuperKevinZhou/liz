@@ -384,9 +384,7 @@ fn execute_live_http(
         sink(NormalizedTurnEvent::AssistantDelta {
             chunk: format!("Live response from {}.", plan.display_name),
         });
-        sink(NormalizedTurnEvent::AssistantMessage {
-            message: assistant_message.clone(),
-        });
+        sink(NormalizedTurnEvent::AssistantMessage { message: assistant_message.clone() });
     }
 
     let final_message = if tool_calls.is_empty() {
@@ -426,8 +424,11 @@ fn simulate_stream(
     let mut tool_calls = Vec::new();
     if request.tool_result_injections.is_empty() && needs_tool_call(&request.user_prompt) {
         let tool_name = infer_tool_name(&request.user_prompt);
-        let provider_tool_name =
-            tool_surface.name_map.provider_name(&tool_name).unwrap_or(tool_name.as_str()).to_owned();
+        let provider_tool_name = tool_surface
+            .name_map
+            .provider_name(&tool_name)
+            .unwrap_or(tool_name.as_str())
+            .to_owned();
         let arguments = synthesize_tool_arguments(
             &request.user_prompt,
             request.thread.id.as_str(),
@@ -485,9 +486,7 @@ fn simulate_stream(
             plan.model_id,
             plan.family.transport_label()
         );
-        sink(NormalizedTurnEvent::AssistantMessage {
-            message: message.clone(),
-        });
+        sink(NormalizedTurnEvent::AssistantMessage { message: message.clone() });
         Some(message)
     } else {
         None
@@ -773,11 +772,11 @@ fn parse_structured_fallback_tool_calls(
         };
         let payload = after_start[..end].trim();
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) {
-            if let (Some(provider_tool_name), Some(arguments)) = (
-                value.get("tool_name").and_then(|value| value.as_str()),
-                value.get("arguments"),
-            ) {
-                if let Some(canonical_name) = normalize_tool_name(tool_surface, provider_tool_name) {
+            if let (Some(provider_tool_name), Some(arguments)) =
+                (value.get("tool_name").and_then(|value| value.as_str()), value.get("arguments"))
+            {
+                if let Some(canonical_name) = normalize_tool_name(tool_surface, provider_tool_name)
+                {
                     let call_id = value
                         .get("call_id")
                         .and_then(|value| value.as_str())
@@ -806,16 +805,12 @@ fn parse_tool_call_arguments(value: Option<&serde_json::Value>) -> Option<serde_
 }
 
 fn normalize_tool_name(tool_surface: &ToolSurfaceSpec, provider_tool_name: &str) -> Option<String> {
-    tool_surface
-        .name_map
-        .canonical_name(provider_tool_name)
-        .map(str::to_owned)
-        .or_else(|| {
-            tool_surface
-                .name_map
-                .provider_name(provider_tool_name)
-                .map(|_| provider_tool_name.to_owned())
-        })
+    tool_surface.name_map.canonical_name(provider_tool_name).map(str::to_owned).or_else(|| {
+        tool_surface
+            .name_map
+            .provider_name(provider_tool_name)
+            .map(|_| provider_tool_name.to_owned())
+    })
 }
 
 fn clean_structured_fallback_text(value: &str) -> String {

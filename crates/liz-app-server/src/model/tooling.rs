@@ -318,4 +318,3 @@ fn tool_schemas() -> Vec<StaticToolSchema> {
         },
     ]
 }
-

@@ -103,9 +103,7 @@ impl AnthropicAdapter {
                     "{} request prepared for {} using anthropic-messages.",
                     plan.display_name, plan.model_id
                 );
-                sink(NormalizedTurnEvent::AssistantMessage {
-                    message: final_message.clone(),
-                });
+                sink(NormalizedTurnEvent::AssistantMessage { message: final_message.clone() });
                 Some(final_message)
             } else {
                 None
@@ -165,10 +163,11 @@ fn execute_live_http(
     }
     headers.entry("anthropic-version".to_owned()).or_insert_with(|| "2023-06-01".to_owned());
 
-    let mut user_content = anthropic_user_content(&request.user_prompt, prompt_cache.anthropic_ephemeral)
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
+    let mut user_content =
+        anthropic_user_content(&request.user_prompt, prompt_cache.anthropic_ephemeral)
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
     for injection in &request.tool_result_injections {
         user_content.push(json!({
             "type":"tool_result",
@@ -212,12 +211,8 @@ fn execute_live_http(
 
     let mut assistant_parts = Vec::new();
     let mut tool_calls = Vec::new();
-    for (index, item) in response
-        .get("content")
-        .and_then(|value| value.as_array())
-        .into_iter()
-        .flatten()
-        .enumerate()
+    for (index, item) in
+        response.get("content").and_then(|value| value.as_array()).into_iter().flatten().enumerate()
     {
         match item.get("type").and_then(|value| value.as_str()) {
             Some("text") => {
@@ -228,7 +223,8 @@ fn execute_live_http(
             Some("tool_use") => {
                 let provider_tool_name =
                     item.get("name").and_then(|value| value.as_str()).unwrap_or_default();
-                if let Some(canonical_name) = tool_surface.name_map.canonical_name(provider_tool_name)
+                if let Some(canonical_name) =
+                    tool_surface.name_map.canonical_name(provider_tool_name)
                 {
                     let call_id = item
                         .get("id")
@@ -267,9 +263,7 @@ fn execute_live_http(
         sink(NormalizedTurnEvent::AssistantDelta {
             chunk: format!("Live response from {}.", plan.display_name),
         });
-        sink(NormalizedTurnEvent::AssistantMessage {
-            message: assistant_message.clone(),
-        });
+        sink(NormalizedTurnEvent::AssistantMessage { message: assistant_message.clone() });
     }
 
     Ok(ModelRunSummary {
