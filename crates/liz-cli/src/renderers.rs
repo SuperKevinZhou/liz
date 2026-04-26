@@ -56,7 +56,8 @@ pub fn render_append_only(
     }
     state.committed_entries = view_model.transcript_entries.len();
 
-    let live_lines = live_region_lines(view_model);
+    let terminal_height = terminal::size()?.1;
+    let live_lines = live_region_lines(view_model, terminal_height);
     for line in &live_lines {
         queue!(stdout, MoveToColumn(0), Clear(ClearType::CurrentLine), Print(line), Print("\r\n"))?;
     }
@@ -104,7 +105,7 @@ fn render_transcript_entry_line(
     Ok(())
 }
 
-fn live_region_lines(view_model: &ViewModel) -> Vec<String> {
+fn live_region_lines(view_model: &ViewModel, terminal_height: u16) -> Vec<String> {
     let mut lines = Vec::new();
     lines.push(format!(
         "status: {}",
@@ -122,17 +123,18 @@ fn live_region_lines(view_model: &ViewModel) -> Vec<String> {
     lines.push(format!("> {composer_value}"));
 
     if view_model.command_palette_is_open() || view_model.slash_mode {
+        let row_limit = command_palette_row_limit(terminal_height);
         let suggestions = if view_model.command_suggestions.is_empty() {
             ViewModel::slash_commands()
                 .iter()
                 .map(|spec| format!("/{:<10} {}", spec.name, spec.description))
-                .take(3)
+                .take(row_limit)
                 .collect::<Vec<_>>()
         } else {
             view_model
                 .command_suggestions
                 .iter()
-                .take(6)
+                .take(row_limit)
                 .enumerate()
                 .map(|(index, suggestion)| {
                     let marker = if index == view_model.selected_command_index { ">" } else { " " };
@@ -169,6 +171,14 @@ fn clear_live_region(stdout: &mut Stdout, live_region_height: u16) -> io::Result
     }
     queue!(stdout, MoveToColumn(0))?;
     Ok(())
+}
+
+fn command_palette_row_limit(terminal_height: u16) -> usize {
+    if terminal_height <= 22 {
+        3
+    } else {
+        6
+    }
 }
 
 impl Default for RendererSkeleton {
@@ -251,7 +261,12 @@ pub fn render(
     render_composer(stdout, composer_area, view_model)?;
 
     if view_model.active_overlay == Some(OverlayPanel::CommandPalette) {
-        render_command_palette_docked(stdout, composer_area, view_model)?;
+        render_command_palette_docked(
+            stdout,
+            Rect { x: 0, y: origin_y, width, height },
+            composer_area,
+            view_model,
+        )?;
     }
 
     if !view_model.pending_approvals.is_empty() {
@@ -487,10 +502,13 @@ fn slash_page_header(panel: OverlayPanel) -> &'static str {
 
 fn render_command_palette_docked(
     stdout: &mut Stdout,
+    screen: Rect,
     composer: Rect,
     view_model: &ViewModel,
 ) -> io::Result<()> {
-    let height = (view_model.command_suggestions.len().min(6) as u16 + 2).max(4);
+    let row_limit = command_palette_row_limit(screen.height).max(3);
+    let suggestion_rows = view_model.command_suggestions.len().min(row_limit).max(1) as u16;
+    let height = (suggestion_rows + 2).max(4);
     let width = composer.width.saturating_sub(4).min(72).max(40);
     let x = composer.x + 2;
     let y = composer.y.saturating_sub(height);
@@ -502,7 +520,7 @@ fn render_command_palette_docked(
         width: width.saturating_sub(4),
         height: height.saturating_sub(2),
     };
-    let lines = command_palette_lines(view_model, body.width as usize);
+    let lines = command_palette_lines(view_model, body.width as usize, row_limit);
     draw_lines(stdout, body.x, body.y, body.width, &lines)
 }
 
@@ -533,7 +551,9 @@ fn render_approval_notice(
 
 fn overlay_lines(panel: OverlayPanel, view_model: &ViewModel, width: usize) -> Vec<ScreenLine> {
     match panel {
-        OverlayPanel::CommandPalette => command_palette_lines(view_model, width),
+        OverlayPanel::CommandPalette => {
+            command_palette_lines(view_model, width, command_palette_row_limit(terminal::size().map(|(_, height)| height).unwrap_or(MIN_HEIGHT)))
+        }
         OverlayPanel::Config => config_lines(view_model),
         OverlayPanel::Status => status_lines(view_model),
         OverlayPanel::Help => help_lines(),
@@ -542,7 +562,7 @@ fn overlay_lines(panel: OverlayPanel, view_model: &ViewModel, width: usize) -> V
     }
 }
 
-fn command_palette_lines(view_model: &ViewModel, width: usize) -> Vec<ScreenLine> {
+fn command_palette_lines(view_model: &ViewModel, width: usize, row_limit: usize) -> Vec<ScreenLine> {
     let suggestions = if view_model.command_suggestions.is_empty() {
         ViewModel::slash_commands()
             .iter()
@@ -556,7 +576,7 @@ fn command_palette_lines(view_model: &ViewModel, width: usize) -> Vec<ScreenLine
     };
     suggestions
         .iter()
-        .take(6)
+        .take(row_limit)
         .enumerate()
         .map(|(index, suggestion)| {
             let selected = index == view_model.selected_command_index;
@@ -1136,4 +1156,45 @@ fn char_width(ch: char) -> usize {
 
 fn repeat(ch: char, count: usize) -> String {
     std::iter::repeat_n(ch, count).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{command_palette_row_limit, live_region_lines};
+    use crate::view_model::ViewModel;
+
+    #[test]
+    fn command_palette_uses_small_budget_on_short_terminal() {
+        assert_eq!(command_palette_row_limit(20), 3);
+        assert_eq!(command_palette_row_limit(22), 3);
+    }
+
+    #[test]
+    fn command_palette_uses_full_budget_on_tall_terminal() {
+        assert_eq!(command_palette_row_limit(23), 6);
+        assert_eq!(command_palette_row_limit(40), 6);
+    }
+
+    #[test]
+    fn live_region_limits_visible_suggestions_by_terminal_budget() {
+        let mut view_model = ViewModel::default();
+        view_model.input_buffer = "/".to_owned();
+        view_model.refresh_composer_affordances();
+
+        let short_lines = live_region_lines(&view_model, 20);
+        let short_suggestions = short_lines
+            .iter()
+            .skip(2)
+            .filter(|line| line.starts_with("> /") || line.starts_with("  /"))
+            .count();
+        assert_eq!(short_suggestions, 3);
+
+        let tall_lines = live_region_lines(&view_model, 40);
+        let tall_suggestions = tall_lines
+            .iter()
+            .skip(2)
+            .filter(|line| line.starts_with("> /") || line.starts_with("  /"))
+            .count();
+        assert_eq!(tall_suggestions, 6);
+    }
 }
