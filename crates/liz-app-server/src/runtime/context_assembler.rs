@@ -199,12 +199,14 @@ impl ContextAssembler {
             layers.resident
         );
         let developer_prompt = format!(
-            "turn_operating_contract:\n{}\n\nrecent_conversation_wakeup:\n{}\n\nthread_projection:\n{}\n\ntask_local:\n{}\n\nexecutor_boundary:\n{}",
+            "turn_operating_contract:\n{}\n\nrecent_conversation_wakeup:\n{}\n\nthread_projection:\n{}\n\ntask_local:\n{}\n\nexecutor_boundary:\n{}\n\ntooling_surface:\n{}\n\nexecution_boundaries:\n{}",
             liz_turn_operating_contract(),
             layers.recent_conversation,
             layers.thread_projection,
             layers.task_local,
-            layers.executor_boundary
+            layers.executor_boundary,
+            liz_tool_surface_summary(),
+            liz_execution_boundary_contract(),
         );
         let user_prompt = input.to_owned();
         let prompt = format!(
@@ -251,6 +253,35 @@ fn liz_turn_operating_contract() -> &'static str {
         "Keep exploration proportional to the retrieval scope and stay narrow when the request is small or specific.",
         "\n",
         "Maintain clear executor boundaries, surface uncertainty briefly, and preserve pending commitments when they matter."
+    )
+}
+
+fn liz_tool_surface_summary() -> String {
+    let workspace_root = std::env::current_dir()
+        .ok()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| ".".to_owned());
+    format!(
+        concat!(
+            "workspace_root: {workspace_root}\n",
+            "provider_tool_aliases: workspace_list, workspace_search, workspace_read, workspace_write_text, workspace_apply_patch, shell_exec, shell_spawn, shell_wait, shell_read_output, shell_terminate\n",
+            "canonical_runtime_tools: workspace.list, workspace.search, workspace.read, workspace.write_text, workspace.apply_patch, shell.exec, shell.spawn, shell.wait, shell.read_output, shell.terminate"
+        ),
+        workspace_root = workspace_root,
+    )
+}
+
+fn liz_execution_boundary_contract() -> &'static str {
+    concat!(
+        "Use runtime tools when reading, searching, editing, patching files, or running commands.",
+        "\n",
+        "Do not claim you cannot modify files: capability is available through runtime tools; approval and sandbox are execution boundaries, not capability absence.",
+        "\n",
+        "Never claim completion before observing corresponding tool results.",
+        "\n",
+        "Keep edits minimal, read only the files you need, and run narrow verification after mutations.",
+        "\n",
+        "Structured tool results are fed back as data; reason from stdout/stderr, exit code, diffs, and changed file signals."
     )
 }
 
