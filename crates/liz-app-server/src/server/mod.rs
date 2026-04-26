@@ -6,7 +6,10 @@ use crate::config::LizConfigFile;
 use crate::events::EventBus;
 use crate::executor::ExecutorGateway;
 use crate::handlers;
-use crate::model::{ModelGateway, ModelTurnRequest, NormalizedTurnEvent, ProviderOverride};
+use crate::model::{
+    ModelGateway, ModelTurnRequest, NormalizedTurnEvent, ProviderOverride, ProviderToolCall,
+    ToolResultInjection,
+};
 use crate::runtime::RuntimeCoordinator;
 use crate::storage::StoragePaths;
 use liz_protocol::{
@@ -252,19 +255,43 @@ impl AppServer {
         let thread_id = thread.id.clone();
         let turn_id = turn.id.clone();
         let model_gateway = self.gateway_with_provider_auth_profiles();
-
-        let request = ModelTurnRequest::from_prompt_parts(
+        let base_request = ModelTurnRequest::from_prompt_parts(
             thread,
             turn,
             system_prompt,
             developer_prompt,
             user_prompt,
         );
-        let run_result = model_gateway
-            .run_turn(request, |event| self.handle_model_event(&thread_id, &turn_id, event));
+        let mut continuation_results = Vec::<ToolResultInjection>::new();
+        let mut last_tool_fingerprint = String::new();
+        let mut repeated_tool_rounds = 0_u32;
 
-        match run_result {
-            Ok(summary) => {
+        loop {
+            let request =
+                base_request.clone().with_tool_result_injections(continuation_results.clone());
+            let run_result = model_gateway
+                .run_turn(request, |event| self.handle_model_event(&thread_id, &turn_id, event));
+            let summary = match run_result {
+                Ok(summary) => summary,
+                Err(error) => {
+                    if let Ok(turn) =
+                        self.runtime.fail_turn(&thread_id, &turn_id, error.to_string())
+                    {
+                        self.event_bus.publish(crate::events::PendingEvent::new(
+                            thread_id.clone(),
+                            Some(turn.id.clone()),
+                            ServerEventPayload::TurnFailed(TurnFailedEvent {
+                                turn,
+                                message: error.to_string(),
+                            }),
+                        ));
+                        self.compile_memory_for_thread(&thread_id, Some(&turn_id));
+                    }
+                    return;
+                }
+            };
+
+            if summary.tool_calls.is_empty() {
                 let final_message =
                     summary.assistant_message.unwrap_or_else(|| "Completed turn".to_owned());
                 if let Ok(turn) = self.runtime.complete_turn(&thread_id, &turn_id, final_message) {
@@ -275,20 +302,31 @@ impl AppServer {
                     ));
                     self.compile_memory_for_thread(&thread_id, Some(&turn_id));
                 }
+                return;
             }
-            Err(error) => {
-                if let Ok(turn) = self.runtime.fail_turn(&thread_id, &turn_id, error.to_string()) {
-                    self.event_bus.publish(crate::events::PendingEvent::new(
-                        thread_id.clone(),
-                        Some(turn.id.clone()),
-                        ServerEventPayload::TurnFailed(TurnFailedEvent {
-                            turn,
-                            message: error.to_string(),
-                        }),
-                    ));
-                    self.compile_memory_for_thread(&thread_id, Some(&turn_id));
-                }
+
+            let fingerprint = tool_call_fingerprint(&summary.tool_calls);
+            if fingerprint == last_tool_fingerprint {
+                repeated_tool_rounds = repeated_tool_rounds.saturating_add(1);
+            } else {
+                repeated_tool_rounds = 0;
+                last_tool_fingerprint = fingerprint;
             }
+
+            let mut round_results = summary
+                .tool_calls
+                .iter()
+                .map(|call| self.execute_model_tool_call(&thread_id, &turn_id, call))
+                .collect::<Vec<_>>();
+
+            if repeated_tool_rounds >= 2 {
+                round_results.push(runtime_diagnostic_injection(
+                    "runtime.loop_diagnostic",
+                    "Detected repeated tool-call pattern. Explain the blocker or choose a different action.",
+                ));
+            }
+
+            continuation_results.extend(round_results);
         }
     }
 
@@ -351,27 +389,64 @@ impl AppServer {
                         risk_hint: None,
                     }),
                 ));
-                if let Some(invocation) = parse_tool_invocation(&tool_name, &arguments) {
-                    self.execute_model_tool(thread_id, turn_id, invocation);
-                }
             }
             NormalizedTurnEvent::UsageDelta(_) | NormalizedTurnEvent::ProviderRawEvent { .. } => {}
         }
     }
 
-    fn execute_model_tool(
+    fn execute_model_tool_call(
         &mut self,
         thread_id: &ThreadId,
         turn_id: &TurnId,
-        invocation: liz_protocol::ToolInvocation,
-    ) {
+        tool_call: &ProviderToolCall,
+    ) -> ToolResultInjection {
+        let invocation = match parse_tool_invocation(&tool_call.tool_name, &tool_call.arguments) {
+            Ok(invocation) => invocation,
+            Err(message) => {
+                self.event_bus.publish(crate::events::PendingEvent::new(
+                    thread_id.clone(),
+                    Some(turn_id.clone()),
+                    ServerEventPayload::ToolFailed(liz_protocol::ToolFailedEvent {
+                        tool_name: tool_call.tool_name.clone(),
+                        summary: message.clone(),
+                    }),
+                ));
+                return ToolResultInjection {
+                    call_id: tool_call.call_id.clone(),
+                    tool_name: tool_call.tool_name.clone(),
+                    provider_tool_name: tool_call.provider_tool_name.clone(),
+                    result: serde_json::json!({ "error": message }),
+                    is_error: true,
+                    summary: "Tool invocation parse failed".to_owned(),
+                };
+            }
+        };
         let request = ToolCallRequest {
             thread_id: thread_id.clone(),
             turn_id: Some(turn_id.clone()),
             invocation,
         };
-        let Ok(executed) = self.executor.execute_tool(&request) else {
-            return;
+        let executed = match self.executor.execute_tool(&request) {
+            Ok(executed) => executed,
+            Err(error) => {
+                let summary = error.to_string();
+                self.event_bus.publish(crate::events::PendingEvent::new(
+                    thread_id.clone(),
+                    Some(turn_id.clone()),
+                    ServerEventPayload::ToolFailed(liz_protocol::ToolFailedEvent {
+                        tool_name: tool_call.tool_name.clone(),
+                        summary: summary.clone(),
+                    }),
+                ));
+                return ToolResultInjection {
+                    call_id: tool_call.call_id.clone(),
+                    tool_name: tool_call.tool_name.clone(),
+                    provider_tool_name: tool_call.provider_tool_name.clone(),
+                    result: serde_json::json!({ "error": summary }),
+                    is_error: true,
+                    summary: "Tool execution failed".to_owned(),
+                };
+            }
         };
         let executor_task_id = executor_task_id_for_result(thread_id, &executed.result);
         let output_chunks = executed.output_chunks.clone();
@@ -380,14 +455,33 @@ impl AppServer {
             .into_iter()
             .map(|artifact| (artifact.kind, artifact.summary, artifact.body))
             .collect::<Vec<_>>();
-        let Ok((execution_turn_id, artifact_refs)) = self.runtime.record_tool_execution(
+        let (execution_turn_id, artifact_refs) = match self.runtime.record_tool_execution(
             thread_id,
             Some(turn_id),
             executed.tool_name.as_str(),
             &executed.summary,
             artifacts,
-        ) else {
-            return;
+        ) {
+            Ok(values) => values,
+            Err(error) => {
+                let summary = error.to_string();
+                self.event_bus.publish(crate::events::PendingEvent::new(
+                    thread_id.clone(),
+                    Some(turn_id.clone()),
+                    ServerEventPayload::ToolFailed(liz_protocol::ToolFailedEvent {
+                        tool_name: executed.tool_name.as_str().to_owned(),
+                        summary: summary.clone(),
+                    }),
+                ));
+                return ToolResultInjection {
+                    call_id: tool_call.call_id.clone(),
+                    tool_name: tool_call.tool_name.clone(),
+                    provider_tool_name: tool_call.provider_tool_name.clone(),
+                    result: serde_json::json!({ "error": summary }),
+                    is_error: true,
+                    summary: "Tool result recording failed".to_owned(),
+                };
+            }
         };
 
         for artifact in artifact_refs.iter().cloned() {
@@ -428,6 +522,20 @@ impl AppServer {
                 artifact_ids: artifact_refs.iter().map(|artifact| artifact.id.clone()).collect(),
             }),
         ));
+
+        ToolResultInjection {
+            call_id: tool_call.call_id.clone(),
+            tool_name: tool_call.tool_name.clone(),
+            provider_tool_name: tool_call.provider_tool_name.clone(),
+            result: serde_json::to_value(&executed.result).unwrap_or_else(|_| {
+                serde_json::json!({
+                    "tool_name": executed.tool_name.as_str(),
+                    "summary": "tool result serialization failed"
+                })
+            }),
+            is_error: false,
+            summary: format!("{} succeeded", executed.tool_name.as_str()),
+        }
     }
 
     fn compile_memory_after_boundary(
@@ -487,6 +595,29 @@ impl AppServer {
         }
 
         gateway
+    }
+}
+
+fn tool_call_fingerprint(tool_calls: &[ProviderToolCall]) -> String {
+    tool_calls
+        .iter()
+        .map(|call| format!("{}:{}", call.tool_name, call.arguments))
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+fn runtime_diagnostic_injection(tool_name: &str, message: &str) -> ToolResultInjection {
+    let diagnostic_id = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or_default();
+    ToolResultInjection {
+        call_id: format!("diagnostic_{diagnostic_id}"),
+        tool_name: tool_name.to_owned(),
+        provider_tool_name: tool_name.to_owned(),
+        result: serde_json::json!({ "diagnostic": message }),
+        is_error: true,
+        summary: "Runtime diagnostic".to_owned(),
     }
 }
 
@@ -723,21 +854,100 @@ mod tests {
     }
 }
 
-fn parse_tool_invocation(tool_name: &str, arguments: &str) -> Option<liz_protocol::ToolInvocation> {
-    let value: serde_json::Value = serde_json::from_str(arguments).ok()?;
+fn parse_tool_invocation(
+    tool_name: &str,
+    arguments: &serde_json::Value,
+) -> Result<liz_protocol::ToolInvocation, String> {
+    let value = arguments;
     match tool_name {
-        "shell.exec" => {
-            Some(liz_protocol::ToolInvocation::ShellExec(liz_protocol::ShellExecRequest {
-                command: value.get("command")?.as_str()?.to_owned(),
-                working_dir: value
-                    .get("working_dir")
-                    .and_then(|value| value.as_str())
-                    .map(str::to_owned),
+        "workspace.list" => Ok(liz_protocol::ToolInvocation::WorkspaceList(
+            liz_protocol::WorkspaceListRequest {
+                root: required_string_field(value, "root")?,
+                recursive: optional_bool_field(value, "recursive").unwrap_or(false),
+                include_hidden: optional_bool_field(value, "include_hidden").unwrap_or(false),
+                max_entries: optional_usize_field(value, "max_entries"),
+            },
+        )),
+        "workspace.search" => Ok(liz_protocol::ToolInvocation::WorkspaceSearch(
+            liz_protocol::WorkspaceSearchRequest {
+                root: required_string_field(value, "root")?,
+                pattern: required_string_field(value, "pattern")?,
+                case_sensitive: optional_bool_field(value, "case_sensitive").unwrap_or(false),
+                include_hidden: optional_bool_field(value, "include_hidden").unwrap_or(false),
+                max_results: optional_usize_field(value, "max_results"),
+            },
+        )),
+        "workspace.read" => Ok(liz_protocol::ToolInvocation::WorkspaceRead(
+            liz_protocol::WorkspaceReadRequest {
+                path: required_string_field(value, "path")?,
+                start_line: optional_usize_field(value, "start_line"),
+                end_line: optional_usize_field(value, "end_line"),
+            },
+        )),
+        "workspace.write_text" => Ok(liz_protocol::ToolInvocation::WorkspaceWriteText(
+            liz_protocol::WorkspaceWriteTextRequest {
+                path: required_string_field(value, "path")?,
+                content: required_string_field(value, "content")?,
+            },
+        )),
+        "workspace.apply_patch" => Ok(liz_protocol::ToolInvocation::WorkspaceApplyPatch(
+            liz_protocol::WorkspaceApplyPatchRequest {
+                path: required_string_field(value, "path")?,
+                search: required_string_field(value, "search")?,
+                replace: required_string_field(value, "replace")?,
+                replace_all: optional_bool_field(value, "replace_all").unwrap_or(false),
+            },
+        )),
+        "shell.exec" => Ok(liz_protocol::ToolInvocation::ShellExec(liz_protocol::ShellExecRequest {
+            command: required_string_field(value, "command")?,
+            working_dir: optional_string_field(value, "working_dir"),
+            sandbox: parse_shell_sandbox_request(value.get("sandbox")),
+        })),
+        "shell.spawn" => Ok(liz_protocol::ToolInvocation::ShellSpawn(
+            liz_protocol::ShellSpawnRequest {
+                command: required_string_field(value, "command")?,
+                working_dir: optional_string_field(value, "working_dir"),
                 sandbox: parse_shell_sandbox_request(value.get("sandbox")),
-            }))
-        }
-        _ => None,
+            },
+        )),
+        "shell.wait" => Ok(liz_protocol::ToolInvocation::ShellWait(liz_protocol::ShellWaitRequest {
+            task_id: ExecutorTaskId::new(required_string_field(value, "task_id")?),
+        })),
+        "shell.read_output" => Ok(liz_protocol::ToolInvocation::ShellReadOutput(
+            liz_protocol::ShellReadOutputRequest {
+                task_id: ExecutorTaskId::new(required_string_field(value, "task_id")?),
+            },
+        )),
+        "shell.terminate" => Ok(liz_protocol::ToolInvocation::ShellTerminate(
+            liz_protocol::ShellTerminateRequest {
+                task_id: ExecutorTaskId::new(required_string_field(value, "task_id")?),
+            },
+        )),
+        _ => Err(format!("unknown tool name: {tool_name}")),
     }
+}
+
+fn required_string_field(value: &serde_json::Value, field: &str) -> Result<String, String> {
+    value
+        .get(field)
+        .and_then(|field_value| field_value.as_str())
+        .map(str::to_owned)
+        .ok_or_else(|| format!("missing required string field `{field}`"))
+}
+
+fn optional_string_field(value: &serde_json::Value, field: &str) -> Option<String> {
+    value.get(field).and_then(|field_value| field_value.as_str()).map(str::to_owned)
+}
+
+fn optional_bool_field(value: &serde_json::Value, field: &str) -> Option<bool> {
+    value.get(field).and_then(|field_value| field_value.as_bool())
+}
+
+fn optional_usize_field(value: &serde_json::Value, field: &str) -> Option<usize> {
+    value
+        .get(field)
+        .and_then(|field_value| field_value.as_u64())
+        .and_then(|raw| usize::try_from(raw).ok())
 }
 
 fn parse_shell_sandbox_request(
@@ -779,14 +989,14 @@ mod tool_invocation_tests {
     fn parses_shell_exec_with_sandbox_override() {
         let invocation = parse_tool_invocation(
             "shell.exec",
-            r#"{
+            &serde_json::json!({
                 "command":"echo hello",
                 "working_dir":"/tmp/workspace",
                 "sandbox":{
                     "mode":"danger-full-access",
                     "network_access":"enabled"
                 }
-            }"#,
+            }),
         )
         .expect("shell.exec invocation should parse");
 
