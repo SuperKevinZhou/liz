@@ -13,6 +13,7 @@ mod output_budget;
 mod prompt_cache;
 mod provider_spec;
 mod registry;
+mod tooling;
 
 pub use auth::{
     build_openai_codex_authorize_url, exchange_gitlab_oauth_code,
@@ -37,3 +38,7 @@ pub use output_budget::OutputBudget;
 pub use prompt_cache::{anthropic_system_blocks, anthropic_user_content, PromptCachePolicy};
 pub use provider_spec::{ProviderAuthKind, ProviderSpec};
 pub use registry::ProviderRegistry;
+pub use tooling::{
+    ProviderToolCall, ProviderToolNameMap, ProviderToolProtocol, ProviderToolSchema,
+    ToolResultInjection, ToolSurfaceSpec,
+};

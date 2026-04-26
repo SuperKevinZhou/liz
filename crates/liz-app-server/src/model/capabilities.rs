@@ -3,6 +3,14 @@
 /// The capability matrix advertised by a provider adapter.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelCapabilities {
+    /// Whether the provider supports native tool-call request/response shapes.
+    pub native_tool_calls: bool,
+    /// Whether liz can fall back to a structured tool-call protocol when native tools are absent.
+    pub structured_tool_protocol: bool,
+    /// Whether tool results can be injected back for continuation turns.
+    pub tool_result_continuation: bool,
+    /// Whether incremental tool-call deltas are streamed before tool-call commit.
+    pub streaming_tool_call_delta: bool,
     /// Whether assistant text can stream incrementally.
     pub assistant_text_streaming: bool,
     /// Whether tool calls can stream incrementally.
@@ -31,6 +39,10 @@ impl ModelCapabilities {
     /// Returns a capability matrix for a strong OpenAI-style streaming adapter.
     pub fn openai_streaming() -> Self {
         Self {
+            native_tool_calls: true,
+            structured_tool_protocol: true,
+            tool_result_continuation: true,
+            streaming_tool_call_delta: true,
             assistant_text_streaming: true,
             tool_call_streaming: true,
             tool_call_patching: true,
@@ -48,6 +60,10 @@ impl ModelCapabilities {
     /// Returns a conservative capability matrix for future OpenAI-compatible providers.
     pub fn openai_compatible() -> Self {
         Self {
+            native_tool_calls: true,
+            structured_tool_protocol: true,
+            tool_result_continuation: true,
+            streaming_tool_call_delta: false,
             assistant_text_streaming: true,
             tool_call_streaming: false,
             tool_call_patching: false,
@@ -65,6 +81,10 @@ impl ModelCapabilities {
     /// Returns a capability matrix for Anthropic Messages-style providers.
     pub fn anthropic_messages() -> Self {
         Self {
+            native_tool_calls: true,
+            structured_tool_protocol: true,
+            tool_result_continuation: true,
+            streaming_tool_call_delta: false,
             assistant_text_streaming: true,
             tool_call_streaming: true,
             tool_call_patching: false,
@@ -82,6 +102,10 @@ impl ModelCapabilities {
     /// Returns a capability matrix for Google-family providers.
     pub fn google_family() -> Self {
         Self {
+            native_tool_calls: true,
+            structured_tool_protocol: true,
+            tool_result_continuation: true,
+            streaming_tool_call_delta: false,
             assistant_text_streaming: true,
             tool_call_streaming: true,
             tool_call_patching: false,
@@ -99,6 +123,10 @@ impl ModelCapabilities {
     /// Returns a capability matrix for AWS Bedrock converse providers.
     pub fn bedrock_converse() -> Self {
         Self {
+            native_tool_calls: true,
+            structured_tool_protocol: true,
+            tool_result_continuation: true,
+            streaming_tool_call_delta: false,
             assistant_text_streaming: true,
             tool_call_streaming: true,
             tool_call_patching: false,
@@ -116,6 +144,10 @@ impl ModelCapabilities {
     /// Returns a conservative capability matrix for a local gateway.
     pub fn local_gateway() -> Self {
         Self {
+            native_tool_calls: false,
+            structured_tool_protocol: true,
+            tool_result_continuation: true,
+            streaming_tool_call_delta: false,
             assistant_text_streaming: true,
             tool_call_streaming: false,
             tool_call_patching: false,
@@ -151,6 +183,30 @@ impl ModelCapabilities {
     /// Overrides tool-call streaming support.
     pub fn with_tool_call_streaming(mut self, tool_call_streaming: bool) -> Self {
         self.tool_call_streaming = tool_call_streaming;
+        self
+    }
+
+    /// Overrides native tool-call support.
+    pub fn with_native_tool_calls(mut self, native_tool_calls: bool) -> Self {
+        self.native_tool_calls = native_tool_calls;
+        self
+    }
+
+    /// Overrides structured-tool-protocol fallback support.
+    pub fn with_structured_tool_protocol(mut self, structured_tool_protocol: bool) -> Self {
+        self.structured_tool_protocol = structured_tool_protocol;
+        self
+    }
+
+    /// Overrides tool-result continuation support.
+    pub fn with_tool_result_continuation(mut self, tool_result_continuation: bool) -> Self {
+        self.tool_result_continuation = tool_result_continuation;
+        self
+    }
+
+    /// Overrides streaming tool-call delta support.
+    pub fn with_streaming_tool_call_delta(mut self, streaming_tool_call_delta: bool) -> Self {
+        self.streaming_tool_call_delta = streaming_tool_call_delta;
         self
     }
 
