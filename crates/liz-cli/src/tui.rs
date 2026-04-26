@@ -4,10 +4,10 @@ use crate::app_client::{AppClientError, WebSocketAppClient};
 use crate::renderers;
 use crate::settings::{LizConfigFile, ProviderField, SettingsLocation};
 use crate::view_model::{OverlayPanel, ViewModel};
-use crossterm::cursor::{self, MoveTo, Show};
+use crossterm::cursor::{self, MoveToColumn, MoveUp, Show};
 use crossterm::event::{self, Event as CEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crossterm::style::Print;
-use crossterm::terminal::{self, disable_raw_mode, enable_raw_mode};
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType};
 use crossterm::{execute, queue};
 use liz_protocol::requests::{
     ClientRequest, ClientRequestEnvelope, MemoryCompileNowRequest, MemoryListTopicsRequest,
@@ -720,37 +720,25 @@ fn save_override(
 
 struct TerminalGuard {
     stdout: Stdout,
-    origin_y: u16,
-    last_drawn_height: u16,
+    render_state: renderers::TerminalRenderState,
 }
 
 impl TerminalGuard {
     fn enter() -> io::Result<Self> {
         enable_raw_mode()?;
         let mut stdout = io::stdout();
-        let (cursor_x, mut origin_y) = cursor::position()?;
+        let (cursor_x, _) = cursor::position()?;
         if cursor_x > 0 {
             queue!(stdout, Print("\r\n"))?;
-            origin_y = cursor::position()?.1;
-        }
-
-        let (_, terminal_height) = terminal::size()?;
-        let available_height = terminal_height.saturating_sub(origin_y);
-        if available_height < renderers::MIN_HEIGHT {
-            let missing = renderers::MIN_HEIGHT - available_height;
-            for _ in 0..missing {
-                queue!(stdout, Print("\r\n"))?;
-            }
-            origin_y = terminal_height.saturating_sub(renderers::MIN_HEIGHT);
         }
         stdout.flush()?;
 
-        Ok(Self { stdout, origin_y, last_drawn_height: 0 })
+        Ok(Self { stdout, render_state: renderers::TerminalRenderState::default() })
     }
 
     fn draw(&mut self, view_model: &ViewModel, server_url: &str) -> io::Result<()> {
-        self.last_drawn_height =
-            renderers::render(&mut self.stdout, view_model, server_url, self.origin_y)?;
+        let _ = server_url;
+        renderers::render_append_only(&mut self.stdout, view_model, &mut self.render_state)?;
         Ok(())
     }
 }
@@ -758,8 +746,16 @@ impl TerminalGuard {
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
-        let target_y = self.origin_y.saturating_add(self.last_drawn_height);
-        let _ = execute!(self.stdout, MoveTo(0, target_y), Show, Print("\r\n"));
+        if self.render_state.live_region_height > 0 {
+            let _ = queue!(self.stdout, MoveToColumn(0));
+            for index in 0..self.render_state.live_region_height {
+                let _ = queue!(self.stdout, Clear(ClearType::CurrentLine));
+                if index + 1 < self.render_state.live_region_height {
+                    let _ = queue!(self.stdout, MoveUp(1), MoveToColumn(0));
+                }
+            }
+        }
+        let _ = execute!(self.stdout, MoveToColumn(0), Show, Print("\r\n"));
     }
 }
 

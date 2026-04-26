@@ -1,10 +1,11 @@
 //! Crossterm renderers for the CLI chat shell.
 
 use crate::view_model::{ConfigFocus, OverlayPanel, TranscriptEntryKind, ViewModel};
-use crossterm::cursor::{Hide, MoveTo, Show};
+use crossterm::cursor::{Hide, MoveTo, MoveToColumn, MoveUp, Show};
 use crossterm::queue;
 use crossterm::style::{Color, Print, ResetColor, SetForegroundColor};
 use crossterm::terminal::{self, Clear, ClearType};
+use liz_protocol::ThreadId;
 use std::env;
 use std::io::{self, Stdout, Write};
 
@@ -18,6 +19,156 @@ const THEME_COLOR: Color = Color::Rgb { r: 0x2b, g: 0xda, b: 0x7f };
 pub struct RendererSkeleton {
     /// The renderer stack reserved for transcript-first chat surfaces.
     pub renderer_stack: &'static str,
+}
+
+/// Stateful append-only renderer metadata kept by the terminal session.
+#[derive(Debug, Clone, Default)]
+pub struct TerminalRenderState {
+    /// Active thread currently projected in transcript.
+    pub active_thread_id: Option<ThreadId>,
+    /// Number of committed transcript entries already written to scrollback.
+    pub committed_entries: usize,
+    /// Number of currently displayed live-region lines.
+    pub live_region_height: u16,
+}
+
+/// Renders transcript incrementally and keeps only composer/status in a live region.
+pub fn render_append_only(
+    stdout: &mut Stdout,
+    view_model: &ViewModel,
+    state: &mut TerminalRenderState,
+) -> io::Result<u16> {
+    queue!(stdout, Hide)?;
+
+    let selected_thread_id = view_model.selected_thread_id();
+    if selected_thread_id != state.active_thread_id {
+        state.active_thread_id = selected_thread_id;
+        state.committed_entries = 0;
+    }
+
+    clear_live_region(stdout, state.live_region_height)?;
+
+    if state.committed_entries > view_model.transcript_entries.len() {
+        state.committed_entries = 0;
+    }
+    for entry in view_model.transcript_entries.iter().skip(state.committed_entries) {
+        render_transcript_entry_line(stdout, entry.kind, &entry.body)?;
+    }
+    state.committed_entries = view_model.transcript_entries.len();
+
+    let live_lines = live_region_lines(view_model);
+    for line in &live_lines {
+        queue!(stdout, MoveToColumn(0), Clear(ClearType::CurrentLine), Print(line), Print("\r\n"))?;
+    }
+    state.live_region_height = live_lines.len() as u16;
+
+    queue!(stdout, Show)?;
+    stdout.flush()?;
+    Ok(state.live_region_height)
+}
+
+fn render_transcript_entry_line(
+    stdout: &mut Stdout,
+    kind: TranscriptEntryKind,
+    body: &str,
+) -> io::Result<()> {
+    let marker = match kind {
+        TranscriptEntryKind::User => "▶",
+        TranscriptEntryKind::Assistant => "●",
+        TranscriptEntryKind::Tool => "○",
+        TranscriptEntryKind::Approval => "!",
+        TranscriptEntryKind::System => "·",
+    };
+    let color = match kind {
+        TranscriptEntryKind::User => THEME_COLOR,
+        TranscriptEntryKind::Assistant => Color::White,
+        TranscriptEntryKind::Tool => Color::DarkGrey,
+        TranscriptEntryKind::Approval => Color::Yellow,
+        TranscriptEntryKind::System => Color::Grey,
+    };
+
+    let prefix = format!("{marker} {:<8} ", kind.label());
+    let width = terminal::size()?.0.max(MIN_WIDTH) as usize;
+    for line in body.lines().flat_map(|line| wrap_text(line, width.saturating_sub(prefix.len()))) {
+        queue!(
+            stdout,
+            MoveToColumn(0),
+            Clear(ClearType::CurrentLine),
+            SetForegroundColor(color),
+            Print(&prefix),
+            ResetColor,
+            Print(line),
+            Print("\r\n")
+        )?;
+    }
+    Ok(())
+}
+
+fn live_region_lines(view_model: &ViewModel) -> Vec<String> {
+    let mut lines = Vec::new();
+    lines.push(format!(
+        "status: {}",
+        if view_model.status_line.is_empty() {
+            "ready".to_owned()
+        } else {
+            view_model.status_line.clone()
+        }
+    ));
+    let composer_value = if view_model.input_buffer.is_empty() {
+        "Type message or /command".to_owned()
+    } else {
+        view_model.input_buffer.replace('\n', " ⏎ ")
+    };
+    lines.push(format!("> {composer_value}"));
+
+    if view_model.command_palette_is_open() || view_model.slash_mode {
+        let suggestions = if view_model.command_suggestions.is_empty() {
+            ViewModel::slash_commands()
+                .iter()
+                .map(|spec| format!("/{:<10} {}", spec.name, spec.description))
+                .take(3)
+                .collect::<Vec<_>>()
+        } else {
+            view_model
+                .command_suggestions
+                .iter()
+                .take(6)
+                .enumerate()
+                .map(|(index, suggestion)| {
+                    let marker = if index == view_model.selected_command_index { ">" } else { " " };
+                    format!(
+                        "{marker} /{:<10} {}",
+                        suggestion.spec.name, suggestion.spec.description
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        lines.extend(suggestions);
+    }
+
+    if !view_model.pending_approvals.is_empty() {
+        lines.push(format!(
+            "approval: {} pending (Enter approve once / Esc deny)",
+            view_model.pending_approvals.len()
+        ));
+    }
+
+    lines
+}
+
+fn clear_live_region(stdout: &mut Stdout, live_region_height: u16) -> io::Result<()> {
+    if live_region_height == 0 {
+        return Ok(());
+    }
+    queue!(stdout, MoveToColumn(0))?;
+    for index in 0..live_region_height {
+        queue!(stdout, Clear(ClearType::CurrentLine))?;
+        if index + 1 < live_region_height {
+            queue!(stdout, MoveUp(1), MoveToColumn(0))?;
+        }
+    }
+    queue!(stdout, MoveToColumn(0))?;
+    Ok(())
 }
 
 impl Default for RendererSkeleton {
