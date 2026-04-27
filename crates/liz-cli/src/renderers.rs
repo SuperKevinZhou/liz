@@ -1184,17 +1184,66 @@ fn append_transcript_entry(
     body: &str,
     width: usize,
 ) {
-    let color = match kind {
-        TranscriptEntryKind::User => THEME_COLOR,
-        TranscriptEntryKind::Assistant => THEME_COLOR,
-        TranscriptEntryKind::Tool => Color::DarkGrey,
-        TranscriptEntryKind::Approval => Color::Yellow,
-        TranscriptEntryKind::System => Color::Grey,
-    };
-    lines.push(ScreenLine::colored(kind.label(), color));
+    match kind {
+        TranscriptEntryKind::User => {
+            append_marked_block(lines, "> ", THEME_COLOR, None, body, width);
+        }
+        TranscriptEntryKind::Assistant => {
+            append_marked_block(lines, "● ", THEME_COLOR, None, body, width);
+        }
+        TranscriptEntryKind::Tool => {
+            append_tool_block(lines, body, width);
+        }
+        TranscriptEntryKind::Approval => {
+            append_marked_block(lines, "? ", Color::Yellow, Some(Color::Yellow), body, width);
+        }
+        TranscriptEntryKind::System => {
+            append_marked_block(lines, "※ ", Color::DarkGrey, Some(Color::DarkGrey), body, width);
+        }
+    }
+}
+
+fn append_tool_block(lines: &mut Vec<ScreenLine>, body: &str, width: usize) {
+    let (title, summary) = body
+        .split_once(": ")
+        .map_or((body.trim(), ""), |(title, summary)| (title.trim(), summary.trim()));
+    let title = if title.is_empty() { "tool" } else { title };
+    let mut header = ScreenLine::blank();
+    header.push(Segment::colored("● ", THEME_COLOR));
+    header.push(Segment::colored(title, Color::DarkGrey));
+    lines.push(header);
+
+    if summary.is_empty() {
+        return;
+    }
+
+    append_marked_block(lines, "  ⎿ ", Color::DarkGrey, Some(Color::DarkGrey), summary, width);
+}
+
+fn append_marked_block(
+    lines: &mut Vec<ScreenLine>,
+    marker: &str,
+    marker_color: Color,
+    body_color: Option<Color>,
+    body: &str,
+    width: usize,
+) {
+    let content_width = width.saturating_sub(display_width(marker)).max(20);
+    let mut first_line = true;
+
     for paragraph in body.lines() {
-        for wrapped in wrap_text(paragraph, width.saturating_sub(2)) {
-            lines.push(ScreenLine::plain(format!("  {wrapped}")));
+        let wrapped_lines = wrap_text(paragraph, content_width);
+        for wrapped in wrapped_lines {
+            let prefix = if first_line { marker } else { "  " };
+            let mut line = ScreenLine::blank();
+            line.push(Segment::colored(prefix, marker_color));
+            if let Some(color) = body_color {
+                line.push(Segment::colored(wrapped, color));
+            } else {
+                line.push(Segment::plain(wrapped));
+            }
+            lines.push(line);
+            first_line = false;
         }
     }
 }
@@ -1408,6 +1457,9 @@ fn is_single_cell_symbol(ch: char) -> bool {
             | '·'
             | '…'
             | '⏎'
+            | '⎿'
+            | '●'
+            | '※'
             | '‼'
             | '⌕'
             | '❯'
@@ -1421,8 +1473,8 @@ fn repeat(ch: char, count: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        char_width, common_transcript_prefix, input_line_offset, live_region_lines,
-        sync_render_projection, welcome_block_lines, TerminalRenderState,
+        append_transcript_entry, char_width, common_transcript_prefix, input_line_offset,
+        live_region_lines, sync_render_projection, welcome_block_lines, TerminalRenderState,
     };
     use crate::view_model::{TranscriptEntry, TranscriptEntryKind, ViewModel};
     use liz_protocol::{ModelStatusResponse, ThreadId};
@@ -1483,6 +1535,44 @@ mod tests {
         assert_eq!(state.active_thread_id, Some(ThreadId::new("thread_new")));
         assert!(state.rendered_entries.is_empty());
         assert!(!state.welcome_rendered);
+    }
+
+    #[test]
+    fn transcript_entries_use_marker_first_rendering() {
+        let mut lines = Vec::new();
+        append_transcript_entry(&mut lines, TranscriptEntryKind::User, "check the renderer", 80);
+        append_transcript_entry(
+            &mut lines,
+            TranscriptEntryKind::Assistant,
+            "I will inspect it.",
+            80,
+        );
+
+        assert_eq!(lines[0].segments[0].text, "> ");
+        assert_eq!(lines[0].segments[1].text, "check the renderer");
+        assert_eq!(lines[1].segments[0].text, "● ");
+        assert_eq!(lines[1].segments[1].text, "I will inspect it.");
+        assert!(lines
+            .iter()
+            .flat_map(|line| line.segments.iter())
+            .all(|segment| segment.text != "you" && segment.text != "liz"));
+    }
+
+    #[test]
+    fn tool_entries_render_as_call_with_result_tail() {
+        let mut lines = Vec::new();
+
+        append_transcript_entry(
+            &mut lines,
+            TranscriptEntryKind::Tool,
+            "workspace.read: Read 42 lines",
+            80,
+        );
+
+        assert_eq!(lines[0].segments[0].text, "● ");
+        assert_eq!(lines[0].segments[1].text, "workspace.read");
+        assert_eq!(lines[1].segments[0].text, "  ⎿ ");
+        assert_eq!(lines[1].segments[1].text, "Read 42 lines");
     }
 
     #[test]
