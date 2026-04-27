@@ -55,11 +55,7 @@ pub fn render_incremental(
     queue!(stdout, Hide)?;
     clear_live_region(stdout, state.live_region_height, state.input_line_offset)?;
 
-    if view_model.selected_thread_id() != state.active_thread_id {
-        state.active_thread_id = view_model.selected_thread_id();
-        state.welcome_rendered = false;
-        state.rendered_entries.clear();
-    }
+    sync_render_projection(state, view_model.selected_thread_id(), &view_model.transcript_entries);
 
     if view_model.transcript_entries.is_empty()
         && view_model.model_status.is_some()
@@ -142,6 +138,23 @@ fn input_line_offset(lines: &[ScreenLine]) -> u16 {
 
 fn common_transcript_prefix(left: &[TranscriptEntry], right: &[TranscriptEntry]) -> usize {
     left.iter().zip(right.iter()).take_while(|(left, right)| left == right).count()
+}
+
+fn sync_render_projection(
+    state: &mut TerminalRenderState,
+    selected_thread_id: Option<ThreadId>,
+    transcript_entries: &[TranscriptEntry],
+) {
+    if selected_thread_id == state.active_thread_id {
+        return;
+    }
+
+    let visible_entries_already_written = state.rendered_entries == transcript_entries;
+    state.active_thread_id = selected_thread_id;
+    state.welcome_rendered = false;
+    if !visible_entries_already_written {
+        state.rendered_entries.clear();
+    }
 }
 
 fn write_scrollback_lines(stdout: &mut Stdout, lines: &[ScreenLine]) -> io::Result<()> {
@@ -1409,10 +1422,10 @@ fn repeat(ch: char, count: usize) -> String {
 mod tests {
     use super::{
         char_width, common_transcript_prefix, input_line_offset, live_region_lines,
-        welcome_block_lines,
+        sync_render_projection, welcome_block_lines, TerminalRenderState,
     };
     use crate::view_model::{TranscriptEntry, TranscriptEntryKind, ViewModel};
-    use liz_protocol::ModelStatusResponse;
+    use liz_protocol::{ModelStatusResponse, ThreadId};
 
     #[test]
     fn common_prefix_keeps_existing_scrollback_entries_from_reprinting() {
@@ -1430,6 +1443,46 @@ mod tests {
         ];
 
         assert_eq!(common_transcript_prefix(&existing, &next), 2);
+    }
+
+    #[test]
+    fn thread_activation_keeps_already_written_pending_message() {
+        let entries =
+            vec![TranscriptEntry { kind: TranscriptEntryKind::User, body: "hello".to_owned() }];
+        let mut state = TerminalRenderState {
+            active_thread_id: None,
+            welcome_rendered: true,
+            rendered_entries: entries.clone(),
+            live_region_height: 3,
+            input_line_offset: 1,
+        };
+
+        sync_render_projection(&mut state, Some(ThreadId::new("thread_01")), &entries);
+
+        assert_eq!(state.active_thread_id, Some(ThreadId::new("thread_01")));
+        assert_eq!(state.rendered_entries, entries);
+        assert!(!state.welcome_rendered);
+    }
+
+    #[test]
+    fn thread_switch_resets_different_scrollback_projection() {
+        let previous =
+            vec![TranscriptEntry { kind: TranscriptEntryKind::User, body: "old".to_owned() }];
+        let next =
+            vec![TranscriptEntry { kind: TranscriptEntryKind::User, body: "new".to_owned() }];
+        let mut state = TerminalRenderState {
+            active_thread_id: Some(ThreadId::new("thread_old")),
+            welcome_rendered: true,
+            rendered_entries: previous,
+            live_region_height: 3,
+            input_line_offset: 1,
+        };
+
+        sync_render_projection(&mut state, Some(ThreadId::new("thread_new")), &next);
+
+        assert_eq!(state.active_thread_id, Some(ThreadId::new("thread_new")));
+        assert!(state.rendered_entries.is_empty());
+        assert!(!state.welcome_rendered);
     }
 
     #[test]
