@@ -28,6 +28,8 @@ pub struct RendererSkeleton {
 pub struct TerminalRenderState {
     /// The thread currently being projected into scrollback.
     pub active_thread_id: Option<ThreadId>,
+    /// Whether the empty-state welcome block has already been written for this projection.
+    pub welcome_rendered: bool,
     /// Transcript entries already written into scrollback for the active projection.
     pub rendered_entries: Vec<TranscriptEntry>,
     /// Number of rows used by the live input/status region.
@@ -53,7 +55,17 @@ pub fn render_incremental(
 
     if view_model.selected_thread_id() != state.active_thread_id {
         state.active_thread_id = view_model.selected_thread_id();
+        state.welcome_rendered = false;
         state.rendered_entries.clear();
+    }
+
+    if view_model.transcript_entries.is_empty()
+        && view_model.model_status.is_some()
+        && !state.welcome_rendered
+    {
+        let welcome = welcome_block_lines(view_model, width as usize);
+        write_scrollback_lines(stdout, &welcome)?;
+        state.welcome_rendered = true;
     }
 
     let common_prefix =
@@ -197,6 +209,74 @@ fn composer_lines(view_model: &ViewModel, width: u16) -> Vec<ScreenLine> {
     status.push(Segment::colored(right, Color::DarkGrey));
     lines.push(status);
     lines
+}
+
+fn welcome_block_lines(view_model: &ViewModel, width: usize) -> Vec<ScreenLine> {
+    let box_width = width.saturating_sub(2).clamp(54, 96);
+    let title = format!(" liz CLI v{} ", env!("CARGO_PKG_VERSION"));
+    let top = titled_box_top(box_width, &title);
+    let bottom = format!("╰{}╯", repeat('─', box_width.saturating_sub(2)));
+
+    let cwd = env::current_dir()
+        .ok()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| ".".to_owned());
+    let provider_name = view_model
+        .model_status
+        .as_ref()
+        .and_then(|status| status.display_name.clone())
+        .unwrap_or_else(|| "Provider".to_owned());
+    let model_name = view_model
+        .model_status
+        .as_ref()
+        .and_then(|status| status.model_id.clone())
+        .unwrap_or_else(|| "Not configured".to_owned());
+    let billing = if view_model.model_status.as_ref().is_some_and(|status| status.ready) {
+        "Ready"
+    } else {
+        "Setup required"
+    };
+
+    let divider = box_width.saturating_mul(52) / 100;
+    let left_width = divider.saturating_sub(3).max(18);
+    let right_width = box_width.saturating_sub(divider + 4).max(18);
+    let left_status = format!("{model_name} · {provider_name} · {billing}");
+    let activity = recent_activity_line(view_model);
+
+    let rows = [
+        two_column_box_row("Welcome back!", "Tips for getting started", left_width, right_width),
+        two_column_box_row("", "Run /config to configure provider access", left_width, right_width),
+        two_column_box_row("", "Run /memory for continuity and recall", left_width, right_width),
+        two_column_box_row("", "Run /compile to distill experience", left_width, right_width),
+        two_column_box_row("", &repeat('─', right_width), left_width, right_width),
+        two_column_box_row(&left_status, "Recent activity", left_width, right_width),
+        two_column_box_row(&cwd, &activity, left_width, right_width),
+    ];
+
+    let mut lines = Vec::with_capacity(rows.len() + 3);
+    lines.push(ScreenLine::colored(top, THEME_COLOR));
+    lines.extend(rows.into_iter().map(|row| ScreenLine::colored(row, Color::Grey)));
+    lines.push(ScreenLine::colored(bottom, THEME_COLOR));
+    lines.push(ScreenLine::blank());
+    lines
+}
+
+fn titled_box_top(width: usize, title: &str) -> String {
+    let inner_width = width.saturating_sub(2);
+    let title = truncate(title, inner_width);
+    let left_rule = repeat('─', 1);
+    let right_rule = repeat('─', inner_width.saturating_sub(display_width(&title) + 1));
+    format!("╭{left_rule}{title}{right_rule}╮")
+}
+
+fn two_column_box_row(left: &str, right: &str, left_width: usize, right_width: usize) -> String {
+    format!("│ {} │ {} │", pad_right(left, left_width), pad_right(right, right_width))
+}
+
+fn pad_right(value: &str, width: usize) -> String {
+    let value = truncate(value, width);
+    let padding = width.saturating_sub(display_width(&value));
+    format!("{value}{}", repeat(' ', padding))
 }
 
 #[derive(Debug, Clone)]
@@ -1162,8 +1242,9 @@ fn repeat(ch: char, count: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{common_transcript_prefix, live_region_lines};
+    use super::{common_transcript_prefix, live_region_lines, welcome_block_lines};
     use crate::view_model::{TranscriptEntry, TranscriptEntryKind, ViewModel};
+    use liz_protocol::ModelStatusResponse;
 
     #[test]
     fn common_prefix_keeps_existing_scrollback_entries_from_reprinting() {
@@ -1198,5 +1279,30 @@ mod tests {
 
         assert!(rendered.contains("> check src/main.rs"));
         assert!(rendered.contains("ready"));
+    }
+
+    #[test]
+    fn welcome_block_preserves_empty_state_in_scrollback_renderer() {
+        let mut view_model = ViewModel::default();
+        view_model.model_status = Some(ModelStatusResponse {
+            provider_id: "openai".to_owned(),
+            display_name: Some("OpenAI".to_owned()),
+            model_id: Some("gpt-5".to_owned()),
+            auth_kind: Some("api-key".to_owned()),
+            ready: true,
+            credential_configured: true,
+            credential_hints: Vec::new(),
+            notes: Vec::new(),
+        });
+
+        let rendered = welcome_block_lines(&view_model, 80)
+            .iter()
+            .flat_map(|line| line.segments.iter().map(|segment| segment.text.as_str()))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("Welcome back!"));
+        assert!(rendered.contains("Tips for getting started"));
+        assert!(rendered.contains("gpt-5"));
     }
 }
