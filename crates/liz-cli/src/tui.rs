@@ -4,7 +4,7 @@ use crate::app_client::{AppClientError, WebSocketAppClient};
 use crate::renderers;
 use crate::settings::{LizConfigFile, ProviderField, SettingsLocation};
 use crate::view_model::{OverlayPanel, ViewModel};
-use crossterm::cursor::{self, Show};
+use crossterm::cursor::{self, SetCursorStyle, Show};
 use crossterm::event::{self, Event as CEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crossterm::style::Print;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
@@ -731,6 +731,7 @@ impl TerminalGuard {
         if cursor_x > 0 {
             queue!(stdout, Print("\r\n"))?;
         }
+        queue!(stdout, SetCursorStyle::SteadyBlock)?;
         stdout.flush()?;
 
         Ok(Self { stdout, render_state: renderers::TerminalRenderState::default() })
@@ -747,7 +748,7 @@ impl Drop for TerminalGuard {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
         let _ = renderers::clear_incremental_live_region(&mut self.stdout, &mut self.render_state);
-        let _ = execute!(self.stdout, Show, Print("\r\n"));
+        let _ = execute!(self.stdout, SetCursorStyle::DefaultUserShape, Show, Print("\r\n"));
     }
 }
 

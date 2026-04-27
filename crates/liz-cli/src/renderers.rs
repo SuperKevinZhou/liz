@@ -34,6 +34,8 @@ pub struct TerminalRenderState {
     pub rendered_entries: Vec<TranscriptEntry>,
     /// Number of rows used by the live input/status region.
     pub live_region_height: u16,
+    /// Row offset of the composer input line inside the live region.
+    pub input_line_offset: u16,
 }
 
 impl Default for RendererSkeleton {
@@ -79,9 +81,12 @@ pub fn render_incremental(
     state.rendered_entries = view_model.transcript_entries.clone();
 
     let live_lines = live_region_lines(view_model, width, terminal_height);
+    let input_line_offset = input_line_offset(&live_lines);
     write_scrollback_lines(stdout, &live_lines)?;
     state.live_region_height = live_lines.len() as u16;
+    state.input_line_offset = input_line_offset;
 
+    move_cursor_to_input(stdout, view_model, state, width)?;
     queue!(stdout, Show)?;
     stdout.flush()?;
     Ok(state.live_region_height)
@@ -102,6 +107,32 @@ fn clear_live_region(stdout: &mut Stdout, live_region_height: u16) -> io::Result
         return Ok(());
     }
     queue!(stdout, MoveUp(live_region_height), MoveToColumn(0), Clear(ClearType::FromCursorDown))
+}
+
+fn move_cursor_to_input(
+    stdout: &mut Stdout,
+    view_model: &ViewModel,
+    state: &TerminalRenderState,
+    width: u16,
+) -> io::Result<()> {
+    if state.live_region_height == 0 {
+        return Ok(());
+    }
+    let rows_up = state.live_region_height.saturating_sub(state.input_line_offset);
+    let input = if view_model.input_buffer.is_empty() {
+        "Try \"how does <filepath> work?\""
+    } else {
+        view_model.input_buffer.as_str()
+    };
+    let cursor_x = display_width(&format!("❯ {input}")).min(width.saturating_sub(1) as usize);
+    queue!(stdout, MoveUp(rows_up), MoveToColumn(cursor_x as u16))
+}
+
+fn input_line_offset(lines: &[ScreenLine]) -> u16 {
+    lines
+        .iter()
+        .position(|line| line.segments.iter().any(|segment| segment.text.starts_with("❯ ")))
+        .unwrap_or(0) as u16
 }
 
 fn common_transcript_prefix(left: &[TranscriptEntry], right: &[TranscriptEntry]) -> usize {
@@ -180,14 +211,14 @@ fn live_region_lines(view_model: &ViewModel, width: u16, terminal_height: u16) -
 fn composer_lines(view_model: &ViewModel, width: u16) -> Vec<ScreenLine> {
     let mut lines = Vec::new();
     let rule = repeat('─', width as usize);
-    lines.push(ScreenLine::colored(rule.clone(), Color::DarkGrey));
+    lines.push(ScreenLine::colored(rule.clone(), THEME_COLOR));
     let input = if view_model.input_buffer.is_empty() {
         "Try \"how does <filepath> work?\"".to_owned()
     } else {
         view_model.input_buffer.replace('\n', "⏎ ")
     };
-    lines.push(ScreenLine::plain(truncate(&format!("> {input}"), width as usize)));
-    lines.push(ScreenLine::colored(rule, Color::DarkGrey));
+    lines.push(ScreenLine::plain(truncate(&format!("❯ {input}"), width as usize)));
+    lines.push(ScreenLine::colored(rule, THEME_COLOR));
 
     let left = if !view_model.status_line.is_empty() {
         view_model.status_line.as_str()
@@ -251,7 +282,7 @@ fn welcome_block_lines(view_model: &ViewModel, width: usize) -> Vec<ScreenLine> 
             &center_text("Welcome back!", left_width),
             Color::White,
             "Tips for getting started",
-            Color::White,
+            THEME_COLOR,
             left_width,
             right_width,
         ),
@@ -283,7 +314,7 @@ fn welcome_block_lines(view_model: &ViewModel, width: usize) -> Vec<ScreenLine> 
             "",
             Color::DarkGrey,
             &repeat('─', right_width),
-            Color::DarkGrey,
+            THEME_COLOR,
             left_width,
             right_width,
         ),
@@ -291,7 +322,7 @@ fn welcome_block_lines(view_model: &ViewModel, width: usize) -> Vec<ScreenLine> 
             &center_text(&left_status, left_width),
             Color::Grey,
             "Recent activity",
-            Color::White,
+            THEME_COLOR,
             left_width,
             right_width,
         ),
@@ -565,12 +596,12 @@ fn render_empty_transcript(
     )?;
     write_centered(stdout, left, 8, Color::DarkGrey, &truncate(&cwd, left.width as usize))?;
 
-    put(stdout, right.x, right.y, Color::White, "Tips for getting started")?;
+    put(stdout, right.x, right.y, THEME_COLOR, "Tips for getting started")?;
     put(stdout, right.x, right.y + 1, Color::DarkGrey, "Run /config to configure provider access")?;
     put(stdout, right.x, right.y + 2, Color::DarkGrey, "Run /memory for continuity and recall")?;
     put(stdout, right.x, right.y + 3, Color::DarkGrey, "Run /compile to distill experience")?;
-    put(stdout, right.x, right.y + 4, Color::DarkGrey, &repeat('─', right.width as usize))?;
-    put(stdout, right.x, right.y + 5, Color::White, "Recent activity")?;
+    put(stdout, right.x, right.y + 4, THEME_COLOR, &repeat('─', right.width as usize))?;
+    put(stdout, right.x, right.y + 5, THEME_COLOR, "Recent activity")?;
     let activity = recent_activity_line(view_model);
     put(stdout, right.x, right.y + 6, Color::DarkGrey, &truncate(&activity, right.width as usize))?;
 
@@ -582,7 +613,7 @@ fn render_composer(stdout: &mut Stdout, area: Rect, view_model: &ViewModel) -> i
         return Ok(());
     }
     let line = repeat('─', area.width as usize);
-    put(stdout, area.x, area.y, Color::DarkGrey, &line)?;
+    put(stdout, area.x, area.y, THEME_COLOR, &line)?;
 
     let prompt_y = area.y + 1;
     let input = if view_model.input_buffer.is_empty() {
@@ -590,11 +621,11 @@ fn render_composer(stdout: &mut Stdout, area: Rect, view_model: &ViewModel) -> i
     } else {
         view_model.input_buffer.replace('\n', "⏎ ")
     };
-    let prompt = format!("> {input}");
+    let prompt = format!("❯ {input}");
     put(stdout, area.x, prompt_y, Color::White, &truncate(&prompt, area.width as usize))?;
 
     if area.height > 2 {
-        put(stdout, area.x, area.y + 2, Color::DarkGrey, &line)?;
+        put(stdout, area.x, area.y + 2, THEME_COLOR, &line)?;
     }
 
     if area.height > 3 {
@@ -1357,7 +1388,9 @@ fn repeat(ch: char, count: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{common_transcript_prefix, live_region_lines, welcome_block_lines};
+    use super::{
+        common_transcript_prefix, input_line_offset, live_region_lines, welcome_block_lines,
+    };
     use crate::view_model::{TranscriptEntry, TranscriptEntryKind, ViewModel};
     use liz_protocol::ModelStatusResponse;
 
@@ -1392,8 +1425,19 @@ mod tests {
             .collect::<Vec<_>>()
             .join("");
 
-        assert!(rendered.contains("> check src/main.rs"));
+        assert!(rendered.contains("❯ check src/main.rs"));
         assert!(rendered.contains("ready"));
+    }
+
+    #[test]
+    fn live_region_tracks_input_line_for_cursor_placement() {
+        let mut view_model = ViewModel::default();
+        view_model.status_line = "ready".to_owned();
+        view_model.input_buffer = "check src/main.rs".to_owned();
+
+        let lines = live_region_lines(&view_model, 80, 24);
+
+        assert_eq!(input_line_offset(&lines), 1);
     }
 
     #[test]
