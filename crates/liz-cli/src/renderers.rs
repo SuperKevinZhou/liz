@@ -3,7 +3,7 @@
 use crate::view_model::{
     ConfigFocus, OverlayPanel, TranscriptEntry, TranscriptEntryKind, ViewModel,
 };
-use crossterm::cursor::{Hide, MoveTo, MoveToColumn, MoveUp, Show};
+use crossterm::cursor::{self, Hide, MoveTo, MoveToColumn, MoveUp, Show};
 use crossterm::queue;
 use crossterm::style::{Color, Print, ResetColor, SetForegroundColor};
 use crossterm::terminal::{self, Clear, ClearType};
@@ -34,6 +34,8 @@ pub struct TerminalRenderState {
     pub rendered_entries: Vec<TranscriptEntry>,
     /// Number of rows used by the live input/status region.
     pub live_region_height: u16,
+    /// Top row of the live input/status region.
+    pub live_region_y: Option<u16>,
 }
 
 impl Default for RendererSkeleton {
@@ -79,8 +81,10 @@ pub fn render_incremental(
     state.rendered_entries = view_model.transcript_entries.clone();
 
     let live_lines = live_region_lines(view_model, width, terminal_height);
-    write_scrollback_lines(stdout, &live_lines)?;
+    let (_, live_y) = cursor::position()?;
+    write_live_region_lines(stdout, live_y, &live_lines)?;
     state.live_region_height = live_lines.len() as u16;
+    state.live_region_y = Some(live_y);
 
     queue!(stdout, Show)?;
     stdout.flush()?;
@@ -94,6 +98,7 @@ pub fn clear_incremental_live_region(
 ) -> io::Result<()> {
     clear_live_region(stdout, state.live_region_height)?;
     state.live_region_height = 0;
+    state.live_region_y = None;
     stdout.flush()
 }
 
@@ -119,9 +124,22 @@ fn write_scrollback_lines(stdout: &mut Stdout, lines: &[ScreenLine]) -> io::Resu
 
 fn write_line_segments(stdout: &mut Stdout, line: &ScreenLine) -> io::Result<()> {
     for segment in &line.segments {
-        let color = segment.color.unwrap_or(Color::White);
-        queue!(stdout, SetForegroundColor(color), Print(&segment.text), ResetColor)?;
+        if let Some(color) = segment.color {
+            queue!(stdout, SetForegroundColor(color), Print(&segment.text), ResetColor)?;
+        } else {
+            queue!(stdout, ResetColor, Print(&segment.text))?;
+        }
     }
+    Ok(())
+}
+
+fn write_live_region_lines(stdout: &mut Stdout, y: u16, lines: &[ScreenLine]) -> io::Result<()> {
+    for (offset, line) in lines.iter().enumerate() {
+        let row = y.saturating_add(offset as u16);
+        queue!(stdout, MoveTo(0, row), Clear(ClearType::CurrentLine))?;
+        write_line_segments(stdout, line)?;
+    }
+    queue!(stdout, MoveTo(0, y.saturating_add(lines.len() as u16)))?;
     Ok(())
 }
 
@@ -212,7 +230,7 @@ fn composer_lines(view_model: &ViewModel, width: u16) -> Vec<ScreenLine> {
 }
 
 fn welcome_block_lines(view_model: &ViewModel, width: usize) -> Vec<ScreenLine> {
-    let box_width = width.saturating_sub(2).clamp(54, 96);
+    let box_width = width.saturating_sub(2).max(54);
     let title = format!(" liz CLI v{} ", env!("CARGO_PKG_VERSION"));
     let top = titled_box_top(box_width, &title);
     let bottom = format!("╰{}╯", repeat('─', box_width.saturating_sub(2)));
@@ -244,21 +262,75 @@ fn welcome_block_lines(view_model: &ViewModel, width: usize) -> Vec<ScreenLine> 
     let activity = recent_activity_line(view_model);
 
     let rows = [
-        two_column_box_row("Welcome back!", "Tips for getting started", left_width, right_width),
-        two_column_box_row("", "Run /config to configure provider access", left_width, right_width),
-        two_column_box_row("", "Run /memory for continuity and recall", left_width, right_width),
-        two_column_box_row("", "Run /compile to distill experience", left_width, right_width),
-        two_column_box_row("", &repeat('─', right_width), left_width, right_width),
-        two_column_box_row(&left_status, "Recent activity", left_width, right_width),
-        two_column_box_row(&cwd, &activity, left_width, right_width),
+        two_column_box_line(
+            &center_text("Welcome back!", left_width),
+            Color::White,
+            "Tips for getting started",
+            Color::White,
+            left_width,
+            right_width,
+        ),
+        two_column_box_line(
+            "",
+            Color::DarkGrey,
+            "Run /config to configure provider access",
+            Color::DarkGrey,
+            left_width,
+            right_width,
+        ),
+        two_column_box_line(
+            "",
+            Color::DarkGrey,
+            "Run /memory for continuity and recall",
+            Color::DarkGrey,
+            left_width,
+            right_width,
+        ),
+        two_column_box_line(
+            "",
+            Color::DarkGrey,
+            "Run /compile to distill experience",
+            Color::DarkGrey,
+            left_width,
+            right_width,
+        ),
+        two_column_box_line(
+            "",
+            Color::DarkGrey,
+            &repeat('─', right_width),
+            Color::DarkGrey,
+            left_width,
+            right_width,
+        ),
+        two_column_box_line(
+            &center_text(&left_status, left_width),
+            Color::Grey,
+            "Recent activity",
+            Color::White,
+            left_width,
+            right_width,
+        ),
+        two_column_box_line(
+            &center_text(&cwd, left_width),
+            Color::DarkGrey,
+            &activity,
+            Color::DarkGrey,
+            left_width,
+            right_width,
+        ),
     ];
 
     let mut lines = Vec::with_capacity(rows.len() + 3);
-    lines.push(ScreenLine::colored(top, THEME_COLOR));
-    lines.extend(rows.into_iter().map(|row| ScreenLine::colored(row, Color::Grey)));
-    lines.push(ScreenLine::colored(bottom, THEME_COLOR));
+    lines.push(indented_line(ScreenLine::colored(top, THEME_COLOR)));
+    lines.extend(rows.into_iter().map(indented_line));
+    lines.push(indented_line(ScreenLine::colored(bottom, THEME_COLOR)));
     lines.push(ScreenLine::blank());
     lines
+}
+
+fn indented_line(mut line: ScreenLine) -> ScreenLine {
+    line.segments.insert(0, Segment::plain(" "));
+    line
 }
 
 fn titled_box_top(width: usize, title: &str) -> String {
@@ -269,14 +341,50 @@ fn titled_box_top(width: usize, title: &str) -> String {
     format!("╭{left_rule}{title}{right_rule}╮")
 }
 
-fn two_column_box_row(left: &str, right: &str, left_width: usize, right_width: usize) -> String {
-    format!("│ {} │ {} │", pad_right(left, left_width), pad_right(right, right_width))
+fn two_column_box_line(
+    left: &str,
+    left_color: Color,
+    right: &str,
+    right_color: Color,
+    left_width: usize,
+    right_width: usize,
+) -> ScreenLine {
+    let mut line = ScreenLine::blank();
+    line.push(Segment::colored("│", THEME_COLOR));
+    line.push(Segment::plain(" "));
+    push_padded_value(&mut line, left, left_width, left_color);
+    line.push(Segment::plain(" "));
+    line.push(Segment::colored("│", Color::DarkGrey));
+    line.push(Segment::plain(" "));
+    push_padded_value(&mut line, right, right_width, right_color);
+    line.push(Segment::plain(" "));
+    line.push(Segment::colored("│", THEME_COLOR));
+    line
 }
 
-fn pad_right(value: &str, width: usize) -> String {
+fn push_padded_value(line: &mut ScreenLine, value: &str, width: usize, color: Color) {
     let value = truncate(value, width);
-    let padding = width.saturating_sub(display_width(&value));
-    format!("{value}{}", repeat(' ', padding))
+    let leading_padding = value.chars().take_while(|ch| *ch == ' ').count();
+    let trimmed_start = value.trim_start();
+    let visible_width = display_width(trimmed_start);
+    let trailing_padding = width.saturating_sub(leading_padding + visible_width);
+
+    if leading_padding > 0 {
+        line.push(Segment::plain(repeat(' ', leading_padding)));
+    }
+    if !trimmed_start.is_empty() {
+        line.push(Segment::colored(trimmed_start.to_owned(), color));
+    }
+    if trailing_padding > 0 {
+        line.push(Segment::plain(repeat(' ', trailing_padding)));
+    }
+}
+
+fn center_text(value: &str, width: usize) -> String {
+    let value = truncate(value, width);
+    let used = display_width(&value);
+    let left_padding = width.saturating_sub(used) / 2;
+    format!("{}{}", repeat(' ', left_padding), value)
 }
 
 #[derive(Debug, Clone)]
@@ -1229,11 +1337,33 @@ fn display_width(text: &str) -> usize {
 }
 
 fn char_width(ch: char) -> usize {
-    if ch.is_ascii() {
+    if ch.is_ascii() || is_single_cell_symbol(ch) {
         1
     } else {
         2
     }
+}
+
+fn is_single_cell_symbol(ch: char) -> bool {
+    matches!(
+        ch,
+        '─' | '│'
+            | '╭'
+            | '╮'
+            | '╰'
+            | '╯'
+            | '├'
+            | '┤'
+            | '┬'
+            | '┴'
+            | '┼'
+            | '›'
+            | '·'
+            | '…'
+            | '⏎'
+            | '‼'
+            | '⌕'
+    )
 }
 
 fn repeat(ch: char, count: usize) -> String {
@@ -1304,5 +1434,6 @@ mod tests {
         assert!(rendered.contains("Welcome back!"));
         assert!(rendered.contains("Tips for getting started"));
         assert!(rendered.contains("gpt-5"));
+        assert!(!rendered.contains("─…"));
     }
 }
