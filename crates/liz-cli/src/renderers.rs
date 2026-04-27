@@ -14,7 +14,7 @@ use std::io::{self, Stdout, Write};
 const MIN_WIDTH: u16 = 60;
 /// Minimum vertical space reserved for the anchored terminal surface.
 pub const MIN_HEIGHT: u16 = 16;
-const THEME_COLOR: Color = Color::Rgb { r: 0x2b, g: 0xda, b: 0x7f };
+const THEME_COLOR: Color = Color::Rgb { r: 0x7a, g: 0x9a, b: 0x7e };
 
 /// Minimal renderer metadata for banner and smoke surfaces.
 #[derive(Debug, Clone, PartialEq, Eq)]
