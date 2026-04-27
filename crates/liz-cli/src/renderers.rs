@@ -181,14 +181,9 @@ fn live_region_lines(view_model: &ViewModel, width: u16, terminal_height: u16) -
     let mut lines = Vec::new();
 
     if let Some(streaming) = view_model.streaming_preview() {
-        let mut header = ScreenLine::blank();
-        header.push(Segment::colored("liz", THEME_COLOR));
-        header.push(Segment::plain("  "));
-        header.push(Segment::colored("responding", Color::DarkGrey));
-        lines.push(header);
-        for wrapped in wrap_text(streaming, width.saturating_sub(2) as usize).into_iter().take(6) {
-            lines.push(ScreenLine::plain(format!("  {wrapped}")));
-        }
+        let mut preview = Vec::new();
+        append_marked_block(&mut preview, "● ", THEME_COLOR, None, streaming, width as usize);
+        lines.extend(preview.into_iter().take(6));
         lines.push(ScreenLine::blank());
     }
 
@@ -1477,7 +1472,8 @@ mod tests {
         live_region_lines, sync_render_projection, welcome_block_lines, TerminalRenderState,
     };
     use crate::view_model::{TranscriptEntry, TranscriptEntryKind, ViewModel};
-    use liz_protocol::{ModelStatusResponse, ThreadId};
+    use liz_protocol::events::AssistantChunkEvent;
+    use liz_protocol::{EventId, ModelStatusResponse, ServerEvent, ServerEventPayload, ThreadId};
 
     #[test]
     fn common_prefix_keeps_existing_scrollback_entries_from_reprinting() {
@@ -1573,6 +1569,27 @@ mod tests {
         assert_eq!(lines[0].segments[1].text, "workspace.read");
         assert_eq!(lines[1].segments[0].text, "  ⎿ ");
         assert_eq!(lines[1].segments[1].text, "Read 42 lines");
+    }
+
+    #[test]
+    fn streaming_preview_uses_assistant_marker() {
+        let mut view_model = ViewModel::default();
+        view_model.apply_event(&ServerEvent {
+            event_id: EventId::new("event_chunk"),
+            thread_id: ThreadId::new("thread_stream"),
+            turn_id: None,
+            created_at: liz_protocol::Timestamp::new("2026-04-27T00:00:00Z"),
+            payload: ServerEventPayload::AssistantChunk(AssistantChunkEvent {
+                chunk: "Streaming response".to_owned(),
+                stream_id: None,
+                is_final: false,
+            }),
+        });
+
+        let lines = live_region_lines(&view_model, 80, 24);
+
+        assert_eq!(lines[0].segments[0].text, "● ");
+        assert_eq!(lines[0].segments[1].text, "Streaming response");
     }
 
     #[test]
