@@ -53,7 +53,7 @@ pub fn render_incremental(
     let (width, terminal_height) = terminal::size()?;
     let width = width.max(MIN_WIDTH);
     queue!(stdout, Hide)?;
-    clear_live_region(stdout, state.live_region_height)?;
+    clear_live_region(stdout, state.live_region_height, state.input_line_offset)?;
 
     if view_model.selected_thread_id() != state.active_thread_id {
         state.active_thread_id = view_model.selected_thread_id();
@@ -97,16 +97,21 @@ pub fn clear_incremental_live_region(
     stdout: &mut Stdout,
     state: &mut TerminalRenderState,
 ) -> io::Result<()> {
-    clear_live_region(stdout, state.live_region_height)?;
+    clear_live_region(stdout, state.live_region_height, state.input_line_offset)?;
     state.live_region_height = 0;
+    state.input_line_offset = 0;
     stdout.flush()
 }
 
-fn clear_live_region(stdout: &mut Stdout, live_region_height: u16) -> io::Result<()> {
+fn clear_live_region(
+    stdout: &mut Stdout,
+    live_region_height: u16,
+    input_line_offset: u16,
+) -> io::Result<()> {
     if live_region_height == 0 {
         return Ok(());
     }
-    queue!(stdout, MoveUp(live_region_height), MoveToColumn(0), Clear(ClearType::FromCursorDown))
+    queue!(stdout, MoveUp(input_line_offset), MoveToColumn(0), Clear(ClearType::FromCursorDown))
 }
 
 fn move_cursor_to_input(
@@ -119,12 +124,12 @@ fn move_cursor_to_input(
         return Ok(());
     }
     let rows_up = state.live_region_height.saturating_sub(state.input_line_offset);
-    let input = if view_model.input_buffer.is_empty() {
-        "Try \"how does <filepath> work?\""
+    let cursor_text = if view_model.input_buffer.is_empty() {
+        String::new()
     } else {
-        view_model.input_buffer.as_str()
+        view_model.input_buffer.replace('\n', "⏎ ")
     };
-    let cursor_x = display_width(&format!("❯ {input}")).min(width.saturating_sub(1) as usize);
+    let cursor_x = display_width(&format!("❯ {cursor_text}")).min(width.saturating_sub(1) as usize);
     queue!(stdout, MoveUp(rows_up), MoveToColumn(cursor_x as u16))
 }
 
@@ -212,12 +217,7 @@ fn composer_lines(view_model: &ViewModel, width: u16) -> Vec<ScreenLine> {
     let mut lines = Vec::new();
     let rule = repeat('─', width as usize);
     lines.push(ScreenLine::colored(rule.clone(), THEME_COLOR));
-    let input = if view_model.input_buffer.is_empty() {
-        "Try \"how does <filepath> work?\"".to_owned()
-    } else {
-        view_model.input_buffer.replace('\n', "⏎ ")
-    };
-    lines.push(ScreenLine::plain(truncate(&format!("❯ {input}"), width as usize)));
+    lines.push(composer_input_line(view_model, width as usize));
     lines.push(ScreenLine::colored(rule, THEME_COLOR));
 
     let left = if !view_model.status_line.is_empty() {
@@ -243,6 +243,24 @@ fn composer_lines(view_model: &ViewModel, width: u16) -> Vec<ScreenLine> {
     status.push(Segment::colored(right, Color::DarkGrey));
     lines.push(status);
     lines
+}
+
+fn composer_input_line(view_model: &ViewModel, width: usize) -> ScreenLine {
+    let mut line = ScreenLine::blank();
+    line.push(Segment::colored("❯ ".to_owned(), THEME_COLOR));
+    let input_width = width.saturating_sub(display_width("❯ "));
+    if view_model.input_buffer.is_empty() {
+        line.push(Segment::colored(
+            truncate("Try \"how does <filepath> work?\"", input_width),
+            Color::DarkGrey,
+        ));
+    } else {
+        line.push(Segment::colored(
+            truncate(&view_model.input_buffer.replace('\n', "⏎ "), input_width),
+            Color::White,
+        ));
+    }
+    line
 }
 
 fn welcome_block_lines(view_model: &ViewModel, width: usize) -> Vec<ScreenLine> {
@@ -1379,6 +1397,7 @@ fn is_single_cell_symbol(ch: char) -> bool {
             | '⏎'
             | '‼'
             | '⌕'
+            | '❯'
     )
 }
 
@@ -1389,7 +1408,8 @@ fn repeat(ch: char, count: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        common_transcript_prefix, input_line_offset, live_region_lines, welcome_block_lines,
+        char_width, common_transcript_prefix, input_line_offset, live_region_lines,
+        welcome_block_lines,
     };
     use crate::view_model::{TranscriptEntry, TranscriptEntryKind, ViewModel};
     use liz_protocol::ModelStatusResponse;
@@ -1438,6 +1458,20 @@ mod tests {
         let lines = live_region_lines(&view_model, 80, 24);
 
         assert_eq!(input_line_offset(&lines), 1);
+    }
+
+    #[test]
+    fn empty_composer_keeps_placeholder_gray_and_cursor_after_prompt() {
+        let mut view_model = ViewModel::default();
+        view_model.status_line = "ready".to_owned();
+
+        let lines = live_region_lines(&view_model, 80, 24);
+        let input_line = &lines[input_line_offset(&lines) as usize];
+
+        assert_eq!(char_width('❯'), 1);
+        assert_eq!(input_line.segments[0].text, "❯ ");
+        assert_eq!(input_line.segments[0].color, Some(super::THEME_COLOR));
+        assert_eq!(input_line.segments[1].color, Some(crossterm::style::Color::DarkGrey));
     }
 
     #[test]
