@@ -3,7 +3,7 @@
 use crate::view_model::{
     ConfigFocus, OverlayPanel, TranscriptEntry, TranscriptEntryKind, ViewModel,
 };
-use crossterm::cursor::{self, Hide, MoveTo, MoveToColumn, MoveUp, Show};
+use crossterm::cursor::{Hide, MoveTo, MoveToColumn, MoveUp, Show};
 use crossterm::queue;
 use crossterm::style::{Color, Print, ResetColor, SetForegroundColor};
 use crossterm::terminal::{self, Clear, ClearType};
@@ -34,8 +34,6 @@ pub struct TerminalRenderState {
     pub rendered_entries: Vec<TranscriptEntry>,
     /// Number of rows used by the live input/status region.
     pub live_region_height: u16,
-    /// Top row of the live input/status region.
-    pub live_region_y: Option<u16>,
 }
 
 impl Default for RendererSkeleton {
@@ -81,10 +79,8 @@ pub fn render_incremental(
     state.rendered_entries = view_model.transcript_entries.clone();
 
     let live_lines = live_region_lines(view_model, width, terminal_height);
-    let (_, live_y) = cursor::position()?;
-    write_live_region_lines(stdout, live_y, &live_lines)?;
+    write_scrollback_lines(stdout, &live_lines)?;
     state.live_region_height = live_lines.len() as u16;
-    state.live_region_y = Some(live_y);
 
     queue!(stdout, Show)?;
     stdout.flush()?;
@@ -98,7 +94,6 @@ pub fn clear_incremental_live_region(
 ) -> io::Result<()> {
     clear_live_region(stdout, state.live_region_height)?;
     state.live_region_height = 0;
-    state.live_region_y = None;
     stdout.flush()
 }
 
@@ -130,16 +125,6 @@ fn write_line_segments(stdout: &mut Stdout, line: &ScreenLine) -> io::Result<()>
             queue!(stdout, ResetColor, Print(&segment.text))?;
         }
     }
-    Ok(())
-}
-
-fn write_live_region_lines(stdout: &mut Stdout, y: u16, lines: &[ScreenLine]) -> io::Result<()> {
-    for (offset, line) in lines.iter().enumerate() {
-        let row = y.saturating_add(offset as u16);
-        queue!(stdout, MoveTo(0, row), Clear(ClearType::CurrentLine))?;
-        write_line_segments(stdout, line)?;
-    }
-    queue!(stdout, MoveTo(0, y.saturating_add(lines.len() as u16)))?;
     Ok(())
 }
 
