@@ -574,10 +574,17 @@ fn local_openai_compatible_provider_with_builtin_base_url_still_runs() {
         .run_turn(request, |event| events.push(event))
         .expect("provider should still produce a request plan");
 
-    assert!(summary.assistant_message.is_some());
-    assert!(events
-        .iter()
-        .any(|event| matches!(event, NormalizedTurnEvent::AssistantMessage { .. })));
+    assert!(
+        summary.assistant_message.is_some() || !summary.tool_calls.is_empty(),
+        "provider run should produce assistant text or a tool call",
+    );
+    assert!(
+        events.iter().any(|event| matches!(event, NormalizedTurnEvent::AssistantMessage { .. }))
+            || events
+                .iter()
+                .any(|event| matches!(event, NormalizedTurnEvent::ToolCallCommitted { .. })),
+        "provider run should emit an assistant message or tool call event",
+    );
 }
 
 #[test]

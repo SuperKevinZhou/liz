@@ -10,7 +10,7 @@ use liz_protocol::{
     ServerTransportMessage,
 };
 use std::net::TcpStream;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tempfile::TempDir;
 use tungstenite::{client, Message, WebSocket};
 
@@ -86,14 +86,30 @@ struct TestWebSocketClient {
 
 impl TestWebSocketClient {
     fn connect(url: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let stream = TcpStream::connect(
-            url.trim_start_matches("ws://")
-                .parse::<std::net::SocketAddr>()
-                .expect("websocket test url should be a socket address"),
-        )
-        .expect("tcp stream should connect");
-        let (socket, _) = client(url, stream)?;
-        Ok(Self { socket })
+        let address = url
+            .trim_start_matches("ws://")
+            .parse::<std::net::SocketAddr>()
+            .expect("websocket test url should be a socket address");
+        let deadline = Instant::now() + Duration::from_secs(2);
+
+        loop {
+            let attempt_error = match TcpStream::connect(address) {
+                Ok(stream) => match client(url, stream) {
+                    Ok((socket, _)) => return Ok(Self { socket }),
+                    Err(error) => error.to_string(),
+                },
+                Err(error) => error.to_string(),
+            };
+
+            if Instant::now() >= deadline {
+                return Err(format!(
+                    "websocket client failed to connect to {url}: {}",
+                    attempt_error
+                )
+                .into());
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
     }
 
     fn send_request(

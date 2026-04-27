@@ -215,7 +215,7 @@ fn execute_live_http(
         response.get("content").and_then(|value| value.as_array()).into_iter().flatten().enumerate()
     {
         match item.get("type").and_then(|value| value.as_str()) {
-            Some("text") => {
+            Some("text") | None => {
                 if let Some(text) = item.get("text").and_then(|value| value.as_str()) {
                     assistant_parts.push(text.to_owned());
                 }
