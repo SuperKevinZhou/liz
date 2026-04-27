@@ -1,10 +1,13 @@
 //! Crossterm renderers for the CLI chat shell.
 
-use crate::view_model::{ConfigFocus, OverlayPanel, TranscriptEntryKind, ViewModel};
-use crossterm::cursor::{Hide, MoveTo, Show};
+use crate::view_model::{
+    ConfigFocus, OverlayPanel, TranscriptEntry, TranscriptEntryKind, ViewModel,
+};
+use crossterm::cursor::{Hide, MoveTo, MoveToColumn, MoveUp, Show};
 use crossterm::queue;
 use crossterm::style::{Color, Print, ResetColor, SetForegroundColor};
 use crossterm::terminal::{self, Clear, ClearType};
+use liz_protocol::ThreadId;
 use std::env;
 use std::io::{self, Stdout, Write};
 
@@ -20,10 +23,180 @@ pub struct RendererSkeleton {
     pub renderer_stack: &'static str,
 }
 
+/// State for the append-style terminal renderer.
+#[derive(Debug, Clone, Default)]
+pub struct TerminalRenderState {
+    /// The thread currently being projected into scrollback.
+    pub active_thread_id: Option<ThreadId>,
+    /// Transcript entries already written into scrollback for the active projection.
+    pub rendered_entries: Vec<TranscriptEntry>,
+    /// Number of rows used by the live input/status region.
+    pub live_region_height: u16,
+}
+
 impl Default for RendererSkeleton {
     fn default() -> Self {
         Self { renderer_stack: "crossterm+transcript+promptbar" }
     }
+}
+
+/// Appends new transcript entries to scrollback and redraws only the live input region.
+pub fn render_incremental(
+    stdout: &mut Stdout,
+    view_model: &ViewModel,
+    state: &mut TerminalRenderState,
+) -> io::Result<u16> {
+    let (width, terminal_height) = terminal::size()?;
+    let width = width.max(MIN_WIDTH);
+    queue!(stdout, Hide)?;
+    clear_live_region(stdout, state.live_region_height)?;
+
+    if view_model.selected_thread_id() != state.active_thread_id {
+        state.active_thread_id = view_model.selected_thread_id();
+        state.rendered_entries.clear();
+    }
+
+    let common_prefix =
+        common_transcript_prefix(&state.rendered_entries, &view_model.transcript_entries);
+    for entry in view_model.transcript_entries.iter().skip(common_prefix) {
+        let mut lines = Vec::new();
+        append_transcript_entry(&mut lines, entry.kind, &entry.body, width as usize);
+        lines.push(ScreenLine::blank());
+        write_scrollback_lines(stdout, &lines)?;
+    }
+    state.rendered_entries = view_model.transcript_entries.clone();
+
+    let live_lines = live_region_lines(view_model, width, terminal_height);
+    write_scrollback_lines(stdout, &live_lines)?;
+    state.live_region_height = live_lines.len() as u16;
+
+    queue!(stdout, Show)?;
+    stdout.flush()?;
+    Ok(state.live_region_height)
+}
+
+/// Clears the currently drawn live input region and leaves scrollback intact.
+pub fn clear_incremental_live_region(
+    stdout: &mut Stdout,
+    state: &mut TerminalRenderState,
+) -> io::Result<()> {
+    clear_live_region(stdout, state.live_region_height)?;
+    state.live_region_height = 0;
+    stdout.flush()
+}
+
+fn clear_live_region(stdout: &mut Stdout, live_region_height: u16) -> io::Result<()> {
+    if live_region_height == 0 {
+        return Ok(());
+    }
+    queue!(stdout, MoveUp(live_region_height), MoveToColumn(0), Clear(ClearType::FromCursorDown))
+}
+
+fn common_transcript_prefix(left: &[TranscriptEntry], right: &[TranscriptEntry]) -> usize {
+    left.iter().zip(right.iter()).take_while(|(left, right)| left == right).count()
+}
+
+fn write_scrollback_lines(stdout: &mut Stdout, lines: &[ScreenLine]) -> io::Result<()> {
+    for line in lines {
+        queue!(stdout, MoveToColumn(0), Clear(ClearType::CurrentLine))?;
+        write_line_segments(stdout, line)?;
+        queue!(stdout, Print("\r\n"))?;
+    }
+    Ok(())
+}
+
+fn write_line_segments(stdout: &mut Stdout, line: &ScreenLine) -> io::Result<()> {
+    for segment in &line.segments {
+        let color = segment.color.unwrap_or(Color::White);
+        queue!(stdout, SetForegroundColor(color), Print(&segment.text), ResetColor)?;
+    }
+    Ok(())
+}
+
+fn live_region_lines(view_model: &ViewModel, width: u16, terminal_height: u16) -> Vec<ScreenLine> {
+    let mut lines = Vec::new();
+
+    if let Some(streaming) = view_model.streaming_preview() {
+        let mut header = ScreenLine::blank();
+        header.push(Segment::colored("liz", THEME_COLOR));
+        header.push(Segment::plain("  "));
+        header.push(Segment::colored("responding", Color::DarkGrey));
+        lines.push(header);
+        for wrapped in wrap_text(streaming, width.saturating_sub(2) as usize).into_iter().take(6) {
+            lines.push(ScreenLine::plain(format!("  {wrapped}")));
+        }
+        lines.push(ScreenLine::blank());
+    }
+
+    if let Some(panel) = view_model.active_overlay {
+        match panel {
+            OverlayPanel::CommandPalette => {
+                lines.push(ScreenLine::colored("Commands", Color::White));
+                lines.extend(command_palette_lines(view_model, width.saturating_sub(4) as usize));
+                lines.push(ScreenLine::blank());
+            }
+            panel => {
+                lines.push(ScreenLine::colored(slash_page_header(panel), Color::White));
+                let budget = terminal_height.saturating_sub(6).clamp(3, 12) as usize;
+                lines.extend(
+                    overlay_lines(panel, view_model, width.saturating_sub(4) as usize)
+                        .into_iter()
+                        .take(budget),
+                );
+                lines.push(ScreenLine::blank());
+            }
+        }
+    }
+
+    if !view_model.pending_approvals.is_empty() {
+        lines.push(ScreenLine::colored(
+            format!(
+                "Approval required: Enter approves once, Esc denies · {} pending",
+                view_model.pending_approval_count()
+            ),
+            Color::Yellow,
+        ));
+    }
+
+    lines.extend(composer_lines(view_model, width));
+    lines
+}
+
+fn composer_lines(view_model: &ViewModel, width: u16) -> Vec<ScreenLine> {
+    let mut lines = Vec::new();
+    let rule = repeat('─', width as usize);
+    lines.push(ScreenLine::colored(rule.clone(), Color::DarkGrey));
+    let input = if view_model.input_buffer.is_empty() {
+        "Try \"how does <filepath> work?\"".to_owned()
+    } else {
+        view_model.input_buffer.replace('\n', "⏎ ")
+    };
+    lines.push(ScreenLine::plain(truncate(&format!("> {input}"), width as usize)));
+    lines.push(ScreenLine::colored(rule, Color::DarkGrey));
+
+    let left = if !view_model.status_line.is_empty() {
+        view_model.status_line.as_str()
+    } else {
+        "? for shortcuts"
+    };
+    let right = if view_model.slash_mode {
+        "/ commands"
+    } else {
+        view_model
+            .model_status
+            .as_ref()
+            .and_then(|status| status.model_id.as_deref())
+            .unwrap_or("/model")
+    };
+    let left_text = truncate(left, width.saturating_sub(2) as usize);
+    let mut status = ScreenLine::colored(left_text.clone(), Color::DarkGrey);
+    let right = truncate(right, width.saturating_sub(4) as usize);
+    let used = display_width(&left_text).min(width as usize);
+    let padding = (width as usize).saturating_sub(used + display_width(&right));
+    status.push(Segment::colored(repeat(' ', padding), Color::DarkGrey));
+    status.push(Segment::colored(right, Color::DarkGrey));
+    lines.push(status);
+    lines
 }
 
 #[derive(Debug, Clone)]
@@ -985,4 +1158,45 @@ fn char_width(ch: char) -> usize {
 
 fn repeat(ch: char, count: usize) -> String {
     std::iter::repeat_n(ch, count).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{common_transcript_prefix, live_region_lines};
+    use crate::view_model::{TranscriptEntry, TranscriptEntryKind, ViewModel};
+
+    #[test]
+    fn common_prefix_keeps_existing_scrollback_entries_from_reprinting() {
+        let existing = vec![
+            TranscriptEntry { kind: TranscriptEntryKind::User, body: "hello".to_owned() },
+            TranscriptEntry { kind: TranscriptEntryKind::Assistant, body: "hi".to_owned() },
+        ];
+        let next = vec![
+            TranscriptEntry { kind: TranscriptEntryKind::User, body: "hello".to_owned() },
+            TranscriptEntry { kind: TranscriptEntryKind::Assistant, body: "hi".to_owned() },
+            TranscriptEntry {
+                kind: TranscriptEntryKind::Tool,
+                body: "workspace.read ok".to_owned(),
+            },
+        ];
+
+        assert_eq!(common_transcript_prefix(&existing, &next), 2);
+    }
+
+    #[test]
+    fn live_region_contains_composer_without_transcript_entries() {
+        let mut view_model = ViewModel::default();
+        view_model.status_line = "ready".to_owned();
+        view_model.input_buffer = "check src/main.rs".to_owned();
+
+        let lines = live_region_lines(&view_model, 80, 24);
+        let rendered = lines
+            .iter()
+            .flat_map(|line| line.segments.iter().map(|segment| segment.text.as_str()))
+            .collect::<Vec<_>>()
+            .join("");
+
+        assert!(rendered.contains("> check src/main.rs"));
+        assert!(rendered.contains("ready"));
+    }
 }
