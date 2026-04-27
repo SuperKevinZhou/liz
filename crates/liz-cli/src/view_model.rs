@@ -15,7 +15,7 @@ use liz_protocol::{
     RecentConversationWakeupView, ResponsePayload, ResumeSummary, ServerEvent, ServerEventPayload,
     ServerResponseEnvelope, Thread, ThreadId, ThreadStatus,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 const BUILTIN_COMMANDS: [SlashCommandSpec; 16] = [
     SlashCommandSpec::new("help", "Open command reference", "/help"),
@@ -404,7 +404,6 @@ pub struct ViewModel {
     pub slash_mode: bool,
     pending_thread_start_entries: Vec<TranscriptEntry>,
     assistant_streaming: Option<String>,
-    surfaced_tool_updates: BTreeSet<String>,
 }
 
 impl ViewModel {
@@ -796,56 +795,28 @@ impl ViewModel {
             ServerEventPayload::ToolCallStarted(ToolCallStartedEvent {
                 tool_name,
                 summary,
-                call_id,
                 ..
             }) => {
-                self.surfaced_tool_updates.remove(call_id);
-                let timeline =
-                    format!("{tool_name}: started · {}", compact_tool_text(summary, 120));
-                self.push_thread_entry(
-                    event.thread_id.clone(),
-                    TranscriptEntryKind::Tool,
-                    timeline,
-                );
-                self.status_line = format!("{tool_name}: {}", compact_tool_text(summary, 80));
+                self.status_line = format!("{tool_name}: {summary}");
             }
             ServerEventPayload::ToolCallUpdated(ToolCallUpdatedEvent {
-                call_id,
                 tool_name,
                 delta_summary,
                 preview,
                 ..
             }) => {
-                let summary = format!(
-                    "{}{}",
+                self.status_line = format!(
+                    "{tool_name}: {}{}",
                     delta_summary,
                     preview.as_ref().map(|value| format!(" ({value})")).unwrap_or_default()
                 );
-                let compact = compact_tool_text(&summary, 120);
-                if self.surfaced_tool_updates.insert(call_id.clone()) {
-                    self.push_thread_entry(
-                        event.thread_id.clone(),
-                        TranscriptEntryKind::Tool,
-                        format!("{tool_name}: updated · {compact}"),
-                    );
-                }
-                self.status_line = format!("{tool_name}: {}", compact_tool_text(&summary, 80));
             }
             ServerEventPayload::ToolCallCommitted(ToolCallCommittedEvent {
-                call_id,
                 tool_name,
                 arguments_summary,
                 ..
             }) => {
-                self.surfaced_tool_updates.remove(call_id);
-                let compact = compact_tool_text(arguments_summary, 120);
-                self.push_thread_entry(
-                    event.thread_id.clone(),
-                    TranscriptEntryKind::Tool,
-                    format!("{tool_name}: committed · {compact}"),
-                );
-                self.status_line =
-                    format!("{tool_name}: {}", compact_tool_text(arguments_summary, 80));
+                self.status_line = format!("{tool_name}: {arguments_summary}");
             }
             ServerEventPayload::ToolCompleted(ToolCompletedEvent {
                 tool_name, summary, ..
@@ -1061,17 +1032,6 @@ fn push_deduped_entry(entries: &mut Vec<TranscriptEntry>, entry: TranscriptEntry
         return;
     }
     entries.push(entry);
-}
-
-fn compact_tool_text(value: &str, max_chars: usize) -> String {
-    let trimmed = value.split_whitespace().collect::<Vec<_>>().join(" ");
-    if trimmed.chars().count() <= max_chars {
-        return trimmed;
-    }
-
-    let mut compact = trimmed.chars().take(max_chars.saturating_sub(1)).collect::<String>();
-    compact.push('…');
-    compact
 }
 
 fn slash_suggestions(query: &str) -> Vec<SlashCommandSuggestion> {
