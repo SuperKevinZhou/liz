@@ -941,6 +941,15 @@ fn status_lines(view_model: &ViewModel) -> Vec<ScreenLine> {
     } else {
         lines.push(ScreenLine::colored("Provider status has not loaded yet.", Color::DarkGrey));
     }
+    lines.push(ScreenLine::blank());
+    lines.push(ScreenLine::colored("Runtime execution", Color::White));
+    if let Some(sandbox) = &view_model.runtime_sandbox {
+        lines.push(ScreenLine::plain(format!("Sandbox  {}", sandbox.mode.as_str())));
+        lines.push(ScreenLine::plain(format!("Backend   {}", sandbox.backend.as_str())));
+        lines.push(ScreenLine::plain(format!("Network   {}", sandbox.network_access.as_str())));
+    } else {
+        lines.push(ScreenLine::colored("Runtime config has not loaded yet.", Color::DarkGrey));
+    }
     lines
 }
 
@@ -993,6 +1002,14 @@ fn status_page_lines(view_model: &ViewModel) -> Vec<ScreenLine> {
     } else {
         lines.push(setting_row("Auth token:", "not loaded", false));
         lines.push(setting_row("Model:", "not loaded", false));
+    }
+    lines.push(ScreenLine::blank());
+    if let Some(sandbox) = &view_model.runtime_sandbox {
+        lines.push(setting_row("Sandbox:", sandbox.mode.as_str(), false));
+        lines.push(setting_row("Sandbox backend:", sandbox.backend.as_str(), false));
+        lines.push(setting_row("Sandbox network:", sandbox.network_access.as_str(), false));
+    } else {
+        lines.push(setting_row("Sandbox:", "not loaded", false));
     }
     lines
 }

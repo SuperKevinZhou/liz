@@ -12,12 +12,13 @@ use liz_protocol::events::{
 use liz_protocol::{
     ApprovalRequest, ArtifactKind, MemoryEvidenceView, MemorySearchHit, MemorySessionEntry,
     MemorySessionView, MemoryTopicSummary, MemoryWakeup, ModelStatusResponse, ProviderAuthProfile,
-    RecentConversationWakeupView, ResponsePayload, ResumeSummary, ServerEvent, ServerEventPayload,
-    ServerResponseEnvelope, Thread, ThreadId, ThreadStatus,
+    RecentConversationWakeupView, ResponsePayload, ResumeSummary, RuntimeConfigResponse,
+    ServerEvent, ServerEventPayload, ServerResponseEnvelope, ShellSandboxSummary, Thread, ThreadId,
+    ThreadStatus,
 };
 use std::collections::BTreeMap;
 
-const BUILTIN_COMMANDS: [SlashCommandSpec; 16] = [
+const BUILTIN_COMMANDS: [SlashCommandSpec; 17] = [
     SlashCommandSpec::new("help", "Open command reference", "/help"),
     SlashCommandSpec::new("config", "Open config panel", "/config"),
     SlashCommandSpec::new("status", "Open runtime status", "/status"),
@@ -29,6 +30,11 @@ const BUILTIN_COMMANDS: [SlashCommandSpec; 16] = [
     SlashCommandSpec::new("search", "Search memory", "/search"),
     SlashCommandSpec::new("wakeup", "Refresh wake-up", "/wakeup"),
     SlashCommandSpec::new("compile", "Compile memory for this conversation", "/compile"),
+    SlashCommandSpec::new(
+        "sandbox",
+        "Set shell sandbox mode",
+        "/sandbox <read-only|workspace-write|danger-full-access|external-sandbox>",
+    ),
     SlashCommandSpec::new("approve", "Approve the current request", "/approve"),
     SlashCommandSpec::new("deny", "Deny the current request", "/deny"),
     SlashCommandSpec::new("cancel", "Cancel the running turn", "/cancel"),
@@ -386,6 +392,8 @@ pub struct ViewModel {
     pub dreaming_summaries: Vec<String>,
     /// The latest provider status snapshot returned by the server.
     pub model_status: Option<ModelStatusResponse>,
+    /// The latest runtime execution configuration returned by the server.
+    pub runtime_sandbox: Option<ShellSandboxSummary>,
     /// Persisted provider auth profiles exposed by the server.
     pub auth_profiles: Vec<ProviderAuthProfile>,
     /// The one-line status bar message.
@@ -701,6 +709,9 @@ impl ViewModel {
                     self.model_status = Some(response.clone());
                     self.apply_model_status(response);
                 }
+                ResponsePayload::RuntimeConfig(response) => {
+                    self.apply_runtime_config(response);
+                }
                 ResponsePayload::ProviderAuthList(response) => {
                     self.auth_profiles = response.profiles.clone();
                     self.config_draft.auth_profiles = response.profiles.clone();
@@ -913,6 +924,15 @@ impl ViewModel {
         } else {
             format!("{display_name} needs configuration")
         };
+    }
+
+    fn apply_runtime_config(&mut self, response: &RuntimeConfigResponse) {
+        self.runtime_sandbox = Some(response.sandbox.clone());
+        self.status_line = format!(
+            "Shell sandbox {} via {}",
+            response.sandbox.mode.as_str(),
+            response.sandbox.backend.as_str()
+        );
     }
 
     fn push_entry_for_selected_thread(&mut self, kind: TranscriptEntryKind, body: String) {

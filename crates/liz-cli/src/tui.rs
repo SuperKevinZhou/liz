@@ -12,13 +12,14 @@ use crossterm::{execute, queue};
 use liz_protocol::requests::{
     ClientRequest, ClientRequestEnvelope, MemoryCompileNowRequest, MemoryListTopicsRequest,
     MemoryOpenEvidenceRequest, MemoryOpenSessionRequest, MemoryReadWakeupRequest,
-    MemorySearchRequest, ModelStatusRequest, ProviderAuthListRequest, ThreadForkRequest,
-    ThreadListRequest, ThreadResumeRequest, ThreadStartRequest, TurnCancelRequest, TurnInputKind,
-    TurnStartRequest,
+    MemorySearchRequest, ModelStatusRequest, ProviderAuthListRequest, RuntimeConfigGetRequest,
+    RuntimeConfigUpdateRequest, ThreadForkRequest, ThreadListRequest, ThreadResumeRequest,
+    ThreadStartRequest, TurnCancelRequest, TurnInputKind, TurnStartRequest,
 };
 use liz_protocol::{
     ApprovalDecision, MemorySearchHit, MemorySearchHitKind, MemorySearchMode, RequestId,
-    ResponsePayload, ServerEventPayload, ServerResponseEnvelope, ThreadId,
+    ResponsePayload, SandboxMode, SandboxNetworkAccess, ServerEventPayload, ServerResponseEnvelope,
+    ShellSandboxRequest, ThreadId,
 };
 use std::io::{self, Stdout, Write};
 use std::time::Duration;
@@ -125,6 +126,7 @@ impl CliApp {
     fn bootstrap(&mut self) -> Result<(), AppClientError> {
         self.refresh_threads()?;
         self.send_request(ClientRequest::ModelStatus(ModelStatusRequest {}))?;
+        self.send_request(ClientRequest::RuntimeConfigGet(RuntimeConfigGetRequest {}))?;
         self.send_request(ClientRequest::ProviderAuthList(ProviderAuthListRequest {
             provider_id: None,
         }))?;
@@ -331,6 +333,7 @@ impl CliApp {
             "/config" | "/settings" => self.open_config_overlay()?,
             "/status" => {
                 self.send_request(ClientRequest::ModelStatus(ModelStatusRequest {}))?;
+                self.send_request(ClientRequest::RuntimeConfigGet(RuntimeConfigGetRequest {}))?;
                 self.view_model.open_overlay(OverlayPanel::Status);
                 self.view_model.status_line = "Status opened".to_owned();
             }
@@ -346,6 +349,7 @@ impl CliApp {
             "/search" => self.search_memory(argument)?,
             "/wakeup" => self.request_selected_wakeup()?,
             "/compile" => self.compile_selected_thread_memory()?,
+            "/sandbox" => self.configure_sandbox(argument)?,
             "/approve" => self.respond_to_first_approval(ApprovalDecision::ApproveOnce)?,
             "/deny" => self.respond_to_first_approval(ApprovalDecision::Deny)?,
             "/cancel" => self.cancel_selected_turn()?,
@@ -684,6 +688,32 @@ impl CliApp {
         Ok(())
     }
 
+    fn configure_sandbox(&mut self, argument: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let raw_mode = argument.split_whitespace().next().unwrap_or_default();
+        if raw_mode.is_empty() {
+            self.send_request(ClientRequest::RuntimeConfigGet(RuntimeConfigGetRequest {}))?;
+            self.view_model.status_line =
+                "Use /sandbox <read-only|workspace-write|danger-full-access|external-sandbox>"
+                    .to_owned();
+            return Ok(());
+        }
+
+        let Some(mode) = parse_sandbox_mode(raw_mode) else {
+            self.view_model.status_line = format!("Unknown sandbox mode {raw_mode}");
+            return Ok(());
+        };
+        let network_access = if matches!(mode, SandboxMode::DangerFullAccess) {
+            SandboxNetworkAccess::Enabled
+        } else {
+            SandboxNetworkAccess::Restricted
+        };
+        self.send_request(ClientRequest::RuntimeConfigUpdate(RuntimeConfigUpdateRequest {
+            sandbox: Some(ShellSandboxRequest { mode, network_access }),
+        }))?;
+        self.view_model.status_line = format!("Setting shell sandbox to {}", mode.as_str());
+        Ok(())
+    }
+
     fn respond_to_first_approval(
         &mut self,
         decision: ApprovalDecision,
@@ -715,6 +745,16 @@ fn save_override(
 ) {
     if !value.is_empty() {
         config.upsert_provider(provider_id, field, value.to_owned());
+    }
+}
+
+fn parse_sandbox_mode(value: &str) -> Option<SandboxMode> {
+    match value.to_ascii_lowercase().as_str() {
+        "read-only" | "readonly" => Some(SandboxMode::ReadOnly),
+        "workspace-write" | "workspace" => Some(SandboxMode::WorkspaceWrite),
+        "danger-full-access" | "danger" | "full-access" => Some(SandboxMode::DangerFullAccess),
+        "external-sandbox" | "external" => Some(SandboxMode::ExternalSandbox),
+        _ => None,
     }
 }
 
@@ -835,6 +875,47 @@ mod tests {
             .expect("enter should be handled");
 
         assert!(app.should_exit);
+    }
+
+    #[test]
+    fn sandbox_command_updates_runtime_config() {
+        let (request_tx, request_rx) = mpsc::channel();
+        let (_response_tx, response_rx) = mpsc::channel();
+        let (_event_tx, event_rx) = mpsc::channel();
+        let client = WebSocketAppClient::new(request_tx, response_rx, event_rx);
+        let mut app = CliApp::new(client, DEFAULT_SERVER_URL.to_owned());
+
+        app.view_model.input_buffer = "/sandbox danger-full-access".to_owned();
+        app.view_model.refresh_composer_affordances();
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()))
+            .expect("sandbox command should be handled");
+
+        let request = request_rx.recv().expect("runtime config request should be sent");
+        match request.request {
+            ClientRequest::RuntimeConfigUpdate(update) => {
+                let sandbox = update.sandbox.expect("sandbox update should be present");
+                assert_eq!(sandbox.mode, SandboxMode::DangerFullAccess);
+                assert_eq!(sandbox.network_access, SandboxNetworkAccess::Enabled);
+            }
+            other => panic!("unexpected request: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sandbox_command_without_mode_refreshes_runtime_config() {
+        let (request_tx, request_rx) = mpsc::channel();
+        let (_response_tx, response_rx) = mpsc::channel();
+        let (_event_tx, event_rx) = mpsc::channel();
+        let client = WebSocketAppClient::new(request_tx, response_rx, event_rx);
+        let mut app = CliApp::new(client, DEFAULT_SERVER_URL.to_owned());
+
+        app.view_model.input_buffer = "/sandbox".to_owned();
+        app.view_model.refresh_composer_affordances();
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()))
+            .expect("sandbox command should be handled");
+
+        let request = request_rx.recv().expect("runtime config request should be sent");
+        assert!(matches!(request.request, ClientRequest::RuntimeConfigGet(_)));
     }
 
     #[test]
