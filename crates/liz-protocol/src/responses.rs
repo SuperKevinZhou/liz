@@ -12,6 +12,7 @@ use crate::memory::{
     MemorySessionView, MemoryTopicSummary, MemoryWakeup, RecentConversationWakeupView,
     ResumeSummary,
 };
+use crate::sandbox::ShellSandboxSummary;
 use crate::thread::Thread;
 use crate::tool::ToolCallResponse;
 use crate::turn::Turn;
@@ -98,6 +99,9 @@ pub enum ResponsePayload {
     /// Acknowledges `model/status`.
     #[serde(rename = "model/status")]
     ModelStatus(ModelStatusResponse),
+    /// Acknowledges `runtime/config_get` and `runtime/config_update`.
+    #[serde(rename = "runtime/config")]
+    RuntimeConfig(RuntimeConfigResponse),
     /// Acknowledges `provider_auth/upsert`.
     #[serde(rename = "provider_auth/upsert")]
     ProviderAuthUpsert(ProviderAuthUpsertResponse),
@@ -248,6 +252,13 @@ pub struct ModelStatusResponse {
     pub credential_hints: Vec<String>,
     /// User-visible readiness notes.
     pub notes: Vec<String>,
+}
+
+/// The response payload for runtime execution configuration requests.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeConfigResponse {
+    /// The default shell sandbox used when a tool call does not provide an override.
+    pub sandbox: ShellSandboxSummary,
 }
 
 /// The response payload for `provider_auth/upsert`.

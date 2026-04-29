@@ -5,6 +5,7 @@ use crate::auth::ProviderAuthProfile;
 use crate::checkpoint::CheckpointScope;
 use crate::ids::{ApprovalId, ArtifactId, CheckpointId, MemoryFactId, RequestId, ThreadId, TurnId};
 use crate::memory::{MemorySearchMode, MemoryTopicStatus};
+use crate::sandbox::ShellSandboxRequest;
 use crate::tool::ToolCallRequest;
 use serde::{Deserialize, Serialize};
 
@@ -67,6 +68,12 @@ pub enum ClientRequest {
     /// Reads the effective model/provider readiness status.
     #[serde(rename = "model/status")]
     ModelStatus(ModelStatusRequest),
+    /// Reads runtime execution settings.
+    #[serde(rename = "runtime/config_get")]
+    RuntimeConfigGet(RuntimeConfigGetRequest),
+    /// Updates runtime execution settings for the current app-server process.
+    #[serde(rename = "runtime/config_update")]
+    RuntimeConfigUpdate(RuntimeConfigUpdateRequest),
     /// Creates or replaces a provider auth profile.
     #[serde(rename = "provider_auth/upsert")]
     ProviderAuthUpsert(ProviderAuthUpsertRequest),
@@ -241,6 +248,17 @@ pub struct ProviderAuthListRequest {
 /// Reads effective model/provider readiness without exposing credentials.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelStatusRequest {}
+
+/// Reads the current runtime execution configuration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeConfigGetRequest {}
+
+/// Updates runtime execution configuration for new tool calls.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeConfigUpdateRequest {
+    /// The default shell sandbox to apply when tool calls do not provide an override.
+    pub sandbox: Option<ShellSandboxRequest>,
+}
 
 /// Creates or replaces a provider auth profile.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

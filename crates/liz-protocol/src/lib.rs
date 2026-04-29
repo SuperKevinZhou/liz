@@ -52,8 +52,9 @@ pub use requests::{
     MemoryOpenEvidenceRequest, MemoryOpenSessionRequest, MemoryReadWakeupRequest,
     MemorySearchRequest, ModelStatusRequest, OpenAiCodexOAuthCompleteRequest,
     OpenAiCodexOAuthStartRequest, ProviderAuthDeleteRequest, ProviderAuthListRequest,
-    ProviderAuthUpsertRequest, ThreadForkRequest, ThreadListRequest, ThreadResumeRequest,
-    ThreadRollbackRequest, ThreadStartRequest, TurnCancelRequest, TurnInputKind, TurnStartRequest,
+    ProviderAuthUpsertRequest, RuntimeConfigGetRequest, RuntimeConfigUpdateRequest,
+    ThreadForkRequest, ThreadListRequest, ThreadResumeRequest, ThreadRollbackRequest,
+    ThreadStartRequest, TurnCancelRequest, TurnInputKind, TurnStartRequest,
 };
 pub use responses::{
     ApprovalRespondResponse, ErrorResponseEnvelope, GitHubCopilotDevicePollResponse,
@@ -62,9 +63,10 @@ pub use responses::{
     MemoryOpenEvidenceResponse, MemoryOpenSessionResponse, MemoryReadWakeupResponse,
     MemorySearchResponse, ModelStatusResponse, OpenAiCodexOAuthCompleteResponse,
     OpenAiCodexOAuthStartResponse, ProviderAuthDeleteResponse, ProviderAuthListResponse,
-    ProviderAuthUpsertResponse, ResponseError, ResponsePayload, ServerResponseEnvelope,
-    SuccessResponseEnvelope, ThreadForkResponse, ThreadListResponse, ThreadResumeResponse,
-    ThreadRollbackResponse, ThreadStartResponse, TurnCancelResponse, TurnStartResponse,
+    ProviderAuthUpsertResponse, ResponseError, ResponsePayload, RuntimeConfigResponse,
+    ServerResponseEnvelope, SuccessResponseEnvelope, ThreadForkResponse, ThreadListResponse,
+    ThreadResumeResponse, ThreadRollbackResponse, ThreadStartResponse, TurnCancelResponse,
+    TurnStartResponse,
 };
 pub use sandbox::{
     SandboxBackendKind, SandboxMode, SandboxNetworkAccess, ShellSandboxRequest, ShellSandboxSummary,
