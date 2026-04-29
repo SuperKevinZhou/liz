@@ -68,6 +68,12 @@ pub fn handle_request(
             "model_status_requires_server",
             "model/status must be handled by the app server",
         )),
+        ClientRequest::RuntimeConfigGet(_) | ClientRequest::RuntimeConfigUpdate(_) => {
+            Err(RuntimeError::unsupported(
+                "runtime_config_requires_server",
+                "runtime/config must be handled by the app server",
+            ))
+        }
         ClientRequest::ProviderAuthUpsert(request) => runtime
             .upsert_provider_auth_profile(request)
             .map(|response| (ResponsePayload::ProviderAuthUpsert(response), Vec::new())),

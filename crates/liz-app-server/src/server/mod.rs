@@ -88,6 +88,27 @@ impl AppServer {
                 },
             ));
         }
+        if matches!(envelope.request, liz_protocol::ClientRequest::RuntimeConfigGet(_)) {
+            return ServerResponseEnvelope::Success(Box::new(
+                liz_protocol::SuccessResponseEnvelope {
+                    ok: true,
+                    request_id: envelope.request_id,
+                    response: liz_protocol::ResponsePayload::RuntimeConfig(self.runtime_config()),
+                },
+            ));
+        }
+        if let liz_protocol::ClientRequest::RuntimeConfigUpdate(request) = &envelope.request {
+            if let Some(sandbox) = request.sandbox.clone() {
+                self.executor.set_default_shell_sandbox(sandbox);
+            }
+            return ServerResponseEnvelope::Success(Box::new(
+                liz_protocol::SuccessResponseEnvelope {
+                    ok: true,
+                    request_id: envelope.request_id,
+                    response: liz_protocol::ResponsePayload::RuntimeConfig(self.runtime_config()),
+                },
+            ));
+        }
 
         let request = envelope.request.clone();
         let handled = handlers::handle_request(&mut self.runtime, &self.executor, envelope);
@@ -120,6 +141,11 @@ impl AppServer {
     /// Returns the effective model/provider readiness status used by CLI startup diagnostics.
     pub fn model_status(&self) -> ModelStatusResponse {
         model_status_from_gateway(&self.gateway_with_provider_auth_profiles())
+    }
+
+    /// Returns the effective runtime execution configuration.
+    pub fn runtime_config(&self) -> liz_protocol::RuntimeConfigResponse {
+        liz_protocol::RuntimeConfigResponse { sandbox: self.executor.default_shell_sandbox() }
     }
 
     fn continue_turn_after_policy(&mut self, response: &ServerResponseEnvelope, input: String) {

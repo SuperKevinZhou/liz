@@ -5,6 +5,7 @@ use liz_protocol::{
     SandboxBackendKind, SandboxMode, SandboxNetworkAccess, ShellSandboxRequest, ShellSandboxSummary,
 };
 use std::env;
+use std::path::{Path, PathBuf};
 
 /// The concrete platform backend that will enforce sandbox restrictions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -111,14 +112,21 @@ impl Default for SandboxConfig {
 impl SandboxConfig {
     /// Loads sandbox defaults from environment variables.
     pub fn from_env() -> Self {
+        let windows_backend = WindowsSandboxBackend::from_env();
         Self {
             default_mode: parse_sandbox_mode("LIZ_SANDBOX_MODE")
-                .unwrap_or(SandboxMode::WorkspaceWrite),
+                .unwrap_or_else(|| default_sandbox_mode(windows_backend)),
             default_network_access: parse_network_access("LIZ_SANDBOX_NETWORK")
                 .unwrap_or(SandboxNetworkAccess::Restricted),
-            windows_backend: WindowsSandboxBackend::from_env(),
+            windows_backend,
             linux_variant: LinuxSandboxVariant::from_env(),
         }
+    }
+
+    /// Replaces the default shell sandbox used when a tool request has no override.
+    pub fn set_default_request(&mut self, request: ShellSandboxRequest) {
+        self.default_mode = request.mode;
+        self.default_network_access = request.network_access;
     }
 
     /// Resolves the effective sandbox request for one shell tool invocation.
@@ -212,6 +220,57 @@ fn parse_sandbox_mode(key: &str) -> Option<SandboxMode> {
     }
 }
 
+fn default_sandbox_mode(windows_backend: WindowsSandboxBackend) -> SandboxMode {
+    if cfg!(target_os = "windows") && !windows_helper_available(windows_backend) {
+        SandboxMode::DangerFullAccess
+    } else {
+        SandboxMode::WorkspaceWrite
+    }
+}
+
+fn windows_helper_available(backend: WindowsSandboxBackend) -> bool {
+    if !cfg!(target_os = "windows") {
+        return true;
+    }
+
+    let (env_key, helper_names): (&str, &[&str]) = match backend {
+        WindowsSandboxBackend::RestrictedToken => (
+            "LIZ_WINDOWS_RESTRICTED_TOKEN_HELPER",
+            &["liz-windows-restricted-token.exe", "liz-windows-restricted-token.cmd"],
+        ),
+        WindowsSandboxBackend::SandboxUser => (
+            "LIZ_WINDOWS_SANDBOX_USER_HELPER",
+            &["liz-windows-sandbox-user.exe", "liz-windows-sandbox-user.cmd"],
+        ),
+    };
+
+    if env::var_os(env_key).is_some() {
+        return true;
+    }
+
+    let mut candidates = Vec::new();
+    if let Some(dir) = current_exe_dir() {
+        candidates.extend(helper_candidates_in_dir(&dir, helper_names));
+    }
+    for dir in path_dirs() {
+        candidates.extend(helper_candidates_in_dir(&dir, helper_names));
+    }
+
+    candidates.into_iter().any(|candidate| candidate.is_file())
+}
+
+fn helper_candidates_in_dir(dir: &Path, names: &[&str]) -> Vec<PathBuf> {
+    names.iter().map(|name| dir.join(name)).collect()
+}
+
+fn current_exe_dir() -> Option<PathBuf> {
+    env::current_exe().ok()?.parent().map(Path::to_path_buf)
+}
+
+fn path_dirs() -> impl Iterator<Item = PathBuf> {
+    env::var_os("PATH").into_iter().flat_map(|path| env::split_paths(&path).collect::<Vec<_>>())
+}
+
 fn parse_network_access(key: &str) -> Option<SandboxNetworkAccess> {
     match env::var(key).ok()?.to_ascii_lowercase().as_str() {
         "disabled" => Some(SandboxNetworkAccess::Disabled),
@@ -225,6 +284,8 @@ fn parse_network_access(key: &str) -> Option<SandboxNetworkAccess> {
 mod tests {
     use super::{PlatformSandboxBackend, SandboxConfig, WindowsSandboxBackend};
     use liz_protocol::{SandboxMode, SandboxNetworkAccess, ShellSandboxRequest};
+    use std::ffi::OsString;
+    use std::sync::{Mutex, OnceLock};
 
     #[test]
     fn request_override_wins_over_defaults() {
@@ -243,5 +304,57 @@ mod tests {
         assert_eq!(effective.mode, SandboxMode::DangerFullAccess);
         assert_eq!(effective.network_access, SandboxNetworkAccess::Enabled);
         assert_eq!(effective.backend, PlatformSandboxBackend::None);
+    }
+
+    #[test]
+    fn windows_default_falls_back_to_danger_full_access_without_helper() {
+        if !cfg!(target_os = "windows") {
+            return;
+        }
+
+        let _guard = env_lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _mode = EnvVarGuard::remove("LIZ_SANDBOX_MODE");
+        let _backend = EnvVarGuard::remove("LIZ_WINDOWS_SANDBOX_BACKEND");
+        let _helper = EnvVarGuard::remove("LIZ_WINDOWS_SANDBOX_USER_HELPER");
+        let _restricted_helper = EnvVarGuard::remove("LIZ_WINDOWS_RESTRICTED_TOKEN_HELPER");
+        let _path = EnvVarGuard::set("PATH", "");
+
+        let config = SandboxConfig::from_env();
+
+        assert_eq!(config.default_mode, SandboxMode::DangerFullAccess);
+    }
+
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+
+        fn remove(key: &'static str) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::remove_var(key);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = self.previous.as_ref() {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
     }
 }

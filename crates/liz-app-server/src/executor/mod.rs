@@ -6,8 +6,8 @@ mod workspace;
 
 use crate::runtime::RuntimeResult;
 use liz_protocol::{
-    ArtifactKind, ExecutorStream, ShellSandboxSummary, ToolCallRequest, ToolInvocation, ToolName,
-    ToolResult,
+    ArtifactKind, ExecutorStream, ShellSandboxRequest, ShellSandboxSummary, ToolCallRequest,
+    ToolInvocation, ToolName, ToolResult,
 };
 pub use sandbox::{
     EffectiveSandboxRequest, LinuxSandboxVariant, PlatformSandboxBackend, SandboxConfig,
@@ -58,6 +58,16 @@ pub struct ExecutorGateway {
 }
 
 impl ExecutorGateway {
+    /// Returns the current default shell sandbox.
+    pub fn default_shell_sandbox(&self) -> ShellSandboxSummary {
+        self.shell.default_sandbox_summary()
+    }
+
+    /// Updates the default shell sandbox for subsequent shell tool calls.
+    pub fn set_default_shell_sandbox(&self, request: ShellSandboxRequest) -> ShellSandboxSummary {
+        self.shell.set_default_sandbox(request)
+    }
+
     /// Executes one typed tool invocation against the local workspace runtime.
     pub fn execute_tool(&self, request: &ToolCallRequest) -> RuntimeResult<ExecutedTool> {
         match &request.invocation {

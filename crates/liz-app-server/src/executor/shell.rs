@@ -4,9 +4,9 @@ use crate::executor::{EffectiveSandboxRequest, PlatformSandboxBackend, SandboxCo
 use crate::runtime::{RuntimeError, RuntimeResult};
 use liz_protocol::{
     ExecutorStream, ExecutorTaskId, SandboxMode, SandboxNetworkAccess, ShellExecRequest,
-    ShellExecResult, ShellReadOutputRequest, ShellReadOutputResult, ShellSpawnRequest,
-    ShellSpawnResult, ShellTerminateRequest, ShellTerminateResult, ShellWaitRequest,
-    ShellWaitResult,
+    ShellExecResult, ShellReadOutputRequest, ShellReadOutputResult, ShellSandboxRequest,
+    ShellSandboxSummary, ShellSpawnRequest, ShellSpawnResult, ShellTerminateRequest,
+    ShellTerminateResult, ShellWaitRequest, ShellWaitResult,
 };
 use std::collections::HashMap;
 use std::io::Read;
@@ -22,7 +22,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub struct LocalShellExecutor {
     tasks: Mutex<HashMap<ExecutorTaskId, BackgroundShellTask>>,
     sequence: AtomicU64,
-    sandbox: SandboxConfig,
+    sandbox: Mutex<SandboxConfig>,
 }
 
 impl Default for LocalShellExecutor {
@@ -30,12 +30,29 @@ impl Default for LocalShellExecutor {
         Self {
             tasks: Mutex::new(HashMap::new()),
             sequence: AtomicU64::new(0),
-            sandbox: SandboxConfig::default(),
+            sandbox: Mutex::new(SandboxConfig::default()),
         }
     }
 }
 
 impl LocalShellExecutor {
+    /// Returns the current sandbox defaults.
+    pub fn sandbox_config(&self) -> SandboxConfig {
+        self.sandbox.lock().expect("sandbox config mutex should not be poisoned").clone()
+    }
+
+    /// Updates the default shell sandbox for subsequent tool calls.
+    pub fn set_default_sandbox(&self, request: ShellSandboxRequest) -> ShellSandboxSummary {
+        let mut config = self.sandbox.lock().expect("sandbox config mutex should not be poisoned");
+        config.set_default_request(request);
+        config.resolve_request(None).to_summary()
+    }
+
+    /// Returns the effective default shell sandbox summary.
+    pub fn default_sandbox_summary(&self) -> ShellSandboxSummary {
+        self.sandbox_config().resolve_request(None).to_summary()
+    }
+
     /// Executes one shell command and waits for it to finish.
     pub fn exec(&self, request: &ShellExecRequest) -> RuntimeResult<ShellExecution> {
         let mut prepared = self.prepare_shell_command(
@@ -222,9 +239,10 @@ impl LocalShellExecutor {
         working_dir: Option<&str>,
         sandbox_override: Option<&liz_protocol::ShellSandboxRequest>,
     ) -> RuntimeResult<PreparedShellCommand> {
-        let sandbox = self.sandbox.resolve_request(sandbox_override);
+        let config = self.sandbox_config();
+        let sandbox = config.resolve_request(sandbox_override);
         sandbox.ensure_supported()?;
-        let command_process = build_shell_command(command, working_dir, &sandbox, &self.sandbox)?;
+        let command_process = build_shell_command(command, working_dir, &sandbox, &config)?;
         Ok(PreparedShellCommand { command: command_process, sandbox })
     }
 }

@@ -512,6 +512,10 @@ fn shell_exec_fails_closed_when_default_sandbox_backend_is_unavailable() {
         return;
     }
     let _guard = env_lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _sandbox_mode = EnvVarGuard::set("LIZ_SANDBOX_MODE", "workspace-write");
+    let _sandbox_backend = EnvVarGuard::set("LIZ_WINDOWS_SANDBOX_BACKEND", "sandbox-user");
+    let _sandbox_helper = EnvVarGuard::remove("LIZ_WINDOWS_SANDBOX_USER_HELPER");
+    let _restricted_helper = EnvVarGuard::remove("LIZ_WINDOWS_RESTRICTED_TOKEN_HELPER");
 
     let temp_dir = TempDir::new().expect("temp dir should be created");
     let workspace_root = temp_dir.path().join("workspace");
@@ -564,6 +568,77 @@ fn shell_exec_fails_closed_when_default_sandbox_backend_is_unavailable() {
             );
         }
         other => panic!("expected tool error response, got {other:?}"),
+    }
+}
+
+#[test]
+fn runtime_config_update_changes_default_shell_sandbox() {
+    let temp_dir = TempDir::new().expect("temp dir should be created");
+    let workspace_root = temp_dir.path().join("workspace");
+    fs::create_dir_all(&workspace_root).expect("workspace root should exist");
+
+    let server = AppServer::new(StoragePaths::new(temp_dir.path().join(".liz")));
+    let client = spawn_loopback_websocket(server);
+
+    client
+        .send_request(envelope(
+            "request_runtime_config",
+            ClientRequest::RuntimeConfigUpdate(liz_protocol::RuntimeConfigUpdateRequest {
+                sandbox: Some(ShellSandboxRequest {
+                    mode: SandboxMode::DangerFullAccess,
+                    network_access: SandboxNetworkAccess::Enabled,
+                }),
+            }),
+        ))
+        .expect("runtime config request should be sent");
+    match client.recv_response().expect("runtime config response should arrive") {
+        ServerResponseEnvelope::Success(success) => match success.response {
+            ResponsePayload::RuntimeConfig(response) => {
+                assert_eq!(response.sandbox.mode, SandboxMode::DangerFullAccess);
+                assert_eq!(response.sandbox.backend, SandboxBackendKind::None);
+            }
+            other => panic!("unexpected response payload: {other:?}"),
+        },
+        other => panic!("unexpected response envelope: {other:?}"),
+    }
+
+    client
+        .send_request(envelope(
+            "request_runtime_thread",
+            ClientRequest::ThreadStart(ThreadStartRequest {
+                title: Some("Runtime sandbox default".to_owned()),
+                initial_goal: Some("Run shell command with configured default".to_owned()),
+                workspace_ref: Some(workspace_root.to_string_lossy().to_string()),
+            }),
+        ))
+        .expect("thread request should be sent");
+    let response = client.recv_response().expect("thread response should arrive");
+    let thread = match response {
+        ServerResponseEnvelope::Success(success) => match success.response {
+            ResponsePayload::ThreadStart(response) => response.thread,
+            other => panic!("unexpected response payload: {other:?}"),
+        },
+        other => panic!("unexpected response envelope: {other:?}"),
+    };
+    client.recv_event_timeout(Duration::from_secs(1)).expect("thread_started event should arrive");
+
+    let shell_response = send_tool(
+        &client,
+        "request_runtime_shell",
+        ToolInvocation::ShellExec(ShellExecRequest {
+            command: foreground_output_command(),
+            working_dir: shell_working_dir(&workspace_root),
+            sandbox: None,
+        }),
+        &thread.id,
+    );
+    match shell_response.result {
+        ToolResult::ShellExec(result) => {
+            assert_eq!(result.exit_code, 0, "shell exec result: {result:?}");
+            assert_eq!(result.sandbox.mode, SandboxMode::DangerFullAccess);
+            assert_eq!(result.sandbox.backend, SandboxBackendKind::None);
+        }
+        other => panic!("unexpected shell result: {other:?}"),
     }
 }
 
@@ -738,6 +813,35 @@ fn shell_working_dir(workspace_root: &std::path::Path) -> Option<String> {
 struct SandboxHelperGuard {
     key: &'static str,
     previous: Option<std::ffi::OsString>,
+}
+
+struct EnvVarGuard {
+    key: &'static str,
+    previous: Option<std::ffi::OsString>,
+}
+
+impl EnvVarGuard {
+    fn set(key: &'static str, value: &str) -> Self {
+        let previous = std::env::var_os(key);
+        std::env::set_var(key, value);
+        Self { key, previous }
+    }
+
+    fn remove(key: &'static str) -> Self {
+        let previous = std::env::var_os(key);
+        std::env::remove_var(key);
+        Self { key, previous }
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        if let Some(previous) = self.previous.as_ref() {
+            std::env::set_var(self.key, previous);
+        } else {
+            std::env::remove_var(self.key);
+        }
+    }
 }
 
 impl SandboxHelperGuard {
