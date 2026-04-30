@@ -5,7 +5,6 @@ use liz_protocol::{
     SandboxBackendKind, SandboxMode, SandboxNetworkAccess, ShellSandboxRequest, ShellSandboxSummary,
 };
 use std::env;
-use std::path::{Path, PathBuf};
 
 /// The concrete platform backend that will enforce sandbox restrictions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,7 +114,7 @@ impl SandboxConfig {
         let windows_backend = WindowsSandboxBackend::from_env();
         Self {
             default_mode: parse_sandbox_mode("LIZ_SANDBOX_MODE")
-                .unwrap_or_else(|| default_sandbox_mode(windows_backend)),
+                .unwrap_or_else(default_sandbox_mode),
             default_network_access: parse_network_access("LIZ_SANDBOX_NETWORK")
                 .unwrap_or(SandboxNetworkAccess::Restricted),
             windows_backend,
@@ -220,55 +219,12 @@ fn parse_sandbox_mode(key: &str) -> Option<SandboxMode> {
     }
 }
 
-fn default_sandbox_mode(windows_backend: WindowsSandboxBackend) -> SandboxMode {
-    if cfg!(target_os = "windows") && !windows_helper_available(windows_backend) {
-        SandboxMode::DangerFullAccess
-    } else {
+fn default_sandbox_mode() -> SandboxMode {
+    if cfg!(any(target_os = "macos", target_os = "linux", target_os = "windows")) {
         SandboxMode::WorkspaceWrite
+    } else {
+        SandboxMode::DangerFullAccess
     }
-}
-
-fn windows_helper_available(backend: WindowsSandboxBackend) -> bool {
-    if !cfg!(target_os = "windows") {
-        return true;
-    }
-
-    let (env_key, helper_names): (&str, &[&str]) = match backend {
-        WindowsSandboxBackend::RestrictedToken => (
-            "LIZ_WINDOWS_RESTRICTED_TOKEN_HELPER",
-            &["liz-windows-restricted-token.exe", "liz-windows-restricted-token.cmd"],
-        ),
-        WindowsSandboxBackend::SandboxUser => (
-            "LIZ_WINDOWS_SANDBOX_USER_HELPER",
-            &["liz-windows-sandbox-user.exe", "liz-windows-sandbox-user.cmd"],
-        ),
-    };
-
-    if env::var_os(env_key).is_some() {
-        return true;
-    }
-
-    let mut candidates = Vec::new();
-    if let Some(dir) = current_exe_dir() {
-        candidates.extend(helper_candidates_in_dir(&dir, helper_names));
-    }
-    for dir in path_dirs() {
-        candidates.extend(helper_candidates_in_dir(&dir, helper_names));
-    }
-
-    candidates.into_iter().any(|candidate| candidate.is_file())
-}
-
-fn helper_candidates_in_dir(dir: &Path, names: &[&str]) -> Vec<PathBuf> {
-    names.iter().map(|name| dir.join(name)).collect()
-}
-
-fn current_exe_dir() -> Option<PathBuf> {
-    env::current_exe().ok()?.parent().map(Path::to_path_buf)
-}
-
-fn path_dirs() -> impl Iterator<Item = PathBuf> {
-    env::var_os("PATH").into_iter().flat_map(|path| env::split_paths(&path).collect::<Vec<_>>())
 }
 
 fn parse_network_access(key: &str) -> Option<SandboxNetworkAccess> {
@@ -307,7 +263,7 @@ mod tests {
     }
 
     #[test]
-    fn windows_default_falls_back_to_danger_full_access_without_helper() {
+    fn windows_default_keeps_platform_sandbox_without_helper() {
         if !cfg!(target_os = "windows") {
             return;
         }
@@ -321,7 +277,11 @@ mod tests {
 
         let config = SandboxConfig::from_env();
 
-        assert_eq!(config.default_mode, SandboxMode::DangerFullAccess);
+        assert_eq!(config.default_mode, SandboxMode::WorkspaceWrite);
+        assert_eq!(
+            config.resolve_request(None).backend,
+            PlatformSandboxBackend::WindowsSandboxUser
+        );
     }
 
     struct EnvVarGuard {
