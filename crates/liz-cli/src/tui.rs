@@ -17,9 +17,9 @@ use liz_protocol::requests::{
     ThreadStartRequest, TurnCancelRequest, TurnInputKind, TurnStartRequest,
 };
 use liz_protocol::{
-    ApprovalDecision, MemorySearchHit, MemorySearchHitKind, MemorySearchMode, RequestId,
-    ResponsePayload, SandboxMode, SandboxNetworkAccess, ServerEventPayload, ServerResponseEnvelope,
-    ShellSandboxRequest, ThreadId,
+    ApprovalDecision, ApprovalPolicy, MemorySearchHit, MemorySearchHitKind, MemorySearchMode,
+    RequestId, ResponsePayload, SandboxMode, SandboxNetworkAccess, ServerEventPayload,
+    ServerResponseEnvelope, ShellSandboxRequest, ThreadId,
 };
 use std::io::{self, Stdout, Write};
 use std::time::Duration;
@@ -156,6 +156,11 @@ impl CliApp {
 
         if self.view_model.active_overlay == Some(OverlayPanel::Sandbox) {
             self.handle_sandbox_overlay_key(key)?;
+            return Ok(true);
+        }
+
+        if self.view_model.active_overlay == Some(OverlayPanel::Permissions) {
+            self.handle_permissions_overlay_key(key)?;
             return Ok(true);
         }
 
@@ -308,6 +313,27 @@ impl CliApp {
         Ok(())
     }
 
+    fn handle_permissions_overlay_key(
+        &mut self,
+        key: KeyEvent,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        match key.code {
+            KeyCode::Esc => {
+                self.view_model.close_overlay();
+                self.view_model.status_line = "Permissions picker closed".to_owned();
+            }
+            KeyCode::Up => self.view_model.select_previous_permission_policy(),
+            KeyCode::Tab | KeyCode::Down => self.view_model.select_next_permission_policy(),
+            KeyCode::Enter => {
+                let policy = self.view_model.selected_permission_policy();
+                self.view_model.close_overlay();
+                self.set_approval_policy(policy)?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     fn submit_input(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let input = self.view_model.input_buffer.trim().to_owned();
         if input.is_empty() {
@@ -373,6 +399,7 @@ impl CliApp {
             "/wakeup" => self.request_selected_wakeup()?,
             "/compile" => self.compile_selected_thread_memory()?,
             "/sandbox" => self.configure_sandbox(argument)?,
+            "/permissions" => self.configure_permissions(argument)?,
             "/approve" => self.respond_to_first_approval(ApprovalDecision::ApproveOnce)?,
             "/deny" => self.respond_to_first_approval(ApprovalDecision::Deny)?,
             "/cancel" => self.cancel_selected_turn()?,
@@ -718,10 +745,28 @@ impl CliApp {
         }
 
         let Some(mode) = parse_sandbox_mode(raw_mode) else {
+            if is_permission_policy_alias(raw_mode) {
+                self.view_model.status_line =
+                    "Use /permissions danger-full-access for approval policy".to_owned();
+                return Ok(());
+            }
             self.view_model.status_line = format!("Unknown sandbox mode {raw_mode}");
             return Ok(());
         };
         self.set_sandbox_mode(mode)
+    }
+
+    fn configure_permissions(&mut self, argument: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let raw_policy = argument.split_whitespace().next().unwrap_or_default();
+        if raw_policy.is_empty() {
+            return self.open_permissions_overlay();
+        }
+
+        let Some(policy) = parse_approval_policy(raw_policy) else {
+            self.view_model.status_line = format!("Unknown permissions policy {raw_policy}");
+            return Ok(());
+        };
+        self.set_approval_policy(policy)
     }
 
     fn open_sandbox_overlay(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -739,15 +784,35 @@ impl CliApp {
     }
 
     fn set_sandbox_mode(&mut self, mode: SandboxMode) -> Result<(), Box<dyn std::error::Error>> {
-        let network_access = if matches!(mode, SandboxMode::DangerFullAccess) {
-            SandboxNetworkAccess::Enabled
-        } else {
-            SandboxNetworkAccess::Restricted
-        };
+        let network_access = SandboxNetworkAccess::Restricted;
         self.send_request(ClientRequest::RuntimeConfigUpdate(RuntimeConfigUpdateRequest {
             sandbox: Some(ShellSandboxRequest { mode, network_access }),
+            approval_policy: None,
         }))?;
         self.view_model.status_line = format!("Setting shell sandbox to {}", mode.as_str());
+        Ok(())
+    }
+
+    fn open_permissions_overlay(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let current_policy =
+            self.view_model.runtime_approval_policy.unwrap_or(ApprovalPolicy::OnRequest);
+        self.view_model.set_selected_permission_policy(current_policy);
+        self.view_model.open_overlay(OverlayPanel::Permissions);
+        self.send_request(ClientRequest::RuntimeConfigGet(RuntimeConfigGetRequest {}))?;
+        self.view_model.status_line = "Permissions picker opened".to_owned();
+        Ok(())
+    }
+
+    fn set_approval_policy(
+        &mut self,
+        approval_policy: ApprovalPolicy,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        self.send_request(ClientRequest::RuntimeConfigUpdate(RuntimeConfigUpdateRequest {
+            sandbox: None,
+            approval_policy: Some(approval_policy),
+        }))?;
+        self.view_model.status_line =
+            format!("Setting permissions to {}", approval_policy.as_str());
         Ok(())
     }
 
@@ -789,10 +854,21 @@ fn parse_sandbox_mode(value: &str) -> Option<SandboxMode> {
     match value.to_ascii_lowercase().as_str() {
         "read-only" | "readonly" => Some(SandboxMode::ReadOnly),
         "workspace-write" | "workspace" => Some(SandboxMode::WorkspaceWrite),
-        "danger-full-access" | "danger" | "full-access" => Some(SandboxMode::DangerFullAccess),
         "external-sandbox" | "external" => Some(SandboxMode::ExternalSandbox),
         _ => None,
     }
+}
+
+fn parse_approval_policy(value: &str) -> Option<ApprovalPolicy> {
+    match value.to_ascii_lowercase().as_str() {
+        "on-request" | "ask" | "prompt" => Some(ApprovalPolicy::OnRequest),
+        "danger-full-access" | "danger" | "full-access" => Some(ApprovalPolicy::DangerFullAccess),
+        _ => None,
+    }
+}
+
+fn is_permission_policy_alias(value: &str) -> bool {
+    parse_approval_policy(value).is_some()
 }
 
 struct TerminalGuard {
@@ -999,7 +1075,7 @@ mod tests {
         let client = WebSocketAppClient::new(request_tx, response_rx, event_rx);
         let mut app = CliApp::new(client, DEFAULT_SERVER_URL.to_owned());
 
-        app.view_model.input_buffer = "/sandbox danger-full-access".to_owned();
+        app.view_model.input_buffer = "/sandbox read-only".to_owned();
         app.view_model.refresh_composer_affordances();
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()))
             .expect("sandbox command should be handled");
@@ -1008,11 +1084,32 @@ mod tests {
         match request.request {
             ClientRequest::RuntimeConfigUpdate(update) => {
                 let sandbox = update.sandbox.expect("sandbox update should be present");
-                assert_eq!(sandbox.mode, SandboxMode::DangerFullAccess);
-                assert_eq!(sandbox.network_access, SandboxNetworkAccess::Enabled);
+                assert_eq!(sandbox.mode, SandboxMode::ReadOnly);
+                assert_eq!(sandbox.network_access, SandboxNetworkAccess::Restricted);
+                assert!(update.approval_policy.is_none());
             }
             other => panic!("unexpected request: {other:?}"),
         }
+    }
+
+    #[test]
+    fn sandbox_command_rejects_permission_policy() {
+        let (request_tx, request_rx) = mpsc::channel();
+        let (_response_tx, response_rx) = mpsc::channel();
+        let (_event_tx, event_rx) = mpsc::channel();
+        let client = WebSocketAppClient::new(request_tx, response_rx, event_rx);
+        let mut app = CliApp::new(client, DEFAULT_SERVER_URL.to_owned());
+
+        app.view_model.input_buffer = "/sandbox danger-full-access".to_owned();
+        app.view_model.refresh_composer_affordances();
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()))
+            .expect("sandbox command should be handled");
+
+        assert!(request_rx.try_recv().is_err());
+        assert_eq!(
+            app.view_model.status_line,
+            "Use /permissions danger-full-access for approval policy"
+        );
     }
 
     #[test]
@@ -1057,12 +1154,55 @@ mod tests {
         match request.request {
             ClientRequest::RuntimeConfigUpdate(update) => {
                 let sandbox = update.sandbox.expect("sandbox update should be present");
-                assert_eq!(sandbox.mode, SandboxMode::DangerFullAccess);
-                assert_eq!(sandbox.network_access, SandboxNetworkAccess::Enabled);
+                assert_eq!(sandbox.mode, SandboxMode::ExternalSandbox);
+                assert_eq!(sandbox.network_access, SandboxNetworkAccess::Restricted);
+                assert!(update.approval_policy.is_none());
             }
             other => panic!("unexpected request: {other:?}"),
         }
         assert!(app.view_model.active_overlay.is_none());
+    }
+
+    #[test]
+    fn permissions_command_updates_approval_policy() {
+        let (request_tx, request_rx) = mpsc::channel();
+        let (_response_tx, response_rx) = mpsc::channel();
+        let (_event_tx, event_rx) = mpsc::channel();
+        let client = WebSocketAppClient::new(request_tx, response_rx, event_rx);
+        let mut app = CliApp::new(client, DEFAULT_SERVER_URL.to_owned());
+
+        app.view_model.input_buffer = "/permissions danger-full-access".to_owned();
+        app.view_model.refresh_composer_affordances();
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()))
+            .expect("permissions command should be handled");
+
+        let request = request_rx.recv().expect("runtime config update should be sent");
+        match request.request {
+            ClientRequest::RuntimeConfigUpdate(update) => {
+                assert!(update.sandbox.is_none());
+                assert_eq!(update.approval_policy, Some(ApprovalPolicy::DangerFullAccess));
+            }
+            other => panic!("unexpected request: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn permissions_command_without_policy_opens_picker() {
+        let (request_tx, request_rx) = mpsc::channel();
+        let (_response_tx, response_rx) = mpsc::channel();
+        let (_event_tx, event_rx) = mpsc::channel();
+        let client = WebSocketAppClient::new(request_tx, response_rx, event_rx);
+        let mut app = CliApp::new(client, DEFAULT_SERVER_URL.to_owned());
+
+        app.view_model.input_buffer = "/permissions".to_owned();
+        app.view_model.refresh_composer_affordances();
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()))
+            .expect("permissions command should be handled");
+
+        let request = request_rx.recv().expect("runtime config request should be sent");
+        assert!(matches!(request.request, ClientRequest::RuntimeConfigGet(_)));
+        assert_eq!(app.view_model.active_overlay, Some(OverlayPanel::Permissions));
+        assert_eq!(app.view_model.selected_permission_policy(), ApprovalPolicy::OnRequest);
     }
 
     #[test]

@@ -588,6 +588,7 @@ fn runtime_config_update_changes_default_shell_sandbox() {
                     mode: SandboxMode::DangerFullAccess,
                     network_access: SandboxNetworkAccess::Enabled,
                 }),
+                approval_policy: None,
             }),
         ))
         .expect("runtime config request should be sent");

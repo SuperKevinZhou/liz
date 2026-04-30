@@ -16,7 +16,7 @@ pub mod tool;
 pub mod transport;
 pub mod turn;
 
-pub use approval::{ApprovalDecision, ApprovalRequest, ApprovalStatus};
+pub use approval::{ApprovalDecision, ApprovalPolicy, ApprovalRequest, ApprovalStatus};
 pub use artifact::{ArtifactKind, ArtifactRef};
 pub use auth::{
     GitHubCopilotDeviceCode, GitHubCopilotDevicePollStatus, GitLabOAuthStart,

@@ -16,6 +16,26 @@ pub enum ApprovalDecision {
     Deny,
 }
 
+/// Describes how the runtime handles actions that would otherwise require approval.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ApprovalPolicy {
+    /// Ask for explicit approval before high-risk actions continue.
+    OnRequest,
+    /// Continue high-risk actions without pausing for approval.
+    DangerFullAccess,
+}
+
+impl ApprovalPolicy {
+    /// Returns the stable wire name for this policy.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::OnRequest => "on-request",
+            Self::DangerFullAccess => "danger-full-access",
+        }
+    }
+}
+
 /// Describes the lifecycle state of an approval request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

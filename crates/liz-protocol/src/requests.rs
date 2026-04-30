@@ -1,6 +1,6 @@
 //! Client request envelopes and request payloads.
 
-use crate::approval::ApprovalDecision;
+use crate::approval::{ApprovalDecision, ApprovalPolicy};
 use crate::auth::ProviderAuthProfile;
 use crate::checkpoint::CheckpointScope;
 use crate::ids::{ApprovalId, ArtifactId, CheckpointId, MemoryFactId, RequestId, ThreadId, TurnId};
@@ -258,6 +258,8 @@ pub struct RuntimeConfigGetRequest {}
 pub struct RuntimeConfigUpdateRequest {
     /// The default shell sandbox to apply when tool calls do not provide an override.
     pub sandbox: Option<ShellSandboxRequest>,
+    /// The approval policy to apply to new high-risk actions.
+    pub approval_policy: Option<ApprovalPolicy>,
 }
 
 /// Creates or replaces a provider auth profile.

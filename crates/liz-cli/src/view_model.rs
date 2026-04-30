@@ -10,17 +10,17 @@ use liz_protocol::events::{
     TurnCancelledEvent, TurnCompletedEvent, TurnFailedEvent, TurnStartedEvent,
 };
 use liz_protocol::{
-    ApprovalRequest, ArtifactKind, MemoryEvidenceView, MemorySearchHit, MemorySessionEntry,
-    MemorySessionView, MemoryTopicSummary, MemoryWakeup, ModelStatusResponse, ProviderAuthProfile,
-    RecentConversationWakeupView, ResponsePayload, ResumeSummary, RuntimeConfigResponse,
-    SandboxMode, ServerEvent, ServerEventPayload, ServerResponseEnvelope, ShellSandboxSummary,
-    Thread, ThreadId, ThreadStatus,
+    ApprovalPolicy, ApprovalRequest, ArtifactKind, MemoryEvidenceView, MemorySearchHit,
+    MemorySessionEntry, MemorySessionView, MemoryTopicSummary, MemoryWakeup, ModelStatusResponse,
+    ProviderAuthProfile, RecentConversationWakeupView, ResponsePayload, ResumeSummary,
+    RuntimeConfigResponse, SandboxMode, ServerEvent, ServerEventPayload, ServerResponseEnvelope,
+    ShellSandboxSummary, Thread, ThreadId, ThreadStatus,
 };
 use std::collections::BTreeMap;
 
 const MAX_INPUT_HISTORY_ENTRIES: usize = 100;
 
-const BUILTIN_COMMANDS: [SlashCommandSpec; 17] = [
+const BUILTIN_COMMANDS: [SlashCommandSpec; 18] = [
     SlashCommandSpec::new("help", "Open command reference", "/help"),
     SlashCommandSpec::new("config", "Open config panel", "/config"),
     SlashCommandSpec::new("status", "Open runtime status", "/status"),
@@ -35,7 +35,12 @@ const BUILTIN_COMMANDS: [SlashCommandSpec; 17] = [
     SlashCommandSpec::new(
         "sandbox",
         "Set shell sandbox mode",
-        "/sandbox <read-only|workspace-write|danger-full-access|external-sandbox>",
+        "/sandbox <read-only|workspace-write|external-sandbox>",
+    ),
+    SlashCommandSpec::new(
+        "permissions",
+        "Set approval policy",
+        "/permissions <on-request|danger-full-access>",
     ),
     SlashCommandSpec::new("approve", "Approve the current request", "/approve"),
     SlashCommandSpec::new("deny", "Deny the current request", "/deny"),
@@ -44,12 +49,11 @@ const BUILTIN_COMMANDS: [SlashCommandSpec; 17] = [
     SlashCommandSpec::new("exit", "Leave liz-cli", "/exit"),
 ];
 
-const SANDBOX_MODES: [SandboxMode; 4] = [
-    SandboxMode::ReadOnly,
-    SandboxMode::WorkspaceWrite,
-    SandboxMode::DangerFullAccess,
-    SandboxMode::ExternalSandbox,
-];
+const SANDBOX_MODES: [SandboxMode; 3] =
+    [SandboxMode::ReadOnly, SandboxMode::WorkspaceWrite, SandboxMode::ExternalSandbox];
+
+const PERMISSION_POLICIES: [ApprovalPolicy; 2] =
+    [ApprovalPolicy::OnRequest, ApprovalPolicy::DangerFullAccess];
 
 /// Transcript entry categories surfaced by the chat shell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,6 +109,8 @@ pub enum OverlayPanel {
     CommandPalette,
     /// Shell sandbox mode picker overlay.
     Sandbox,
+    /// Permission and approval policy picker overlay.
+    Permissions,
 }
 
 /// One slash command surfaced in completion and help.
@@ -405,6 +411,8 @@ pub struct ViewModel {
     pub model_status: Option<ModelStatusResponse>,
     /// The latest runtime execution configuration returned by the server.
     pub runtime_sandbox: Option<ShellSandboxSummary>,
+    /// The latest runtime approval policy returned by the server.
+    pub runtime_approval_policy: Option<ApprovalPolicy>,
     /// Persisted provider auth profiles exposed by the server.
     pub auth_profiles: Vec<ProviderAuthProfile>,
     /// The one-line status bar message.
@@ -419,6 +427,8 @@ pub struct ViewModel {
     pub selected_command_index: usize,
     /// Selected row inside the sandbox mode picker.
     pub selected_sandbox_index: usize,
+    /// Selected row inside the permissions picker.
+    pub selected_permission_index: usize,
     /// Config panel state.
     pub config_draft: ConfigDraft,
     /// Whether the composer currently targets slash-command mode.
@@ -443,6 +453,11 @@ impl ViewModel {
     /// Returns the sandbox modes exposed by the picker.
     pub fn sandbox_modes() -> &'static [SandboxMode] {
         &SANDBOX_MODES
+    }
+
+    /// Returns the approval policies exposed by the permissions picker.
+    pub fn permission_policies() -> &'static [ApprovalPolicy] {
+        &PERMISSION_POLICIES
     }
 
     /// Returns the selected thread, if one is available.
@@ -570,6 +585,35 @@ impl ViewModel {
     /// Moves the selected sandbox mode downward.
     pub fn select_next_sandbox_mode(&mut self) {
         self.selected_sandbox_index = (self.selected_sandbox_index + 1) % SANDBOX_MODES.len();
+    }
+
+    /// Returns the selected approval policy.
+    pub fn selected_permission_policy(&self) -> ApprovalPolicy {
+        PERMISSION_POLICIES
+            .get(self.selected_permission_index)
+            .copied()
+            .unwrap_or(ApprovalPolicy::OnRequest)
+    }
+
+    /// Selects the permissions row matching the provided policy.
+    pub fn set_selected_permission_policy(&mut self, policy: ApprovalPolicy) {
+        self.selected_permission_index =
+            PERMISSION_POLICIES.iter().position(|candidate| *candidate == policy).unwrap_or(0);
+    }
+
+    /// Moves the selected permissions row upward.
+    pub fn select_previous_permission_policy(&mut self) {
+        if self.selected_permission_index == 0 {
+            self.selected_permission_index = PERMISSION_POLICIES.len() - 1;
+        } else {
+            self.selected_permission_index -= 1;
+        }
+    }
+
+    /// Moves the selected permissions row downward.
+    pub fn select_next_permission_policy(&mut self) {
+        self.selected_permission_index =
+            (self.selected_permission_index + 1) % PERMISSION_POLICIES.len();
     }
 
     /// Moves the selected conversation upward.
@@ -1016,10 +1060,12 @@ impl ViewModel {
 
     fn apply_runtime_config(&mut self, response: &RuntimeConfigResponse) {
         self.runtime_sandbox = Some(response.sandbox.clone());
+        self.runtime_approval_policy = Some(response.approval_policy);
         self.status_line = format!(
-            "Shell sandbox {} via {}",
+            "Shell sandbox {} via {}; permissions {}",
             response.sandbox.mode.as_str(),
-            response.sandbox.backend.as_str()
+            response.sandbox.backend.as_str(),
+            response.approval_policy.as_str()
         );
     }
 

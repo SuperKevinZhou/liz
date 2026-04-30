@@ -1,5 +1,6 @@
 //! Server response envelopes and typed response payloads.
 
+use crate::approval::ApprovalPolicy;
 use crate::approval::ApprovalRequest;
 use crate::auth::{
     GitHubCopilotDeviceCode, GitHubCopilotDevicePollStatus, GitLabOAuthStart,
@@ -259,6 +260,8 @@ pub struct ModelStatusResponse {
 pub struct RuntimeConfigResponse {
     /// The default shell sandbox used when a tool call does not provide an override.
     pub sandbox: ShellSandboxSummary,
+    /// The current approval policy for high-risk actions.
+    pub approval_policy: ApprovalPolicy,
 }
 
 /// The response payload for `provider_auth/upsert`.

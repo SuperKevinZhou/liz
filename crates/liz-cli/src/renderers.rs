@@ -7,7 +7,7 @@ use crossterm::cursor::{Hide, MoveTo, MoveToColumn, MoveUp, Show};
 use crossterm::queue;
 use crossterm::style::{Color, Print, ResetColor, SetForegroundColor};
 use crossterm::terminal::{self, Clear, ClearType};
-use liz_protocol::{SandboxMode, ThreadId};
+use liz_protocol::{ApprovalPolicy, SandboxMode, ThreadId};
 use std::env;
 use std::io::{self, Stdout, Write};
 
@@ -735,6 +735,7 @@ fn slash_page_header(panel: OverlayPanel) -> &'static str {
         OverlayPanel::Threads => "   Conversations",
         OverlayPanel::CommandPalette => "   Commands",
         OverlayPanel::Sandbox => "   Sandbox",
+        OverlayPanel::Permissions => "   Permissions",
     }
 }
 
@@ -793,6 +794,7 @@ fn overlay_lines(panel: OverlayPanel, view_model: &ViewModel, width: usize) -> V
         OverlayPanel::Memory => memory_lines(view_model, width),
         OverlayPanel::Threads => thread_lines(view_model),
         OverlayPanel::Sandbox => sandbox_lines(view_model, width),
+        OverlayPanel::Permissions => permissions_lines(view_model, width),
     }
 }
 
@@ -900,8 +902,37 @@ fn sandbox_mode_description(mode: SandboxMode) -> &'static str {
     match mode {
         SandboxMode::ReadOnly => "read files only",
         SandboxMode::WorkspaceWrite => "write inside the workspace",
-        SandboxMode::DangerFullAccess => "run without sandboxing",
+        SandboxMode::DangerFullAccess => "legacy compatibility mode",
         SandboxMode::ExternalSandbox => "trust the parent sandbox",
+    }
+}
+
+fn permissions_lines(view_model: &ViewModel, width: usize) -> Vec<ScreenLine> {
+    let mut lines = Vec::new();
+    if let Some(policy) = view_model.runtime_approval_policy {
+        lines.push(ScreenLine::colored(format!("Current {}", policy.as_str()), Color::DarkGrey));
+        lines.push(ScreenLine::blank());
+    }
+
+    for (index, policy) in ViewModel::permission_policies().iter().copied().enumerate() {
+        let selected = index == view_model.selected_permission_index;
+        let marker = if selected { "›" } else { " " };
+        let label =
+            format!("{marker} {:<20} {}", policy.as_str(), permission_policy_description(policy));
+        lines.push(ScreenLine::colored(
+            truncate(&label, width),
+            if selected { Color::White } else { Color::DarkGrey },
+        ));
+    }
+    lines.push(ScreenLine::blank());
+    lines.push(ScreenLine::colored("Enter apply · Esc cancel", Color::DarkGrey));
+    lines
+}
+
+fn permission_policy_description(policy: ApprovalPolicy) -> &'static str {
+    match policy {
+        ApprovalPolicy::OnRequest => "ask before high-risk actions",
+        ApprovalPolicy::DangerFullAccess => "continue without approval prompts",
     }
 }
 
@@ -982,6 +1013,9 @@ fn status_lines(view_model: &ViewModel) -> Vec<ScreenLine> {
         lines.push(ScreenLine::plain(format!("Sandbox  {}", sandbox.mode.as_str())));
         lines.push(ScreenLine::plain(format!("Backend   {}", sandbox.backend.as_str())));
         lines.push(ScreenLine::plain(format!("Network   {}", sandbox.network_access.as_str())));
+        if let Some(policy) = view_model.runtime_approval_policy {
+            lines.push(ScreenLine::plain(format!("Approval  {}", policy.as_str())));
+        }
     } else {
         lines.push(ScreenLine::colored("Runtime config has not loaded yet.", Color::DarkGrey));
     }
@@ -1043,6 +1077,9 @@ fn status_page_lines(view_model: &ViewModel) -> Vec<ScreenLine> {
         lines.push(setting_row("Sandbox:", sandbox.mode.as_str(), false));
         lines.push(setting_row("Sandbox backend:", sandbox.backend.as_str(), false));
         lines.push(setting_row("Sandbox network:", sandbox.network_access.as_str(), false));
+        if let Some(policy) = view_model.runtime_approval_policy {
+            lines.push(setting_row("Permissions:", policy.as_str(), false));
+        }
     } else {
         lines.push(setting_row("Sandbox:", "not loaded", false));
     }

@@ -13,9 +13,9 @@ use crate::model::{
 use crate::runtime::RuntimeCoordinator;
 use crate::storage::StoragePaths;
 use liz_protocol::{
-    ApprovalDecision, ApprovalRequestedEvent, ArtifactCreatedEvent, AssistantChunkEvent,
-    AssistantCompletedEvent, CheckpointCreatedEvent, ClientRequestEnvelope, DiffAvailableEvent,
-    ExecutorOutputChunkEvent, ExecutorTaskId, MemoryCompilationAppliedEvent,
+    ApprovalDecision, ApprovalPolicy, ApprovalRequestedEvent, ArtifactCreatedEvent,
+    AssistantChunkEvent, AssistantCompletedEvent, CheckpointCreatedEvent, ClientRequestEnvelope,
+    DiffAvailableEvent, ExecutorOutputChunkEvent, ExecutorTaskId, MemoryCompilationAppliedEvent,
     MemoryDreamingCompletedEvent, MemoryInvalidationAppliedEvent, ModelStatusResponse,
     ProviderAuthProfile, ProviderCredential, ServerEvent, ServerEventPayload,
     ServerResponseEnvelope, ThreadId, ToolCallRequest, ToolCompletedEvent, TurnCancelRequest,
@@ -48,6 +48,7 @@ pub struct AppServer {
     executor: ExecutorGateway,
     event_bus: EventBus,
     model_gateway: ModelGateway,
+    approval_policy: ApprovalPolicy,
 }
 
 impl AppServer {
@@ -64,6 +65,7 @@ impl AppServer {
             executor: ExecutorGateway::default(),
             event_bus: EventBus::new(),
             model_gateway,
+            approval_policy: ApprovalPolicy::OnRequest,
         }
     }
 
@@ -100,6 +102,9 @@ impl AppServer {
         if let liz_protocol::ClientRequest::RuntimeConfigUpdate(request) = &envelope.request {
             if let Some(sandbox) = request.sandbox.clone() {
                 self.executor.set_default_shell_sandbox(sandbox);
+            }
+            if let Some(approval_policy) = request.approval_policy {
+                self.approval_policy = approval_policy;
             }
             return ServerResponseEnvelope::Success(Box::new(
                 liz_protocol::SuccessResponseEnvelope {
@@ -145,7 +150,10 @@ impl AppServer {
 
     /// Returns the effective runtime execution configuration.
     pub fn runtime_config(&self) -> liz_protocol::RuntimeConfigResponse {
-        liz_protocol::RuntimeConfigResponse { sandbox: self.executor.default_shell_sandbox() }
+        liz_protocol::RuntimeConfigResponse {
+            sandbox: self.executor.default_shell_sandbox(),
+            approval_policy: self.approval_policy,
+        }
     }
 
     fn continue_turn_after_policy(&mut self, response: &ServerResponseEnvelope, input: String) {
@@ -172,7 +180,7 @@ impl AppServer {
         };
         let decision = self.runtime.evaluate_policy(&input, &context);
 
-        if decision.requires_approval {
+        if self.approval_policy == ApprovalPolicy::OnRequest && decision.requires_approval {
             if let Ok((checkpoint, approval)) =
                 self.runtime.require_approval_for_turn(&thread.id, &turn.id, &decision)
             {
@@ -818,9 +826,17 @@ fn provider_override_from_auth_profile(profile: &ProviderAuthProfile) -> Provide
 
 #[cfg(test)]
 mod tests {
-    use super::{provider_override_from_auth_profile, select_default_auth_profiles};
-    use liz_protocol::{ProviderAuthProfile, ProviderCredential};
+    use super::{provider_override_from_auth_profile, select_default_auth_profiles, AppServer};
+    use crate::storage::StoragePaths;
+    use liz_protocol::{
+        ApprovalPolicy, ClientRequest, ClientRequestEnvelope, ProviderAuthProfile,
+        ProviderCredential, RequestId, ResponsePayload, RuntimeConfigGetRequest,
+        RuntimeConfigUpdateRequest, ServerEventPayload, ServerResponseEnvelope, ThreadStartRequest,
+        TurnInputKind, TurnStartRequest,
+    };
     use std::collections::BTreeMap;
+    use std::time::Duration;
+    use tempfile::TempDir;
 
     #[test]
     fn select_default_auth_profiles_prefers_provider_default_ids() {
@@ -877,6 +893,96 @@ mod tests {
             override_config.metadata.get("openai_codex.account_id").map(String::as_str),
             Some("acct")
         );
+    }
+
+    #[test]
+    fn runtime_config_update_changes_approval_policy() {
+        let temp_dir = TempDir::new().expect("temp dir should be created");
+        let mut server = AppServer::new_simulated(StoragePaths::new(temp_dir.path().join(".liz")));
+
+        let response = server.handle_request(envelope(
+            "set_permissions",
+            ClientRequest::RuntimeConfigUpdate(RuntimeConfigUpdateRequest {
+                sandbox: None,
+                approval_policy: Some(ApprovalPolicy::DangerFullAccess),
+            }),
+        ));
+
+        match response {
+            ServerResponseEnvelope::Success(success) => match success.response {
+                ResponsePayload::RuntimeConfig(config) => {
+                    assert_eq!(config.approval_policy, ApprovalPolicy::DangerFullAccess);
+                }
+                other => panic!("unexpected response payload: {other:?}"),
+            },
+            other => panic!("unexpected response envelope: {other:?}"),
+        }
+
+        let response = server.handle_request(envelope(
+            "get_permissions",
+            ClientRequest::RuntimeConfigGet(RuntimeConfigGetRequest {}),
+        ));
+        match response {
+            ServerResponseEnvelope::Success(success) => match success.response {
+                ResponsePayload::RuntimeConfig(config) => {
+                    assert_eq!(config.approval_policy, ApprovalPolicy::DangerFullAccess);
+                }
+                other => panic!("unexpected response payload: {other:?}"),
+            },
+            other => panic!("unexpected response envelope: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn danger_full_access_policy_skips_high_risk_approval_prompt() {
+        let temp_dir = TempDir::new().expect("temp dir should be created");
+        let mut server = AppServer::new_simulated(StoragePaths::new(temp_dir.path().join(".liz")));
+        let events = server.subscribe_events();
+
+        server.handle_request(envelope(
+            "set_permissions",
+            ClientRequest::RuntimeConfigUpdate(RuntimeConfigUpdateRequest {
+                sandbox: None,
+                approval_policy: Some(ApprovalPolicy::DangerFullAccess),
+            }),
+        ));
+        let response = server.handle_request(envelope(
+            "start_high_risk_turn",
+            ClientRequest::ThreadStart(ThreadStartRequest {
+                title: Some("High risk".to_owned()),
+                initial_goal: None,
+                workspace_ref: None,
+            }),
+        ));
+        let thread = match response {
+            ServerResponseEnvelope::Success(success) => match success.response {
+                ResponsePayload::ThreadStart(response) => response.thread,
+                other => panic!("unexpected response payload: {other:?}"),
+            },
+            other => panic!("unexpected response envelope: {other:?}"),
+        };
+        server.handle_request(envelope(
+            "run_high_risk_turn",
+            ClientRequest::TurnStart(TurnStartRequest {
+                thread_id: thread.id,
+                input: "delete .env".to_owned(),
+                input_kind: TurnInputKind::UserMessage,
+            }),
+        ));
+
+        let mut saw_approval = false;
+        while let Ok(event) = events.recv_timeout(Duration::from_millis(25)) {
+            if matches!(event.payload, ServerEventPayload::ApprovalRequested(_)) {
+                saw_approval = true;
+                break;
+            }
+        }
+
+        assert!(!saw_approval);
+    }
+
+    fn envelope(request_id: &str, request: ClientRequest) -> ClientRequestEnvelope {
+        ClientRequestEnvelope { request_id: RequestId::new(request_id), request }
     }
 }
 
