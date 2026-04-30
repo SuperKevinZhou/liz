@@ -162,6 +162,7 @@ impl CliApp {
                     self.view_model.close_overlay();
                     self.view_model.status_line = "Overlay closed".to_owned();
                 } else if !self.view_model.input_buffer.is_empty() {
+                    self.view_model.clear_input_history_selection();
                     self.view_model.input_buffer.clear();
                     self.view_model.refresh_composer_affordances();
                     self.view_model.status_line = "Composer cleared".to_owned();
@@ -170,15 +171,15 @@ impl CliApp {
             KeyCode::Up => {
                 if self.view_model.command_palette_is_open() {
                     self.view_model.select_previous_command();
-                } else if self.view_model.input_buffer.trim().is_empty() {
-                    self.view_model.open_overlay(OverlayPanel::Threads);
+                } else if self.view_model.recall_previous_input() {
+                    self.view_model.status_line = "Recalled previous message".to_owned();
+                } else {
+                    self.view_model.status_line = "No previous messages".to_owned();
                 }
             }
             KeyCode::Down => {
                 if self.view_model.command_palette_is_open() {
                     self.view_model.select_next_command();
-                } else if self.view_model.input_buffer.trim().is_empty() {
-                    self.view_model.open_overlay(OverlayPanel::Threads);
                 }
             }
             KeyCode::Tab => {
@@ -195,6 +196,7 @@ impl CliApp {
                 }
             }
             KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                self.view_model.clear_input_history_selection();
                 self.view_model.input_buffer.push('\n');
                 self.view_model.refresh_composer_affordances();
             }
@@ -217,6 +219,7 @@ impl CliApp {
                 }
             }
             KeyCode::Backspace => {
+                self.view_model.clear_input_history_selection();
                 self.view_model.input_buffer.pop();
                 self.view_model.refresh_composer_affordances();
             }
@@ -226,6 +229,7 @@ impl CliApp {
             }
             KeyCode::Char(character) => {
                 if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT {
+                    self.view_model.clear_input_history_selection();
                     self.view_model.input_buffer.push(character);
                     self.view_model.refresh_composer_affordances();
                 }
@@ -304,6 +308,7 @@ impl CliApp {
             return Ok(());
         }
 
+        self.view_model.record_input_history(&input);
         let Some(thread_id) = self.view_model.selected_thread_id() else {
             self.start_thread_from_message(input)?;
             return Ok(());
@@ -859,6 +864,45 @@ mod tests {
             .expect("tab should be handled");
 
         assert_eq!(app.view_model.input_buffer, "/help ");
+    }
+
+    #[test]
+    fn up_arrow_recalls_submitted_messages_in_composer() {
+        let (request_tx, _request_rx) = mpsc::channel();
+        let (_response_tx, response_rx) = mpsc::channel();
+        let (_event_tx, event_rx) = mpsc::channel();
+        let client = WebSocketAppClient::new(request_tx, response_rx, event_rx);
+        let mut app = CliApp::new(client, DEFAULT_SERVER_URL.to_owned());
+        app.view_model.active_thread_id = Some(ThreadId::new("thread_history"));
+
+        app.view_model.input_buffer = "first message".to_owned();
+        app.submit_input().expect("first message should be sent");
+        app.view_model.input_buffer = "second message".to_owned();
+        app.submit_input().expect("second message should be sent");
+
+        app.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::empty()))
+            .expect("up should recall message history");
+        assert_eq!(app.view_model.input_buffer, "second message");
+
+        app.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::empty()))
+            .expect("second up should recall older message");
+        assert_eq!(app.view_model.input_buffer, "first message");
+    }
+
+    #[test]
+    fn down_arrow_is_noop_in_plain_composer() {
+        let (request_tx, _request_rx) = mpsc::channel();
+        let (_response_tx, response_rx) = mpsc::channel();
+        let (_event_tx, event_rx) = mpsc::channel();
+        let client = WebSocketAppClient::new(request_tx, response_rx, event_rx);
+        let mut app = CliApp::new(client, DEFAULT_SERVER_URL.to_owned());
+        app.view_model.input_buffer = "half typed draft".to_owned();
+
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::empty()))
+            .expect("down should be handled as a no-op");
+
+        assert_eq!(app.view_model.input_buffer, "half typed draft");
+        assert!(app.view_model.active_overlay.is_none());
     }
 
     #[test]

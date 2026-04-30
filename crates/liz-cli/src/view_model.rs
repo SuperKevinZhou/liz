@@ -18,6 +18,8 @@ use liz_protocol::{
 };
 use std::collections::BTreeMap;
 
+const MAX_INPUT_HISTORY_ENTRIES: usize = 100;
+
 const BUILTIN_COMMANDS: [SlashCommandSpec; 17] = [
     SlashCommandSpec::new("help", "Open command reference", "/help"),
     SlashCommandSpec::new("config", "Open config panel", "/config"),
@@ -410,6 +412,8 @@ pub struct ViewModel {
     pub config_draft: ConfigDraft,
     /// Whether the composer currently targets slash-command mode.
     pub slash_mode: bool,
+    input_history: Vec<String>,
+    input_history_index: Option<usize>,
     pending_thread_start_entries: Vec<TranscriptEntry>,
     assistant_streaming: Option<String>,
 }
@@ -544,6 +548,46 @@ impl ViewModel {
             return;
         }
         self.selected_thread_index = (self.selected_thread_index + 1) % self.threads.len();
+    }
+
+    /// Stores a submitted user message for composer history recall.
+    pub fn record_input_history(&mut self, input: &str) {
+        let trimmed = input.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        if self.input_history.last().is_some_and(|entry| entry == trimmed) {
+            self.clear_input_history_selection();
+            return;
+        }
+
+        self.input_history.push(trimmed.to_owned());
+        if self.input_history.len() > MAX_INPUT_HISTORY_ENTRIES {
+            self.input_history.remove(0);
+        }
+        self.clear_input_history_selection();
+    }
+
+    /// Restores the previous submitted user message into the composer.
+    pub fn recall_previous_input(&mut self) -> bool {
+        if self.input_history.is_empty() {
+            return false;
+        }
+
+        let index = match self.input_history_index {
+            Some(0) => 0,
+            Some(index) => index - 1,
+            None => self.input_history.len() - 1,
+        };
+        self.input_history_index = Some(index);
+        self.input_buffer = self.input_history[index].clone();
+        self.refresh_composer_affordances();
+        true
+    }
+
+    /// Leaves history browsing when the composer is edited directly.
+    pub fn clear_input_history_selection(&mut self) {
+        self.input_history_index = None;
     }
 
     /// Opens an overlay panel.
