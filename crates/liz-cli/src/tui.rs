@@ -183,16 +183,8 @@ impl CliApp {
                 }
             }
             KeyCode::Tab => {
-                if self.view_model.command_palette_is_open()
-                    && self.view_model.accept_command_suggestion()
-                {
+                if self.view_model.slash_mode && self.view_model.accept_command_suggestion() {
                     self.view_model.status_line = "Command completed".to_owned();
-                } else if self.view_model.slash_mode {
-                    self.view_model.open_overlay(OverlayPanel::CommandPalette);
-                    self.view_model.status_line = "Command palette opened".to_owned();
-                } else {
-                    self.view_model.open_overlay(OverlayPanel::Threads);
-                    self.view_model.status_line = "Conversation picker opened".to_owned();
                 }
             }
             KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
@@ -864,6 +856,44 @@ mod tests {
             .expect("tab should be handled");
 
         assert_eq!(app.view_model.input_buffer, "/help ");
+    }
+
+    #[test]
+    fn tab_is_noop_for_plain_composer() {
+        let (request_tx, _request_rx) = mpsc::channel();
+        let (_response_tx, response_rx) = mpsc::channel();
+        let (_event_tx, event_rx) = mpsc::channel();
+        let client = WebSocketAppClient::new(request_tx, response_rx, event_rx);
+        let mut app = CliApp::new(client, DEFAULT_SERVER_URL.to_owned());
+
+        app.view_model.input_buffer = "hello liz".to_owned();
+        app.view_model.status_line = "ready".to_owned();
+        app.view_model.refresh_composer_affordances();
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()))
+            .expect("tab should be handled");
+
+        assert_eq!(app.view_model.input_buffer, "hello liz");
+        assert_eq!(app.view_model.status_line, "ready");
+        assert!(app.view_model.active_overlay.is_none());
+    }
+
+    #[test]
+    fn tab_is_noop_for_unknown_slash_command() {
+        let (request_tx, _request_rx) = mpsc::channel();
+        let (_response_tx, response_rx) = mpsc::channel();
+        let (_event_tx, event_rx) = mpsc::channel();
+        let client = WebSocketAppClient::new(request_tx, response_rx, event_rx);
+        let mut app = CliApp::new(client, DEFAULT_SERVER_URL.to_owned());
+
+        app.view_model.input_buffer = "/unknown".to_owned();
+        app.view_model.status_line = "ready".to_owned();
+        app.view_model.refresh_composer_affordances();
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()))
+            .expect("tab should be handled");
+
+        assert_eq!(app.view_model.input_buffer, "/unknown");
+        assert_eq!(app.view_model.status_line, "ready");
+        assert!(app.view_model.active_overlay.is_none());
     }
 
     #[test]
