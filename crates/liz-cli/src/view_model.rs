@@ -13,8 +13,8 @@ use liz_protocol::{
     ApprovalRequest, ArtifactKind, MemoryEvidenceView, MemorySearchHit, MemorySessionEntry,
     MemorySessionView, MemoryTopicSummary, MemoryWakeup, ModelStatusResponse, ProviderAuthProfile,
     RecentConversationWakeupView, ResponsePayload, ResumeSummary, RuntimeConfigResponse,
-    ServerEvent, ServerEventPayload, ServerResponseEnvelope, ShellSandboxSummary, Thread, ThreadId,
-    ThreadStatus,
+    SandboxMode, ServerEvent, ServerEventPayload, ServerResponseEnvelope, ShellSandboxSummary,
+    Thread, ThreadId, ThreadStatus,
 };
 use std::collections::BTreeMap;
 
@@ -42,6 +42,13 @@ const BUILTIN_COMMANDS: [SlashCommandSpec; 17] = [
     SlashCommandSpec::new("cancel", "Cancel the running turn", "/cancel"),
     SlashCommandSpec::new("clear", "Clear visible transcript and start fresh", "/clear"),
     SlashCommandSpec::new("exit", "Leave liz-cli", "/exit"),
+];
+
+const SANDBOX_MODES: [SandboxMode; 4] = [
+    SandboxMode::ReadOnly,
+    SandboxMode::WorkspaceWrite,
+    SandboxMode::DangerFullAccess,
+    SandboxMode::ExternalSandbox,
 ];
 
 /// Transcript entry categories surfaced by the chat shell.
@@ -96,6 +103,8 @@ pub enum OverlayPanel {
     Threads,
     /// Slash-command completion overlay.
     CommandPalette,
+    /// Shell sandbox mode picker overlay.
+    Sandbox,
 }
 
 /// One slash command surfaced in completion and help.
@@ -408,6 +417,8 @@ pub struct ViewModel {
     pub command_suggestions: Vec<SlashCommandSuggestion>,
     /// Selected suggestion row inside the command palette.
     pub selected_command_index: usize,
+    /// Selected row inside the sandbox mode picker.
+    pub selected_sandbox_index: usize,
     /// Config panel state.
     pub config_draft: ConfigDraft,
     /// Whether the composer currently targets slash-command mode.
@@ -427,6 +438,11 @@ impl ViewModel {
     /// Returns the builtin slash command inventory.
     pub fn slash_commands() -> &'static [SlashCommandSpec] {
         &BUILTIN_COMMANDS
+    }
+
+    /// Returns the sandbox modes exposed by the picker.
+    pub fn sandbox_modes() -> &'static [SandboxMode] {
+        &SANDBOX_MODES
     }
 
     /// Returns the selected thread, if one is available.
@@ -526,6 +542,34 @@ impl ViewModel {
         }
         self.selected_command_index =
             (self.selected_command_index + 1) % self.command_suggestions.len();
+    }
+
+    /// Returns the selected sandbox mode.
+    pub fn selected_sandbox_mode(&self) -> SandboxMode {
+        SANDBOX_MODES
+            .get(self.selected_sandbox_index)
+            .copied()
+            .unwrap_or(SandboxMode::WorkspaceWrite)
+    }
+
+    /// Selects the sandbox mode row matching the provided mode.
+    pub fn set_selected_sandbox_mode(&mut self, mode: SandboxMode) {
+        self.selected_sandbox_index =
+            SANDBOX_MODES.iter().position(|candidate| *candidate == mode).unwrap_or(1);
+    }
+
+    /// Moves the selected sandbox mode upward.
+    pub fn select_previous_sandbox_mode(&mut self) {
+        if self.selected_sandbox_index == 0 {
+            self.selected_sandbox_index = SANDBOX_MODES.len() - 1;
+        } else {
+            self.selected_sandbox_index -= 1;
+        }
+    }
+
+    /// Moves the selected sandbox mode downward.
+    pub fn select_next_sandbox_mode(&mut self) {
+        self.selected_sandbox_index = (self.selected_sandbox_index + 1) % SANDBOX_MODES.len();
     }
 
     /// Moves the selected conversation upward.

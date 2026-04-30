@@ -7,7 +7,7 @@ use crossterm::cursor::{Hide, MoveTo, MoveToColumn, MoveUp, Show};
 use crossterm::queue;
 use crossterm::style::{Color, Print, ResetColor, SetForegroundColor};
 use crossterm::terminal::{self, Clear, ClearType};
-use liz_protocol::ThreadId;
+use liz_protocol::{SandboxMode, ThreadId};
 use std::env;
 use std::io::{self, Stdout, Write};
 
@@ -734,6 +734,7 @@ fn slash_page_header(panel: OverlayPanel) -> &'static str {
         OverlayPanel::Memory => "   Memory",
         OverlayPanel::Threads => "   Conversations",
         OverlayPanel::CommandPalette => "   Commands",
+        OverlayPanel::Sandbox => "   Sandbox",
     }
 }
 
@@ -791,6 +792,7 @@ fn overlay_lines(panel: OverlayPanel, view_model: &ViewModel, width: usize) -> V
         OverlayPanel::Help => help_lines(),
         OverlayPanel::Memory => memory_lines(view_model, width),
         OverlayPanel::Threads => thread_lines(view_model),
+        OverlayPanel::Sandbox => sandbox_lines(view_model, width),
     }
 }
 
@@ -868,6 +870,39 @@ fn config_lines(view_model: &ViewModel) -> Vec<ScreenLine> {
         if draft.dirty { Color::Yellow } else { THEME_COLOR },
     ));
     lines
+}
+
+fn sandbox_lines(view_model: &ViewModel, width: usize) -> Vec<ScreenLine> {
+    let mut lines = Vec::new();
+    if let Some(sandbox) = &view_model.runtime_sandbox {
+        lines.push(ScreenLine::colored(
+            format!("Current {} via {}", sandbox.mode.as_str(), sandbox.backend.as_str()),
+            Color::DarkGrey,
+        ));
+        lines.push(ScreenLine::blank());
+    }
+
+    for (index, mode) in ViewModel::sandbox_modes().iter().copied().enumerate() {
+        let selected = index == view_model.selected_sandbox_index;
+        let marker = if selected { "›" } else { " " };
+        let label = format!("{marker} {:<20} {}", mode.as_str(), sandbox_mode_description(mode));
+        lines.push(ScreenLine::colored(
+            truncate(&label, width),
+            if selected { Color::White } else { Color::DarkGrey },
+        ));
+    }
+    lines.push(ScreenLine::blank());
+    lines.push(ScreenLine::colored("Enter apply · Esc cancel", Color::DarkGrey));
+    lines
+}
+
+fn sandbox_mode_description(mode: SandboxMode) -> &'static str {
+    match mode {
+        SandboxMode::ReadOnly => "read files only",
+        SandboxMode::WorkspaceWrite => "write inside the workspace",
+        SandboxMode::DangerFullAccess => "run without sandboxing",
+        SandboxMode::ExternalSandbox => "trust the parent sandbox",
+    }
 }
 
 fn config_page_lines(view_model: &ViewModel, width: usize) -> Vec<ScreenLine> {

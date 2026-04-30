@@ -154,6 +154,11 @@ impl CliApp {
             return Ok(true);
         }
 
+        if self.view_model.active_overlay == Some(OverlayPanel::Sandbox) {
+            self.handle_sandbox_overlay_key(key)?;
+            return Ok(true);
+        }
+
         match key.code {
             KeyCode::Esc => {
                 if !self.view_model.pending_approvals.is_empty() {
@@ -276,6 +281,27 @@ impl CliApp {
                 if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT {
                     self.view_model.config_draft.push_char(character);
                 }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn handle_sandbox_overlay_key(
+        &mut self,
+        key: KeyEvent,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        match key.code {
+            KeyCode::Esc => {
+                self.view_model.close_overlay();
+                self.view_model.status_line = "Sandbox picker closed".to_owned();
+            }
+            KeyCode::Up => self.view_model.select_previous_sandbox_mode(),
+            KeyCode::Tab | KeyCode::Down => self.view_model.select_next_sandbox_mode(),
+            KeyCode::Enter => {
+                let mode = self.view_model.selected_sandbox_mode();
+                self.view_model.close_overlay();
+                self.set_sandbox_mode(mode)?;
             }
             _ => {}
         }
@@ -688,17 +714,31 @@ impl CliApp {
     fn configure_sandbox(&mut self, argument: &str) -> Result<(), Box<dyn std::error::Error>> {
         let raw_mode = argument.split_whitespace().next().unwrap_or_default();
         if raw_mode.is_empty() {
-            self.send_request(ClientRequest::RuntimeConfigGet(RuntimeConfigGetRequest {}))?;
-            self.view_model.status_line =
-                "Use /sandbox <read-only|workspace-write|danger-full-access|external-sandbox>"
-                    .to_owned();
-            return Ok(());
+            return self.open_sandbox_overlay();
         }
 
         let Some(mode) = parse_sandbox_mode(raw_mode) else {
             self.view_model.status_line = format!("Unknown sandbox mode {raw_mode}");
             return Ok(());
         };
+        self.set_sandbox_mode(mode)
+    }
+
+    fn open_sandbox_overlay(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let current_mode = self
+            .view_model
+            .runtime_sandbox
+            .as_ref()
+            .map(|sandbox| sandbox.mode)
+            .unwrap_or(SandboxMode::WorkspaceWrite);
+        self.view_model.set_selected_sandbox_mode(current_mode);
+        self.view_model.open_overlay(OverlayPanel::Sandbox);
+        self.send_request(ClientRequest::RuntimeConfigGet(RuntimeConfigGetRequest {}))?;
+        self.view_model.status_line = "Sandbox picker opened".to_owned();
+        Ok(())
+    }
+
+    fn set_sandbox_mode(&mut self, mode: SandboxMode) -> Result<(), Box<dyn std::error::Error>> {
         let network_access = if matches!(mode, SandboxMode::DangerFullAccess) {
             SandboxNetworkAccess::Enabled
         } else {
@@ -976,7 +1016,7 @@ mod tests {
     }
 
     #[test]
-    fn sandbox_command_without_mode_refreshes_runtime_config() {
+    fn sandbox_command_without_mode_opens_picker() {
         let (request_tx, request_rx) = mpsc::channel();
         let (_response_tx, response_rx) = mpsc::channel();
         let (_event_tx, event_rx) = mpsc::channel();
@@ -990,6 +1030,39 @@ mod tests {
 
         let request = request_rx.recv().expect("runtime config request should be sent");
         assert!(matches!(request.request, ClientRequest::RuntimeConfigGet(_)));
+        assert_eq!(app.view_model.active_overlay, Some(OverlayPanel::Sandbox));
+        assert_eq!(app.view_model.selected_sandbox_mode(), SandboxMode::WorkspaceWrite);
+    }
+
+    #[test]
+    fn sandbox_picker_enter_updates_runtime_config() {
+        let (request_tx, request_rx) = mpsc::channel();
+        let (_response_tx, response_rx) = mpsc::channel();
+        let (_event_tx, event_rx) = mpsc::channel();
+        let client = WebSocketAppClient::new(request_tx, response_rx, event_rx);
+        let mut app = CliApp::new(client, DEFAULT_SERVER_URL.to_owned());
+
+        app.view_model.input_buffer = "/sandbox".to_owned();
+        app.view_model.refresh_composer_affordances();
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()))
+            .expect("sandbox command should be handled");
+        let _refresh = request_rx.recv().expect("runtime config request should be sent");
+
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::empty()))
+            .expect("down should move sandbox selection");
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()))
+            .expect("enter should apply sandbox selection");
+
+        let request = request_rx.recv().expect("runtime config update should be sent");
+        match request.request {
+            ClientRequest::RuntimeConfigUpdate(update) => {
+                let sandbox = update.sandbox.expect("sandbox update should be present");
+                assert_eq!(sandbox.mode, SandboxMode::DangerFullAccess);
+                assert_eq!(sandbox.network_access, SandboxNetworkAccess::Enabled);
+            }
+            other => panic!("unexpected request: {other:?}"),
+        }
+        assert!(app.view_model.active_overlay.is_none());
     }
 
     #[test]
