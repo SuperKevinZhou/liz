@@ -817,26 +817,14 @@ fn build_memory_wakeup(
     thread: &Thread,
     recent_conversation: &RecentConversationWakeupView,
 ) -> MemoryWakeup {
-    let relevant_facts = snapshot
-        .facts
+    let ranked_facts = ranked_wakeup_facts(snapshot, thread);
+    let relevant_facts = ranked_facts
         .iter()
-        .filter(|fact| fact.invalidated_at.is_none() && fact.invalidated_by.is_none())
-        .filter(|fact| {
-            fact.related_thread_ids.is_empty() || fact.related_thread_ids.contains(&thread.id)
-        })
         .take(6)
         .map(|fact| format!("{}: {}", fact.subject, fact.value))
         .collect::<Vec<_>>();
-    let citation_fact_ids = snapshot
-        .facts
-        .iter()
-        .filter(|fact| fact.invalidated_at.is_none() && fact.invalidated_by.is_none())
-        .filter(|fact| {
-            fact.related_thread_ids.is_empty() || fact.related_thread_ids.contains(&thread.id)
-        })
-        .take(6)
-        .map(|fact| fact.id.clone())
-        .collect::<Vec<_>>();
+    let citation_fact_ids =
+        ranked_facts.iter().take(6).map(|fact| fact.id.clone()).collect::<Vec<_>>();
 
     MemoryWakeup {
         identity_summary: snapshot.identity_summary.clone(),
@@ -859,6 +847,49 @@ fn build_memory_wakeup(
         citation_fact_ids,
         citations: recent_conversation.citations.clone(),
     }
+}
+
+fn ranked_wakeup_facts<'a>(
+    snapshot: &'a GlobalMemorySnapshot,
+    thread: &Thread,
+) -> Vec<&'a StoredMemoryFact> {
+    let mut facts = snapshot
+        .facts
+        .iter()
+        .filter(|fact| fact.invalidated_at.is_none() && fact.invalidated_by.is_none())
+        .filter(|fact| {
+            fact.related_thread_ids.is_empty() || fact.related_thread_ids.contains(&thread.id)
+        })
+        .collect::<Vec<_>>();
+    facts.sort_by(|left, right| {
+        wakeup_fact_score(right, thread)
+            .cmp(&wakeup_fact_score(left, thread))
+            .then_with(|| right.updated_at.cmp(&left.updated_at))
+    });
+    facts
+}
+
+fn wakeup_fact_score(fact: &StoredMemoryFact, thread: &Thread) -> i32 {
+    let mut score = 0;
+    if fact.related_thread_ids.contains(&thread.id) {
+        score += 50;
+    }
+    match fact.kind {
+        MemoryFactKind::Identity => score += 40,
+        MemoryFactKind::Commitment => score += 35,
+        MemoryFactKind::ActiveState => score += 30,
+        MemoryFactKind::Decision => score += 25,
+        MemoryFactKind::ProcedureCandidate => score += 15,
+        MemoryFactKind::Topic | MemoryFactKind::Keyword => score += 10,
+    }
+    if fact
+        .keywords
+        .iter()
+        .any(|keyword| thread.title.to_ascii_lowercase().contains(&keyword.to_ascii_lowercase()))
+    {
+        score += 10;
+    }
+    score
 }
 
 fn build_recent_conversation(
