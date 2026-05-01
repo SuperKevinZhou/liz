@@ -17,6 +17,7 @@ const DEFAULT_TOPIC_LIMIT: usize = 12;
 const DEFAULT_SEARCH_LIMIT: usize = 8;
 const RECENT_SUMMARY_LIMIT: usize = 4;
 const RECENT_ENTRY_LIMIT: usize = 8;
+const FAKE_EMBEDDING_DIM: usize = 64;
 
 /// Handles foreground wake-up, compilation, and recall work.
 #[derive(Debug, Clone, Default)]
@@ -605,7 +606,7 @@ impl ForegroundMemoryEngine {
                 topic.summary,
                 topic.recent_keywords.join(" ")
             );
-            let score = score_match(&query_tokens, &haystack, mode);
+            let score = score_match(query, &query_tokens, &haystack, mode);
             if score == 0 {
                 continue;
             }
@@ -627,7 +628,7 @@ impl ForegroundMemoryEngine {
             .filter(|fact| fact.invalidated_at.is_none() && fact.invalidated_by.is_none())
         {
             let haystack = format!("{} {} {}", fact.subject, fact.value, fact.keywords.join(" "));
-            let score = score_match(&query_tokens, &haystack, mode);
+            let score = score_match(query, &query_tokens, &haystack, mode);
             if score == 0 {
                 continue;
             }
@@ -658,7 +659,7 @@ impl ForegroundMemoryEngine {
                 thread.active_summary.clone().unwrap_or_default(),
                 summaries
             );
-            let score = score_match(&query_tokens, &haystack, mode);
+            let score = score_match(query, &query_tokens, &haystack, mode);
             if score == 0 {
                 continue;
             }
@@ -1255,24 +1256,74 @@ fn normalize_tokens(text: &str) -> Vec<String> {
         .collect()
 }
 
-fn score_match(query_tokens: &[String], haystack: &str, mode: MemorySearchMode) -> u32 {
+fn score_match(
+    query: &str,
+    query_tokens: &[String],
+    haystack: &str,
+    mode: MemorySearchMode,
+) -> u32 {
     let haystack_tokens = normalize_tokens(haystack);
     if haystack_tokens.is_empty() {
         return 0;
     }
     let haystack_set = haystack_tokens.into_iter().collect::<BTreeSet<_>>();
     let shared = query_tokens.iter().filter(|token| haystack_set.contains(*token)).count() as u32;
-    if shared == 0 {
-        return 0;
-    }
 
     match mode {
         MemorySearchMode::Keyword => shared * 100,
-        MemorySearchMode::Semantic => {
-            let total = query_tokens.len().max(haystack_set.len()) as u32;
-            shared * 100 + (shared * 100 / total.max(1))
-        }
+        MemorySearchMode::Semantic => semantic_embedding_score(query, haystack, shared),
     }
+}
+
+fn semantic_embedding_score(query: &str, haystack: &str, shared_tokens: u32) -> u32 {
+    let query_embedding = deterministic_embedding(query);
+    let haystack_embedding = deterministic_embedding(haystack);
+    let mut dot = 0.0_f32;
+    let mut query_norm = 0.0_f32;
+    let mut haystack_norm = 0.0_f32;
+    for index in 0..FAKE_EMBEDDING_DIM {
+        dot += query_embedding[index] * haystack_embedding[index];
+        query_norm += query_embedding[index] * query_embedding[index];
+        haystack_norm += haystack_embedding[index] * haystack_embedding[index];
+    }
+    if query_norm == 0.0 || haystack_norm == 0.0 {
+        return 0;
+    }
+    let cosine = dot / (query_norm.sqrt() * haystack_norm.sqrt());
+    let score = (cosine.max(0.0) * 100.0).round() as u32 + shared_tokens * 25;
+    (score >= 18).then_some(score).unwrap_or(0)
+}
+
+fn deterministic_embedding(text: &str) -> [f32; FAKE_EMBEDDING_DIM] {
+    let mut vector = [0.0_f32; FAKE_EMBEDDING_DIM];
+    for token in normalize_tokens(text).into_iter().flat_map(semantic_token_aliases) {
+        let index = stable_hash(&token) as usize % FAKE_EMBEDDING_DIM;
+        vector[index] += 1.0;
+    }
+    vector
+}
+
+fn semantic_token_aliases(token: String) -> Vec<String> {
+    let canonical = match token.as_str() {
+        "edit" | "edits" | "change" | "changes" | "modify" | "modified" | "patch" | "patched" => {
+            "change"
+        }
+        "repo" | "repository" | "project" | "workspace" | "codebase" => "workspace",
+        "remember" | "recall" | "memory" | "memorize" | "memories" => "memory",
+        "conversation" | "chat" | "thread" | "session" => "conversation",
+        "run" | "exec" | "execute" | "command" | "shell" => "command",
+        _ => return vec![token],
+    };
+    vec![token, canonical.to_owned()]
+}
+
+fn stable_hash(text: &str) -> u64 {
+    let mut hash = 14_695_981_039_346_656_037_u64;
+    for byte in text.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(1_099_511_628_211);
+    }
+    hash
 }
 
 fn merge_into_vec<T, I>(target: &mut Vec<T>, values: I)
@@ -1355,6 +1406,26 @@ mod tests {
             .expect_err("invalid compiler JSON should be rejected");
 
         assert_eq!(error.code(), "memory_compilation_json_invalid");
+    }
+
+    #[test]
+    fn semantic_search_scores_embedding_aliases_without_token_overlap() {
+        let query_tokens = normalize_tokens("edit project files");
+        let keyword_score = score_match(
+            "edit project files",
+            &query_tokens,
+            "workspace patch workflow",
+            MemorySearchMode::Keyword,
+        );
+        let semantic_score = score_match(
+            "edit project files",
+            &query_tokens,
+            "workspace patch workflow",
+            MemorySearchMode::Semantic,
+        );
+
+        assert_eq!(keyword_score, 0);
+        assert!(semantic_score > 0);
     }
 
     fn test_compilation_input(with_citation: bool) -> MemoryCompilationInput {
