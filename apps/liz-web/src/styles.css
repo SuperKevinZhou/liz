@@ -51,6 +51,11 @@ button {
   cursor: pointer;
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
 .console-shell {
   display: grid;
   grid-template-columns: 58px minmax(240px, 300px) minmax(420px, 1fr) minmax(280px, 360px);
@@ -118,6 +123,15 @@ button {
   place-items: center;
   margin-top: auto;
   color: var(--danger);
+}
+
+.rail-status.connected {
+  color: var(--accent);
+}
+
+.rail-status.connecting,
+.rail-status.reconnecting {
+  color: var(--approval);
 }
 
 .thread-panel,
@@ -805,5 +819,20 @@ button {
 
   .inspector {
     left: 60px;
+  }
+
+  .memory-grid,
+  .approval-row {
+    grid-template-columns: 1fr;
+  }
+
+  .memory-surface header,
+  .memory-search,
+  .approval-actions,
+  .settings-header,
+  .channel-row,
+  .provider-list article {
+    align-items: stretch;
+    flex-direction: column;
   }
 }

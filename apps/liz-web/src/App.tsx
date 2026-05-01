@@ -64,7 +64,7 @@ export function App() {
             );
           })}
         </nav>
-        <div className="rail-status" title="Disconnected">
+        <div className={`rail-status ${runtime.connectionState}`} title={runtime.connectionState}>
           <CircleDot size={14} />
         </div>
       </aside>
@@ -353,7 +353,12 @@ function MemorySurface({ runtime }: { runtime: LizRuntime }) {
           <option value="keyword">Keyword</option>
           <option value="semantic">Semantic</option>
         </select>
-        <button className="primary-button" type="button" onClick={() => void runtime.searchMemory(query, mode)}>
+          <button
+            className="primary-button"
+            type="button"
+            disabled={!query.trim()}
+            onClick={() => void runtime.searchMemory(query, mode)}
+          >
           Search
         </button>
       </form>
@@ -518,10 +523,20 @@ function ChatSurface({ runtime }: { runtime: LizRuntime }) {
         />
         <div>
           <span>{runtime.activeThread ? workspaceLabel(runtime.activeThread) : "no thread selected"}</span>
-          <button className="secondary-button" type="button" onClick={() => void runtime.cancelTurn()}>
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={!runtime.activeRuntime.activeTurnId}
+            onClick={() => void runtime.cancelTurn()}
+          >
             Stop
           </button>
-          <button className="primary-button" type="button" onClick={submit}>
+          <button
+            className="primary-button"
+            type="button"
+            disabled={!runtime.activeThread || !message.trim()}
+            onClick={submit}
+          >
             Send
           </button>
         </div>
@@ -714,6 +729,7 @@ function Inspector({ runtime }: { runtime: LizRuntime }) {
           type="button"
           title="Fork thread"
           aria-label="Fork thread"
+          disabled={!runtime.activeThread}
           onClick={() => {
             if (!runtime.activeThread) {
               return;
