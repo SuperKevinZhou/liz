@@ -4,7 +4,7 @@ test("loads the owner-facing home shell", async ({ page }) => {
   await page.goto("/");
 
   await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
-  await expect(page.getByRole("navigation", { name: "Primary navigation" })).toBeVisible();
+  await expect(page.getByLabel("Primary navigation")).toBeVisible();
   await expect(page.getByRole("button", { name: "Home" })).toHaveClass(/active/);
   await expect(page.getByRole("button", { name: "People" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Devices" })).toBeVisible();
