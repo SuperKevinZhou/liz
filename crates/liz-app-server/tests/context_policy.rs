@@ -1,13 +1,17 @@
 //! Context assembly and policy-engine coverage for Phase 6.
 
-use liz_app_server::runtime::{RetrievalScope, RuntimeCoordinator};
+use liz_app_server::runtime::{ContextAssembler, RetrievalScope, RuntimeCoordinator};
 use liz_app_server::server::{spawn_loopback_websocket, AppServer, WebSocketTransportError};
-use liz_app_server::storage::StoragePaths;
+use liz_app_server::storage::{GlobalMemorySnapshot, StoragePaths, StoredMemoryFact};
 use liz_protocol::requests::{
     ApprovalRespondRequest, ClientRequest, ClientRequestEnvelope, ThreadStartRequest,
     TurnInputKind, TurnStartRequest,
 };
-use liz_protocol::{ApprovalDecision, RequestId, ServerEventPayload};
+use liz_protocol::{
+    ApprovalDecision, InfoBoundary, MemoryFactId, MemoryFactKind, ParticipantRef,
+    RelationshipEntry, RequestId, ServerEventPayload, Thread, ThreadId, ThreadStatus, Timestamp,
+    TrustLevel,
+};
 use std::time::Duration;
 use tempfile::TempDir;
 
@@ -95,6 +99,98 @@ fn context_assembly_surfaces_recent_conversation_wakeup_and_executor_boundary() 
     assert!(context.developer_prompt.contains("thread_projection:"));
     assert!(context.layers.executor_boundary.contains("memory_owner: liz"));
     assert!(context.prompt.contains("controlled task executor"));
+}
+
+#[test]
+fn context_assembly_filters_relationship_boundaries() {
+    let assembler = ContextAssembler;
+    let thread = Thread {
+        id: ThreadId::new("thread_relationship"),
+        title: "Relationship context".to_owned(),
+        status: ThreadStatus::Active,
+        created_at: Timestamp::new("2026-05-01T00:00:00Z"),
+        updated_at: Timestamp::new("2026-05-01T00:00:00Z"),
+        active_goal: Some("Discuss project status".to_owned()),
+        active_summary: Some(
+            "Private personal plans and project status are both active".to_owned(),
+        ),
+        last_interruption: None,
+        workspace_ref: None,
+        pending_commitments: vec![
+            "Share project status update".to_owned(),
+            "Keep personal plans private".to_owned(),
+        ],
+        latest_turn_id: None,
+        latest_checkpoint_id: None,
+        parent_thread_id: None,
+    };
+    let mut snapshot = GlobalMemorySnapshot::empty();
+    snapshot.identity_summary = Some("Owner prefers direct Chinese updates".to_owned());
+    snapshot.active_state_summary =
+        Some("Project status is green; personal plans are private".to_owned());
+    snapshot.facts.push(StoredMemoryFact {
+        id: MemoryFactId::new("fact_project"),
+        kind: MemoryFactKind::ActiveState,
+        subject: "project status".to_owned(),
+        value: "Project status is green".to_owned(),
+        keywords: vec!["project".to_owned()],
+        related_thread_ids: vec![thread.id.clone()],
+        citations: Vec::new(),
+        updated_at: Timestamp::new("2026-05-01T00:00:00Z"),
+        invalidated_at: None,
+        invalidated_by: None,
+    });
+    snapshot.facts.push(StoredMemoryFact {
+        id: MemoryFactId::new("fact_private"),
+        kind: MemoryFactKind::Identity,
+        subject: "personal plans".to_owned(),
+        value: "Personal plans include a private relocation".to_owned(),
+        keywords: vec!["personal".to_owned()],
+        related_thread_ids: vec![thread.id.clone()],
+        citations: Vec::new(),
+        updated_at: Timestamp::new("2026-05-01T00:00:00Z"),
+        invalidated_at: None,
+        invalidated_by: None,
+    });
+    snapshot.relationships.push(RelationshipEntry {
+        person_id: "telegram_user_7".to_owned(),
+        display_name: "Alice".to_owned(),
+        trust_level: TrustLevel::Trusted,
+        info_boundary: InfoBoundary {
+            shared_topics: vec!["project status".to_owned()],
+            forbidden_topics: vec!["personal plans".to_owned()],
+            share_active_state: true,
+            share_commitments: true,
+        },
+        interaction_stance: "friendly_bounded".to_owned(),
+        notes: None,
+    });
+
+    let trusted = assembler.assemble(
+        &snapshot,
+        &thread,
+        &[],
+        "What can you tell Alice?",
+        Some(&ParticipantRef {
+            external_participant_id: "telegram_user_7".to_owned(),
+            display_name: Some("Alice".to_owned()),
+        }),
+    );
+    assert!(trusted.layers.resident.contains("Project status is green"));
+    assert!(!trusted.layers.resident.contains("private relocation"));
+    assert!(!trusted.layers.resident.contains("Owner prefers direct Chinese updates"));
+    assert!(trusted.developer_prompt.contains("relationship_context:"));
+
+    let stranger = assembler.assemble(
+        &snapshot,
+        &thread,
+        &[],
+        "What do you know about the owner?",
+        Some(&ParticipantRef { external_participant_id: "unknown".to_owned(), display_name: None }),
+    );
+    assert!(!stranger.layers.resident.contains("Project status is green"));
+    assert!(!stranger.layers.resident.contains("private relocation"));
+    assert!(stranger.developer_prompt.contains("extremely conservative"));
 }
 
 #[test]

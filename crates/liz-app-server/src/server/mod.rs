@@ -17,7 +17,7 @@ use liz_protocol::{
     AssistantChunkEvent, AssistantCompletedEvent, CheckpointCreatedEvent, ClientRequestEnvelope,
     DiffAvailableEvent, ExecutorOutputChunkEvent, ExecutorTaskId, MemoryCompilationAppliedEvent,
     MemoryDreamingCompletedEvent, MemoryInvalidationAppliedEvent, ModelStatusResponse,
-    ProviderAuthProfile, ProviderCredential, ServerEvent, ServerEventPayload,
+    ParticipantRef, ProviderAuthProfile, ProviderCredential, ServerEvent, ServerEventPayload,
     ServerResponseEnvelope, ThreadId, ToolCallRequest, ToolCompletedEvent, TurnCancelRequest,
     TurnCompletedEvent, TurnFailedEvent, TurnId,
 };
@@ -120,7 +120,11 @@ impl AppServer {
         self.event_bus.publish_all(handled.events);
         match request {
             liz_protocol::ClientRequest::TurnStart(request) => {
-                self.continue_turn_after_policy(&handled.response, request.input);
+                self.continue_turn_after_policy(
+                    &handled.response,
+                    request.input,
+                    request.participant,
+                );
             }
             liz_protocol::ClientRequest::TurnCancel(request) => {
                 self.compile_memory_after_boundary(&handled.response, &request.thread_id, None);
@@ -156,7 +160,12 @@ impl AppServer {
         }
     }
 
-    fn continue_turn_after_policy(&mut self, response: &ServerResponseEnvelope, input: String) {
+    fn continue_turn_after_policy(
+        &mut self,
+        response: &ServerResponseEnvelope,
+        input: String,
+        participant: Option<ParticipantRef>,
+    ) {
         let (thread, turn) = match response {
             ServerResponseEnvelope::Success(success) => match &success.response {
                 liz_protocol::ResponsePayload::TurnStart(turn_response) => {
@@ -175,7 +184,9 @@ impl AppServer {
             ServerResponseEnvelope::Error(_) => return,
         };
 
-        let Ok(context) = self.runtime.assemble_context(&thread.id, &input) else {
+        let Ok(context) =
+            self.runtime.assemble_context_for_participant(&thread.id, &input, participant.as_ref())
+        else {
             return;
         };
         let decision = self.runtime.evaluate_policy(&input, &context);

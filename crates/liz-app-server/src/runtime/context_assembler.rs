@@ -2,7 +2,7 @@
 
 use crate::storage::GlobalMemorySnapshot;
 use crate::storage::TurnLogEntry;
-use liz_protocol::{MemoryWakeup, Thread};
+use liz_protocol::{InfoBoundary, MemoryWakeup, ParticipantRef, Thread, TrustLevel};
 
 /// The retrieval scope chosen for the current turn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,40 +100,55 @@ impl ContextAssembler {
         thread: &Thread,
         recent_entries: &[TurnLogEntry],
         input: &str,
+        participant: Option<&ParticipantRef>,
     ) -> AssembledContext {
         let scope = classify_scope(input);
+        let relationship = resolve_relationship(snapshot, participant);
         let retrieval = TaskLocalRetrieval {
             query_terms: derive_query_terms(input),
             requires_full_repo_scan: matches!(scope, RetrievalScope::Expanded),
         };
         let wakeup = MemoryWakeup {
-            identity_summary: snapshot.identity_summary.clone(),
-            active_state: snapshot
-                .active_state_summary
-                .clone()
-                .or_else(|| thread.active_summary.clone()),
+            identity_summary: filter_identity_summary(snapshot, &relationship),
+            active_state: filter_active_state(snapshot, thread, &relationship),
             relevant_facts: snapshot
                 .facts
                 .iter()
                 .filter(|fact| fact.invalidated_at.is_none())
+                .filter(|fact| relationship_allows_text(&relationship, &fact.value))
                 .take(3)
                 .map(|fact| format!("{}: {}", fact.subject, fact.value))
                 .collect(),
-            open_commitments: thread.pending_commitments.clone(),
-            recent_topics: if snapshot.recent_topics.is_empty() {
+            open_commitments: filter_commitments(thread, &relationship),
+            recent_topics: if !relationship_allows_active_state(&relationship) {
+                Vec::new()
+            } else if snapshot.recent_topics.is_empty() {
                 Vec::new()
             } else {
-                snapshot.recent_topics.clone()
+                snapshot
+                    .recent_topics
+                    .iter()
+                    .filter(|topic| relationship_allows_text(&relationship, topic))
+                    .cloned()
+                    .collect()
             },
-            recent_keywords: if snapshot.recent_keywords.is_empty() {
+            recent_keywords: if !relationship_allows_active_state(&relationship) {
+                Vec::new()
+            } else if snapshot.recent_keywords.is_empty() {
                 Vec::new()
             } else {
-                snapshot.recent_keywords.clone()
+                snapshot
+                    .recent_keywords
+                    .iter()
+                    .filter(|keyword| relationship_allows_text(&relationship, keyword))
+                    .cloned()
+                    .collect()
             },
             citation_fact_ids: snapshot
                 .facts
                 .iter()
                 .filter(|fact| fact.invalidated_at.is_none())
+                .filter(|fact| relationship_allows_text(&relationship, &fact.value))
                 .take(3)
                 .map(|fact| fact.id.clone())
                 .collect(),
@@ -203,8 +218,9 @@ impl ContextAssembler {
         } else {
             String::new()
         };
+        let relationship_stance = liz_relationship_stance_injection(&relationship);
         let developer_prompt = format!(
-            "turn_operating_contract:\n{}\n\nrecent_conversation_wakeup:\n{}\n\nthread_projection:\n{}\n\ntask_local:\n{}\n\nexecutor_boundary:\n{}\n\ntooling_surface:\n{}\n\nexecution_boundaries:\n{}{}",
+            "turn_operating_contract:\n{}\n\nrecent_conversation_wakeup:\n{}\n\nthread_projection:\n{}\n\ntask_local:\n{}\n\nexecutor_boundary:\n{}\n\ntooling_surface:\n{}\n\nexecution_boundaries:\n{}{}{}",
             liz_turn_operating_contract(),
             layers.recent_conversation,
             layers.thread_projection,
@@ -213,6 +229,7 @@ impl ContextAssembler {
             liz_tool_surface_summary(thread.workspace_ref.as_deref()),
             liz_execution_boundary_contract(),
             onboarding,
+            relationship_stance,
         );
         let user_prompt = input.to_owned();
         let prompt = format!(
@@ -405,6 +422,143 @@ Start naturally:
 - Ask about work style: whether they prefer autonomous progress or frequent check-ins.
 
 Do not make this a questionnaire. Weave the questions into natural conversation and spread them across turns when needed. What you learn here becomes L0 identity for future wake-up and continuity."#
+}
+
+#[derive(Debug, Clone)]
+struct RelationshipContext {
+    participant_name: String,
+    trust_level: TrustLevel,
+    boundary: InfoBoundary,
+}
+
+fn resolve_relationship(
+    snapshot: &GlobalMemorySnapshot,
+    participant: Option<&ParticipantRef>,
+) -> RelationshipContext {
+    let Some(participant) = participant else {
+        return RelationshipContext {
+            participant_name: "unknown participant".to_owned(),
+            trust_level: TrustLevel::Stranger,
+            boundary: snapshot.default_stranger_boundary.clone(),
+        };
+    };
+
+    if participant.external_participant_id == "owner" {
+        return RelationshipContext {
+            participant_name: participant
+                .display_name
+                .clone()
+                .unwrap_or_else(|| "owner".to_owned()),
+            trust_level: TrustLevel::Owner,
+            boundary: InfoBoundary::owner_default(),
+        };
+    }
+
+    if let Some(relationship) = snapshot
+        .relationships
+        .iter()
+        .find(|entry| entry.person_id == participant.external_participant_id)
+    {
+        return RelationshipContext {
+            participant_name: relationship.display_name.clone(),
+            trust_level: relationship.trust_level,
+            boundary: relationship.info_boundary.clone(),
+        };
+    }
+
+    RelationshipContext {
+        participant_name: participant
+            .display_name
+            .clone()
+            .unwrap_or_else(|| participant.external_participant_id.clone()),
+        trust_level: TrustLevel::Stranger,
+        boundary: snapshot.default_stranger_boundary.clone(),
+    }
+}
+
+fn filter_identity_summary(
+    snapshot: &GlobalMemorySnapshot,
+    relationship: &RelationshipContext,
+) -> Option<String> {
+    if relationship.trust_level == TrustLevel::Owner {
+        snapshot.identity_summary.clone()
+    } else {
+        None
+    }
+}
+
+fn filter_active_state(
+    snapshot: &GlobalMemorySnapshot,
+    thread: &Thread,
+    relationship: &RelationshipContext,
+) -> Option<String> {
+    if relationship_allows_active_state(relationship) {
+        snapshot
+            .active_state_summary
+            .clone()
+            .or_else(|| thread.active_summary.clone())
+            .filter(|state| relationship_allows_text(relationship, state))
+    } else {
+        None
+    }
+}
+
+fn filter_commitments(thread: &Thread, relationship: &RelationshipContext) -> Vec<String> {
+    if !relationship.boundary.share_commitments {
+        return Vec::new();
+    }
+    thread
+        .pending_commitments
+        .iter()
+        .filter(|commitment| relationship_allows_text(relationship, commitment))
+        .cloned()
+        .collect()
+}
+
+fn relationship_allows_active_state(relationship: &RelationshipContext) -> bool {
+    relationship.trust_level == TrustLevel::Owner || relationship.boundary.share_active_state
+}
+
+fn relationship_allows_text(relationship: &RelationshipContext, text: &str) -> bool {
+    if relationship.trust_level == TrustLevel::Owner {
+        return true;
+    }
+    let lower = text.to_ascii_lowercase();
+    if relationship
+        .boundary
+        .forbidden_topics
+        .iter()
+        .any(|topic| !topic.trim().is_empty() && lower.contains(&topic.to_ascii_lowercase()))
+    {
+        return false;
+    }
+    match relationship.trust_level {
+        TrustLevel::Trusted => {
+            relationship.boundary.shared_topics.is_empty()
+                || relationship.boundary.shared_topics.iter().any(|topic| {
+                    !topic.trim().is_empty() && lower.contains(&topic.to_ascii_lowercase())
+                })
+        }
+        TrustLevel::Acquaintance | TrustLevel::Stranger => false,
+        TrustLevel::Owner => true,
+    }
+}
+
+fn liz_relationship_stance_injection(relationship: &RelationshipContext) -> String {
+    match relationship.trust_level {
+        TrustLevel::Owner => String::new(),
+        TrustLevel::Trusted => format!(
+            "\n\nrelationship_context:\nYou are talking to {}, a trusted contact. Be friendly and bounded. Only discuss explicitly shared topics: {}. Do not mention forbidden topics: {}. If asked outside the sharing boundary, say you need the owner's permission.",
+            relationship.participant_name,
+            relationship.boundary.shared_topics.join(", "),
+            relationship.boundary.forbidden_topics.join(", ")
+        ),
+        TrustLevel::Acquaintance => format!(
+            "\n\nrelationship_context:\nYou are talking to {}, a known contact with limited sharing. Be polite, professional, and conservative. Share only public information and answer questions about liz's own capabilities. Do not discuss owner work details, preferences, emotional state, or private context without permission.",
+            relationship.participant_name
+        ),
+        TrustLevel::Stranger => "\n\nrelationship_context:\nYou are talking to someone not recognized by the owner. Be polite but extremely conservative. Share only that liz is a personal agent. Do not reveal owner information, work, contacts, preferences, active state, or commitments. If asked for more, say you need the owner's permission.".to_owned(),
+    }
 }
 
 fn classify_scope(input: &str) -> RetrievalScope {

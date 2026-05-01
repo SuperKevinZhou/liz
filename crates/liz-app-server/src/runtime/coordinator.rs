@@ -40,8 +40,8 @@ use liz_protocol::responses::{
 use liz_protocol::{
     ApprovalDecision, ApprovalRequest, ApprovalStatus, ArtifactKind, ArtifactRef, Checkpoint,
     CheckpointScope, GitHubCopilotDeviceCode, GitHubCopilotDevicePollStatus, GitLabOAuthStart,
-    MiniMaxOAuthDeviceCode, MiniMaxOAuthPollStatus, OpenAiCodexOAuthStart, ProviderAuthProfile,
-    ProviderCredential, Thread, ThreadId, Turn, TurnId,
+    MiniMaxOAuthDeviceCode, MiniMaxOAuthPollStatus, OpenAiCodexOAuthStart, ParticipantRef,
+    ProviderAuthProfile, ProviderCredential, Thread, ThreadId, Turn, TurnId,
 };
 use std::collections::HashMap;
 
@@ -696,13 +696,23 @@ impl RuntimeCoordinator {
         thread_id: &ThreadId,
         input: &str,
     ) -> RuntimeResult<AssembledContext> {
+        self.assemble_context_for_participant(thread_id, input, None)
+    }
+
+    /// Assembles context for a participant-aware turn.
+    pub fn assemble_context_for_participant(
+        &self,
+        thread_id: &ThreadId,
+        input: &str,
+        participant: Option<&ParticipantRef>,
+    ) -> RuntimeResult<AssembledContext> {
         let thread = self
             .stores
             .get_thread(thread_id)?
             .ok_or_else(|| RuntimeError::not_found("thread_not_found", "thread does not exist"))?;
         let snapshot = self.stores.read_global_memory()?;
         let recent_entries = self.stores.read_turn_log(thread_id)?;
-        Ok(self.context_assembler.assemble(&snapshot, &thread, &recent_entries, input))
+        Ok(self.context_assembler.assemble(&snapshot, &thread, &recent_entries, input, participant))
     }
 
     /// Runs the same foreground compilation helper used by runtime lifecycle boundaries.
