@@ -3,10 +3,14 @@ import { createProtocolClient, type LizProtocolClient } from "../protocol/client
 import type {
   ApprovalRespondRequest,
   ApprovalRespondResponse,
+  AboutYouUpdate,
   MemorySurfaceAboutYouReadResponse,
+  MemorySurfaceAboutYouUpdateResponse,
   MemorySurfaceCarryingReadResponse,
+  MemorySurfaceKnowledgeCorrectResponse,
   MemorySurfaceKnowledgeListResponse,
   ConnectionState,
+  KnowledgeCorrection,
   MemoryCompileNowRequest,
   MemoryCompileNowResponse,
   MemoryListTopicsRequest,
@@ -91,6 +95,8 @@ export interface LizRuntime {
   openMemoryEvidence: (request: MemoryOpenEvidenceRequest) => Promise<void>;
   loadRuntimeState: () => Promise<void>;
   loadOwnerSurfaces: () => Promise<void>;
+  updateAboutYou: (update: AboutYouUpdate) => Promise<void>;
+  correctKnowledge: (correction: KnowledgeCorrection) => Promise<void>;
   updateRuntimeConfig: (request: RuntimeConfigUpdateRequest) => Promise<void>;
   upsertProviderProfile: (profile: ProviderAuthProfile) => Promise<void>;
   deleteProviderProfile: (profileId: string) => Promise<void>;
@@ -422,6 +428,28 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
     dispatch({ type: "knowledge_set", surface: knowledge.data.surface });
   }, [request]);
 
+  const updateAboutYou = useCallback(
+    async (update: AboutYouUpdate) => {
+      const response = await request<MemorySurfaceAboutYouUpdateResponse, { update: AboutYouUpdate }>(
+        "memory_surface/about_you/update",
+        { update },
+      );
+      dispatch({ type: "about_you_set", surface: response.data.surface });
+    },
+    [request],
+  );
+
+  const correctKnowledge = useCallback(
+    async (correction: KnowledgeCorrection) => {
+      const response = await request<
+        MemorySurfaceKnowledgeCorrectResponse,
+        { correction: KnowledgeCorrection }
+      >("memory_surface/knowledge/correct", { correction });
+      dispatch({ type: "knowledge_item_upsert", item: response.data.item });
+    },
+    [request],
+  );
+
   const updateRuntimeConfig = useCallback(
     async (configRequest: RuntimeConfigUpdateRequest) => {
       const response = await request<RuntimeConfigResponse, RuntimeConfigUpdateRequest>(
@@ -486,6 +514,8 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
       openMemoryEvidence,
       loadRuntimeState,
       loadOwnerSurfaces,
+      updateAboutYou,
+      correctKnowledge,
       updateRuntimeConfig,
       upsertProviderProfile,
       deleteProviderProfile,
@@ -511,7 +541,9 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
       refreshThreads,
       respondToApproval,
       searchMemory,
+      correctKnowledge,
       updateRuntimeConfig,
+      updateAboutYou,
       upsertProviderProfile,
       approvals,
       runtime,

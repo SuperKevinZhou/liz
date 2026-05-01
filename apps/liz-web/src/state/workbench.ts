@@ -167,6 +167,7 @@ export type WorkbenchAction =
   | { type: "about_you_set"; surface: AboutYouSurface }
   | { type: "carrying_set"; surface: CarryingSurface }
   | { type: "knowledge_set"; surface: KnowledgeSurface }
+  | { type: "knowledge_item_upsert"; item: KnowledgeSurface["items"][number] }
   | { type: "nodes_set"; nodes: NodeRecord[] }
   | { type: "workspace_mounts_set"; mounts: WorkspaceMount[] }
   | { type: "runtime_config_set"; config: RuntimeConfigResponse }
@@ -379,6 +380,17 @@ export const workbenchReducer = (
 
     case "knowledge_set":
       return { ...state, knowledge: action.surface };
+
+    case "knowledge_item_upsert":
+      return {
+        ...state,
+        knowledge: {
+          items: [
+            action.item,
+            ...(state.knowledge?.items.filter((item) => item.fact_id !== action.item.fact_id) ?? []),
+          ],
+        },
+      };
 
     case "nodes_set":
       return { ...state, nodes: action.nodes };

@@ -250,6 +250,36 @@ function TopBar({
 function PeopleSurface({ runtime }: { runtime: LizRuntime }) {
   const aboutYou = runtime.state.aboutYou;
   const knowledge = runtime.state.knowledge;
+  const [identitySummaryDraft, setIdentitySummaryDraft] = useState<string | null>(null);
+  const [profileDraft, setProfileDraft] = useState<Record<string, string>>({});
+  const [correctionDrafts, setCorrectionDrafts] = useState<Record<string, string>>({});
+  const identitySummary = identitySummaryDraft ?? aboutYou?.identity_summary ?? "";
+
+  const saveAboutYou = () => {
+    const items = (aboutYou?.items ?? []).map((item) => ({
+      ...item,
+      value: profileDraft[item.key] ?? item.value,
+      confirmed: true,
+    }));
+    void runtime.updateAboutYou({
+      identity_summary: identitySummary.trim() || null,
+      items,
+    });
+    setIdentitySummaryDraft(null);
+    setProfileDraft({});
+  };
+
+  const correctKnowledge = (item: KnowledgeItem) => {
+    const correctedValue = correctionDrafts[item.fact_id]?.trim();
+    if (!correctedValue) {
+      return;
+    }
+    void runtime.correctKnowledge({
+      fact_id: item.fact_id,
+      corrected_value: correctedValue,
+    });
+    setCorrectionDrafts((current) => ({ ...current, [item.fact_id]: "" }));
+  };
 
   return (
     <section className="settings-surface control-surface">
@@ -265,12 +295,24 @@ function PeopleSurface({ runtime }: { runtime: LizRuntime }) {
       <div className="settings-grid">
         <section className="settings-section">
           <p className="eyebrow">About You</p>
-          <h3>{aboutYou?.identity_summary ?? "liz is still learning the owner profile."}</h3>
-          <div className="topic-list">
+          <textarea
+            className="small-textarea"
+            value={identitySummary}
+            onChange={(event) => setIdentitySummaryDraft(event.target.value)}
+            placeholder="How liz should summarize the owner profile"
+          />
+          <div className="editable-list">
             {(aboutYou?.items ?? []).map((item) => (
               <article key={item.key}>
-                <strong>{item.label}</strong>
-                <p>{item.value}</p>
+                <label>
+                  <span>{item.label}</span>
+                  <input
+                    value={profileDraft[item.key] ?? item.value}
+                    onChange={(event) =>
+                      setProfileDraft((current) => ({ ...current, [item.key]: event.target.value }))
+                    }
+                  />
+                </label>
                 <small>{item.confirmed ? "confirmed" : "learned"}</small>
               </article>
             ))}
@@ -278,6 +320,9 @@ function PeopleSurface({ runtime }: { runtime: LizRuntime }) {
               <div className="empty-panel">No owner profile details are confirmed yet.</div>
             ) : null}
           </div>
+          <button className="primary-button" type="button" onClick={saveAboutYou}>
+            Save About You
+          </button>
         </section>
         <section className="settings-section">
           <p className="eyebrow">Boundaries</p>
@@ -296,7 +341,12 @@ function PeopleSurface({ runtime }: { runtime: LizRuntime }) {
         </section>
         <section className="settings-section provider-section">
           <p className="eyebrow">Knowledge / Decisions</p>
-          <KnowledgeList items={knowledge?.items ?? []} />
+          <KnowledgeList
+            items={knowledge?.items ?? []}
+            correctionDrafts={correctionDrafts}
+            setCorrectionDrafts={setCorrectionDrafts}
+            onCorrect={correctKnowledge}
+          />
         </section>
       </div>
     </section>
@@ -397,7 +447,17 @@ function DiagnosticsSurface({ runtime }: { runtime: LizRuntime }) {
   );
 }
 
-function KnowledgeList({ items }: { items: KnowledgeItem[] }) {
+function KnowledgeList({
+  items,
+  correctionDrafts,
+  setCorrectionDrafts,
+  onCorrect,
+}: {
+  items: KnowledgeItem[];
+  correctionDrafts?: Record<string, string>;
+  setCorrectionDrafts?: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  onCorrect?: (item: KnowledgeItem) => void;
+}) {
   if (items.length === 0) {
     return <div className="empty-panel">No decisions or knowledge items loaded.</div>;
   }
@@ -409,6 +469,27 @@ function KnowledgeList({ items }: { items: KnowledgeItem[] }) {
           <strong>{item.subject}</strong>
           <p>{item.summary}</p>
           <small>{item.stale ? "stale" : item.kind}</small>
+          {setCorrectionDrafts && onCorrect ? (
+            <div className="correction-row">
+              <input
+                value={correctionDrafts?.[item.fact_id] ?? ""}
+                onChange={(event) =>
+                  setCorrectionDrafts((current) => ({
+                    ...current,
+                    [item.fact_id]: event.target.value,
+                  }))
+                }
+                placeholder="Correct this memory"
+              />
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => onCorrect(item)}
+              >
+                Correct
+              </button>
+            </div>
+          ) : null}
         </article>
       ))}
     </div>

@@ -530,6 +530,11 @@ export interface AboutYouSurface {
   items: AboutYouItem[];
 }
 
+export interface AboutYouUpdate {
+  identity_summary: string | null;
+  items: AboutYouItem[];
+}
+
 export interface CarryingItem {
   thread_id: ThreadId;
   title: string;
@@ -559,7 +564,16 @@ export interface KnowledgeSurface {
   items: KnowledgeItem[];
 }
 
+export interface KnowledgeCorrection {
+  fact_id: MemoryFactId;
+  corrected_value: string;
+}
+
 export interface MemorySurfaceAboutYouReadResponse {
+  surface: AboutYouSurface;
+}
+
+export interface MemorySurfaceAboutYouUpdateResponse {
   surface: AboutYouSurface;
 }
 
@@ -569,6 +583,10 @@ export interface MemorySurfaceCarryingReadResponse {
 
 export interface MemorySurfaceKnowledgeListResponse {
   surface: KnowledgeSurface;
+}
+
+export interface MemorySurfaceKnowledgeCorrectResponse {
+  item: KnowledgeItem;
 }
 
 export interface NodeRecord {
