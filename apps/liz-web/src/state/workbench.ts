@@ -5,6 +5,12 @@ import type {
   ApprovalResolvedEventPayload,
   ApprovalRequestedEventPayload,
   ExecutorOutputChunkEventPayload,
+  MemoryCompilationSummary,
+  MemoryEvidenceView,
+  MemorySearchHit,
+  MemoryTopicSummary,
+  MemoryWakeup,
+  RecentConversationWakeupView,
   ServerEvent,
   Thread,
   ThreadEventPayload,
@@ -83,6 +89,17 @@ export interface WorkbenchState {
   runtimeByThread: Record<ThreadId, ThreadRuntime>;
   toolCallsByThread: Record<ThreadId, ToolCallProjection[]>;
   approvalsByThread: Record<ThreadId, ApprovalRequest[]>;
+  memoryByThread: Record<
+    ThreadId,
+    {
+      wakeup: MemoryWakeup | null;
+      recentConversation: RecentConversationWakeupView | null;
+      compilation: MemoryCompilationSummary | null;
+    }
+  >;
+  memoryTopics: MemoryTopicSummary[];
+  memorySearch: { query: string; mode: "keyword" | "semantic"; hits: MemorySearchHit[] } | null;
+  selectedEvidence: MemoryEvidenceView | null;
   selectedToolCallId: string | null;
 }
 
@@ -96,7 +113,22 @@ export type WorkbenchAction =
   | { type: "resume_summary_added"; threadId: ThreadId; content: string; createdAt: string }
   | { type: "thread_error"; threadId: ThreadId; message: string }
   | { type: "tool_selected"; callId: string | null }
-  | { type: "approval_upsert"; approval: ApprovalRequest };
+  | { type: "approval_upsert"; approval: ApprovalRequest }
+  | {
+      type: "memory_wakeup_set";
+      threadId: ThreadId;
+      wakeup: MemoryWakeup;
+      recentConversation: RecentConversationWakeupView | null;
+    }
+  | { type: "memory_compilation_set"; threadId: ThreadId; compilation: MemoryCompilationSummary }
+  | { type: "memory_topics_set"; topics: MemoryTopicSummary[] }
+  | {
+      type: "memory_search_set";
+      query: string;
+      mode: "keyword" | "semantic";
+      hits: MemorySearchHit[];
+    }
+  | { type: "memory_evidence_set"; evidence: MemoryEvidenceView | null };
 
 export const initialWorkbenchState: WorkbenchState = {
   threads: [],
@@ -105,6 +137,10 @@ export const initialWorkbenchState: WorkbenchState = {
   runtimeByThread: {},
   toolCallsByThread: {},
   approvalsByThread: {},
+  memoryByThread: {},
+  memoryTopics: [],
+  memorySearch: null,
+  selectedEvidence: null,
   selectedToolCallId: null,
 };
 
@@ -218,6 +254,51 @@ export const workbenchReducer = (
 
     case "approval_upsert":
       return upsertApproval(state, action.approval.thread_id, action.approval);
+
+    case "memory_wakeup_set":
+      return {
+        ...state,
+        memoryByThread: {
+          ...state.memoryByThread,
+          [action.threadId]: {
+            ...(state.memoryByThread[action.threadId] ?? {
+              wakeup: null,
+              recentConversation: null,
+              compilation: null,
+            }),
+            wakeup: action.wakeup,
+            recentConversation: action.recentConversation,
+          },
+        },
+      };
+
+    case "memory_compilation_set":
+      return {
+        ...state,
+        memoryByThread: {
+          ...state.memoryByThread,
+          [action.threadId]: {
+            ...(state.memoryByThread[action.threadId] ?? {
+              wakeup: null,
+              recentConversation: null,
+              compilation: null,
+            }),
+            compilation: action.compilation,
+          },
+        },
+      };
+
+    case "memory_topics_set":
+      return { ...state, memoryTopics: action.topics };
+
+    case "memory_search_set":
+      return {
+        ...state,
+        memorySearch: { query: action.query, mode: action.mode, hits: action.hits },
+      };
+
+    case "memory_evidence_set":
+      return { ...state, selectedEvidence: action.evidence };
   }
 };
 
@@ -244,6 +325,15 @@ export const activeApprovals = (state: WorkbenchState) =>
   state.activeThreadId ? (state.approvalsByThread[state.activeThreadId] ?? []) : [];
 
 export const allApprovals = (state: WorkbenchState) => Object.values(state.approvalsByThread).flat();
+
+export const activeMemory = (state: WorkbenchState) =>
+  state.activeThreadId
+    ? (state.memoryByThread[state.activeThreadId] ?? {
+        wakeup: null,
+        recentConversation: null,
+        compilation: null,
+      })
+    : { wakeup: null, recentConversation: null, compilation: null };
 
 const projectServerEvent = (state: WorkbenchState, event: ServerEvent): WorkbenchState => {
   switch (event.event_type) {
@@ -387,6 +477,26 @@ const projectServerEvent = (state: WorkbenchState, event: ServerEvent): Workbenc
         content: `Approval ${approval.status}: ${approval.action_type}.`,
         createdAt: event.created_at,
         tone: "info",
+      });
+    }
+
+    case "memory_wakeup_loaded": {
+      const payload = event.payload as { wakeup: MemoryWakeup };
+      return workbenchReducer(state, {
+        type: "memory_wakeup_set",
+        threadId: event.thread_id,
+        wakeup: payload.wakeup,
+        recentConversation: null,
+      });
+    }
+
+    case "memory_compilation_applied":
+    case "memory_invalidation_applied": {
+      const payload = event.payload as { compilation: MemoryCompilationSummary };
+      return workbenchReducer(state, {
+        type: "memory_compilation_set",
+        threadId: event.thread_id,
+        compilation: payload.compilation,
       });
     }
 

@@ -4,6 +4,16 @@ import type {
   ApprovalRespondRequest,
   ApprovalRespondResponse,
   ConnectionState,
+  MemoryCompileNowRequest,
+  MemoryCompileNowResponse,
+  MemoryListTopicsRequest,
+  MemoryListTopicsResponse,
+  MemoryOpenEvidenceRequest,
+  MemoryOpenEvidenceResponse,
+  MemoryReadWakeupRequest,
+  MemoryReadWakeupResponse,
+  MemorySearchRequest,
+  MemorySearchResponse,
   ResponseError,
   ServerResponseEnvelope,
   Thread,
@@ -23,6 +33,7 @@ import type {
 } from "../protocol/types";
 import {
   activeApprovals,
+  activeMemory,
   activeRuntime,
   activeThread,
   activeToolCalls,
@@ -44,6 +55,7 @@ export interface LizRuntime {
   activeToolCalls: ReturnType<typeof activeToolCalls>;
   activeApprovals: ReturnType<typeof activeApprovals>;
   allApprovals: ReturnType<typeof allApprovals>;
+  activeMemory: ReturnType<typeof activeMemory>;
   selectedToolCall: ReturnType<typeof selectedToolCall>;
   selectToolCall: (callId: string | null) => void;
   connect: () => void;
@@ -55,6 +67,11 @@ export interface LizRuntime {
   startTurn: (input: string) => Promise<void>;
   cancelTurn: () => Promise<void>;
   respondToApproval: (request: ApprovalRespondRequest) => Promise<void>;
+  readMemoryWakeup: () => Promise<void>;
+  compileMemory: () => Promise<void>;
+  listMemoryTopics: () => Promise<void>;
+  searchMemory: (query: string, mode: "keyword" | "semantic") => Promise<void>;
+  openMemoryEvidence: (request: MemoryOpenEvidenceRequest) => Promise<void>;
 }
 
 export const useLizRuntime = (preferences: Preferences): LizRuntime => {
@@ -102,6 +119,7 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
   const selectedTool = selectedToolCall(state);
   const approvals = activeApprovals(state);
   const everyApproval = allApprovals(state);
+  const memory = activeMemory(state);
 
   const connect = useCallback(() => {
     setError(null);
@@ -254,6 +272,78 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
     dispatch({ type: "tool_selected", callId });
   }, []);
 
+  const readMemoryWakeup = useCallback(async () => {
+    const thread = activeThread(state);
+    if (!thread) {
+      return;
+    }
+    const response = await request<MemoryReadWakeupResponse, MemoryReadWakeupRequest>(
+      "memory/read_wakeup",
+      { thread_id: thread.id },
+    );
+    dispatch({
+      type: "memory_wakeup_set",
+      threadId: response.data.thread_id,
+      wakeup: response.data.wakeup,
+      recentConversation: response.data.recent_conversation,
+    });
+  }, [request, state]);
+
+  const compileMemory = useCallback(async () => {
+    const thread = activeThread(state);
+    if (!thread) {
+      return;
+    }
+    const response = await request<MemoryCompileNowResponse, MemoryCompileNowRequest>(
+      "memory/compile_now",
+      { thread_id: thread.id },
+    );
+    dispatch({
+      type: "memory_compilation_set",
+      threadId: response.data.thread_id,
+      compilation: response.data.compilation,
+    });
+  }, [request, state]);
+
+  const listMemoryTopics = useCallback(async () => {
+    const response = await request<MemoryListTopicsResponse, MemoryListTopicsRequest>(
+      "memory/list_topics",
+      { status: null, limit: 80 },
+    );
+    dispatch({ type: "memory_topics_set", topics: response.data.topics });
+  }, [request]);
+
+  const searchMemory = useCallback(
+    async (query: string, mode: "keyword" | "semantic") => {
+      if (!query.trim()) {
+        return;
+      }
+      const response = await request<MemorySearchResponse, MemorySearchRequest>("memory/search", {
+        query: query.trim(),
+        mode,
+        limit: 20,
+      });
+      dispatch({
+        type: "memory_search_set",
+        query: response.data.query,
+        mode: response.data.mode,
+        hits: response.data.hits,
+      });
+    },
+    [request],
+  );
+
+  const openMemoryEvidence = useCallback(
+    async (evidenceRequest: MemoryOpenEvidenceRequest) => {
+      const response = await request<MemoryOpenEvidenceResponse, MemoryOpenEvidenceRequest>(
+        "memory/open_evidence",
+        evidenceRequest,
+      );
+      dispatch({ type: "memory_evidence_set", evidence: response.data.evidence });
+    },
+    [request],
+  );
+
   return useMemo(
     () => ({
       connectionState,
@@ -265,6 +355,7 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
       activeToolCalls: toolCalls,
       activeApprovals: approvals,
       allApprovals: everyApproval,
+      activeMemory: memory,
       selectedToolCall: selectedTool,
       selectToolCall: selectTool,
       connect,
@@ -276,18 +367,29 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
       startTurn,
       cancelTurn,
       respondToApproval,
+      readMemoryWakeup,
+      compileMemory,
+      listMemoryTopics,
+      searchMemory,
+      openMemoryEvidence,
     }),
     [
       cancelTurn,
       close,
+      compileMemory,
       connect,
       connectionState,
       currentThread,
       error,
       everyApproval,
       forkThread,
+      listMemoryTopics,
+      memory,
+      openMemoryEvidence,
+      readMemoryWakeup,
       refreshThreads,
       respondToApproval,
+      searchMemory,
       approvals,
       runtime,
       selectedTool,

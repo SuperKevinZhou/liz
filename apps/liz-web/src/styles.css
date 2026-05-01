@@ -526,6 +526,98 @@ button {
   gap: 8px;
 }
 
+.memory-surface {
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  height: 100%;
+  overflow: auto;
+  padding: 24px;
+}
+
+.memory-surface header,
+.memory-surface header div,
+.memory-actions,
+.memory-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.memory-surface h2,
+.memory-surface h3 {
+  margin: 0;
+}
+
+.memory-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.memory-grid section,
+.evidence-view {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(251, 250, 247, 0.72);
+}
+
+.memory-list {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding-left: 18px;
+  color: var(--ink-1);
+}
+
+.topic-list {
+  display: grid;
+  gap: 8px;
+}
+
+.topic-list article,
+.memory-results button {
+  padding: 10px;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.42);
+}
+
+.topic-list p,
+.memory-results p,
+.evidence-view p {
+  margin: 5px 0 0;
+  color: var(--ink-2);
+  line-height: 1.45;
+}
+
+.topic-list small,
+.memory-results span {
+  color: var(--memory);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.memory-search .search-field {
+  margin: 0;
+}
+
+.memory-search select {
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-1);
+}
+
+.memory-results {
+  display: grid;
+  gap: 8px;
+}
+
 .empty-panel {
   padding: 14px;
   color: var(--ink-2);

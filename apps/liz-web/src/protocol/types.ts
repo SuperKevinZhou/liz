@@ -237,6 +237,13 @@ export interface MemorySearchRequest {
   limit: number | null;
 }
 
+export interface MemoryOpenEvidenceRequest {
+  thread_id: ThreadId;
+  turn_id: TurnId | null;
+  artifact_id: ArtifactId | null;
+  fact_id: MemoryFactId | null;
+}
+
 export interface RuntimeConfigUpdateRequest {
   sandbox: unknown | null;
   approval_policy: "on-request" | "danger-full-access" | null;
@@ -269,6 +276,109 @@ export interface TurnCancelResponse {
 
 export interface ApprovalRespondResponse {
   approval: ApprovalRequest;
+}
+
+export interface MemoryCitationRef {
+  thread_id: ThreadId;
+  turn_id: TurnId | null;
+  artifact_id: ArtifactId | null;
+  note: string;
+}
+
+export interface MemoryWakeup {
+  identity_summary: string | null;
+  active_state: string | null;
+  relevant_facts: string[];
+  open_commitments: string[];
+  recent_topics: string[];
+  recent_keywords: string[];
+  citation_fact_ids: MemoryFactId[];
+  citations: MemoryCitationRef[];
+}
+
+export interface RecentConversationWakeupView {
+  recent_summaries: string[];
+  active_topics: string[];
+  recent_keywords: string[];
+  citations: MemoryCitationRef[];
+}
+
+export interface MemoryCompilationSummary {
+  delta_summary: string;
+  updated_fact_ids: MemoryFactId[];
+  invalidated_fact_ids: MemoryFactId[];
+  recent_topics: string[];
+  recent_keywords: string[];
+  candidate_procedures: string[];
+}
+
+export interface MemoryTopicSummary {
+  name: string;
+  aliases: string[];
+  summary: string;
+  status: "active" | "resolved" | "stale";
+  last_active_at: string | null;
+  related_thread_ids: ThreadId[];
+  related_artifact_ids: ArtifactId[];
+  citation_fact_ids: MemoryFactId[];
+  recent_keywords: string[];
+}
+
+export interface MemorySearchHit {
+  kind: "topic" | "session" | "fact" | "artifact";
+  title: string;
+  summary: string;
+  score: number;
+  thread_id: ThreadId | null;
+  turn_id: TurnId | null;
+  artifact_id: ArtifactId | null;
+  fact_id: MemoryFactId | null;
+}
+
+export interface ArtifactRef {
+  id: ArtifactId;
+  thread_id: ThreadId;
+  turn_id: TurnId;
+  kind: string;
+  summary: string;
+  locator: string;
+  created_at: string;
+}
+
+export interface MemoryEvidenceView {
+  citation: MemoryCitationRef;
+  thread_title: string | null;
+  turn_summary: string | null;
+  fact_id: MemoryFactId | null;
+  fact_kind: string | null;
+  fact_value: string | null;
+  artifact: ArtifactRef | null;
+  artifact_body: string | null;
+}
+
+export interface MemoryReadWakeupResponse {
+  thread_id: ThreadId;
+  wakeup: MemoryWakeup;
+  recent_conversation: RecentConversationWakeupView;
+}
+
+export interface MemoryCompileNowResponse {
+  thread_id: ThreadId;
+  compilation: MemoryCompilationSummary;
+}
+
+export interface MemoryListTopicsResponse {
+  topics: MemoryTopicSummary[];
+}
+
+export interface MemorySearchResponse {
+  query: string;
+  mode: "keyword" | "semantic";
+  hits: MemorySearchHit[];
+}
+
+export interface MemoryOpenEvidenceResponse {
+  evidence: MemoryEvidenceView;
 }
 
 export interface ResumeSummary {

@@ -248,12 +248,11 @@ function WorkspaceView({
     return <ApprovalsSurface runtime={runtime} />;
   }
 
+  if (activeView === "memory") {
+    return <MemorySurface runtime={runtime} />;
+  }
+
   const panels = {
-    memory: {
-      icon: Brain,
-      title: "Memory",
-      rows: ["Wakeup", "Compile now", "Search", "Evidence"],
-    },
     channels: {
       icon: PlugZap,
       title: "Channels",
@@ -276,6 +275,137 @@ function WorkspaceView({
         ))}
       </div>
     </section>
+  );
+}
+
+function MemorySurface({ runtime }: { runtime: LizRuntime }) {
+  const [query, setQuery] = useState("");
+  const [mode, setMode] = useState<"keyword" | "semantic">("keyword");
+  const memory = runtime.activeMemory;
+  const search = runtime.state.memorySearch;
+  const evidence = runtime.state.selectedEvidence;
+
+  return (
+    <section className="memory-surface">
+      <header>
+        <div>
+          <Brain size={20} />
+          <h2>Memory</h2>
+        </div>
+        <div className="memory-actions">
+          <button className="secondary-button" type="button" onClick={() => void runtime.readMemoryWakeup()}>
+            Wakeup
+          </button>
+          <button className="secondary-button" type="button" onClick={() => void runtime.compileMemory()}>
+            Compile now
+          </button>
+          <button className="secondary-button" type="button" onClick={() => void runtime.listMemoryTopics()}>
+            Topics
+          </button>
+        </div>
+      </header>
+
+      <div className="memory-grid">
+        <section>
+          <p className="eyebrow">Liz remembers</p>
+          <h3>{memory.wakeup?.identity_summary ?? "Wakeup not loaded"}</h3>
+          <ListBlock items={memory.wakeup?.relevant_facts ?? []} empty="No relevant facts loaded." />
+        </section>
+        <section>
+          <p className="eyebrow">Active state</p>
+          <h3>{memory.wakeup?.active_state ?? "No active state loaded"}</h3>
+          <ListBlock items={memory.wakeup?.open_commitments ?? []} empty="No open commitments loaded." />
+        </section>
+        <section>
+          <p className="eyebrow">Compilation</p>
+          <h3>{memory.compilation?.delta_summary ?? "No compilation summary"}</h3>
+          <ListBlock
+            items={memory.compilation?.recent_topics ?? []}
+            empty="Compile memory to update topic changes."
+          />
+        </section>
+        <section>
+          <p className="eyebrow">Topics</p>
+          <div className="topic-list">
+            {runtime.state.memoryTopics.map((topic) => (
+              <article key={topic.name}>
+                <strong>{topic.name}</strong>
+                <p>{topic.summary}</p>
+                <small>{topic.status}</small>
+              </article>
+            ))}
+            {runtime.state.memoryTopics.length === 0 ? (
+              <div className="empty-panel">No topics loaded.</div>
+            ) : null}
+          </div>
+        </section>
+      </div>
+
+      <form className="memory-search" onSubmit={(event) => event.preventDefault()}>
+        <label className="search-field">
+          <Search size={15} />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search memory"
+          />
+        </label>
+        <select value={mode} onChange={(event) => setMode(event.target.value as "keyword" | "semantic")}>
+          <option value="keyword">Keyword</option>
+          <option value="semantic">Semantic</option>
+        </select>
+        <button className="primary-button" type="button" onClick={() => void runtime.searchMemory(query, mode)}>
+          Search
+        </button>
+      </form>
+
+      <div className="memory-results">
+        {search?.hits.map((hit) => (
+          <button
+            key={`${hit.kind}:${hit.title}:${hit.score}`}
+            type="button"
+            onClick={() => {
+              if (!hit.thread_id) {
+                return;
+              }
+              void runtime.openMemoryEvidence({
+                thread_id: hit.thread_id,
+                turn_id: hit.turn_id,
+                artifact_id: hit.artifact_id,
+                fact_id: hit.fact_id,
+              });
+            }}
+          >
+            <span>{hit.kind}</span>
+            <strong>{hit.title}</strong>
+            <p>{hit.summary}</p>
+          </button>
+        ))}
+      </div>
+
+      {evidence ? (
+        <section className="evidence-view">
+          <p className="eyebrow">Evidence</p>
+          <h3>{evidence.thread_title ?? evidence.citation.note}</h3>
+          <p>{evidence.fact_value ?? evidence.turn_summary ?? evidence.artifact?.summary}</p>
+          {evidence.artifact_body ? <pre className="inspector-code">{evidence.artifact_body}</pre> : null}
+        </section>
+      ) : null}
+    </section>
+  );
+}
+
+function ListBlock({ items, empty }: { items: string[]; empty: string }) {
+  if (items.length === 0) {
+    return <p className="muted">{empty}</p>;
+  }
+
+  return (
+    <ul className="memory-list">
+      {items.map((item) => (
+        <li key={item}>{item}</li>
+      ))}
+    </ul>
   );
 }
 

@@ -167,6 +167,48 @@ describe("workbench reducer", () => {
     expect(state.approvalsByThread.thread_01[0].status).toBe("approved");
     expect(activeTranscript(state).filter((entry) => entry.kind === "system")).toHaveLength(2);
   });
+
+  it("stores memory wakeup and compilation events", () => {
+    let state = workbenchReducer(initialWorkbenchState, {
+      type: "threads_loaded",
+      threads: [thread],
+    });
+    state = workbenchReducer(state, {
+      type: "server_event",
+      event: event("memory_wakeup_loaded", {
+        wakeup: {
+          identity_summary: "Owner prefers concise updates.",
+          active_state: "Building the web UI.",
+          relevant_facts: ["Web console is active."],
+          open_commitments: ["Ship the first UI."],
+          recent_topics: ["liz-web"],
+          recent_keywords: ["web"],
+          citation_fact_ids: ["fact_01"],
+          citations: [],
+        },
+      }),
+    });
+    state = workbenchReducer(state, {
+      type: "server_event",
+      event: event("memory_compilation_applied", {
+        compilation: {
+          delta_summary: "Updated active UI topic.",
+          updated_fact_ids: ["fact_01"],
+          invalidated_fact_ids: [],
+          recent_topics: ["liz-web"],
+          recent_keywords: ["console"],
+          candidate_procedures: [],
+        },
+      }),
+    });
+
+    expect(state.memoryByThread.thread_01.wakeup?.identity_summary).toBe(
+      "Owner prefers concise updates.",
+    );
+    expect(state.memoryByThread.thread_01.compilation?.delta_summary).toBe(
+      "Updated active UI topic.",
+    );
+  });
 });
 
 const event = (event_type: string, payload: unknown): ServerEvent => ({
