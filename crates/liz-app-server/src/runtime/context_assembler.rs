@@ -454,6 +454,7 @@ struct RelationshipContext {
     participant_name: String,
     trust_level: TrustLevel,
     boundary: InfoBoundary,
+    interaction_stance: Option<String>,
 }
 
 fn resolve_relationship(
@@ -465,6 +466,7 @@ fn resolve_relationship(
             participant_name: "unknown participant".to_owned(),
             trust_level: TrustLevel::Stranger,
             boundary: snapshot.default_stranger_boundary.clone(),
+            interaction_stance: None,
         };
     };
 
@@ -476,6 +478,7 @@ fn resolve_relationship(
                 .unwrap_or_else(|| "owner".to_owned()),
             trust_level: TrustLevel::Owner,
             boundary: InfoBoundary::owner_default(),
+            interaction_stance: None,
         };
     }
 
@@ -488,6 +491,7 @@ fn resolve_relationship(
             participant_name: relationship.display_name.clone(),
             trust_level: relationship.trust_level,
             boundary: relationship.info_boundary.clone(),
+            interaction_stance: Some(relationship.interaction_stance.clone()),
         };
     }
 
@@ -498,6 +502,7 @@ fn resolve_relationship(
             .unwrap_or_else(|| participant.external_participant_id.clone()),
         trust_level: TrustLevel::Stranger,
         boundary: snapshot.default_stranger_boundary.clone(),
+        interaction_stance: None,
     }
 }
 
@@ -570,17 +575,25 @@ fn relationship_allows_text(relationship: &RelationshipContext, text: &str) -> b
 }
 
 fn liz_relationship_stance_injection(relationship: &RelationshipContext) -> String {
+    let stance = relationship
+        .interaction_stance
+        .as_deref()
+        .filter(|stance| !stance.trim().is_empty())
+        .map(|stance| format!("\nOwner-defined stance: {stance}."))
+        .unwrap_or_default();
     match relationship.trust_level {
         TrustLevel::Owner => String::new(),
         TrustLevel::Trusted => format!(
-            "\n\nrelationship_context:\nYou are talking to {}, a trusted contact. Be friendly and bounded. Only discuss explicitly shared topics: {}. Do not mention forbidden topics: {}. If asked outside the sharing boundary, say you need the owner's permission.",
+            "\n\nrelationship_context:\nYou are talking to {}, a trusted contact. Be friendly and bounded. Only discuss explicitly shared topics: {}. Do not mention forbidden topics: {}. If asked outside the sharing boundary, say you need the owner's permission.{}",
             relationship.participant_name,
             relationship.boundary.shared_topics.join(", "),
-            relationship.boundary.forbidden_topics.join(", ")
+            relationship.boundary.forbidden_topics.join(", "),
+            stance
         ),
         TrustLevel::Acquaintance => format!(
-            "\n\nrelationship_context:\nYou are talking to {}, a known contact with limited sharing. Be polite, professional, and conservative. Share only public information and answer questions about liz's own capabilities. Do not discuss owner work details, preferences, emotional state, or private context without permission.",
-            relationship.participant_name
+            "\n\nrelationship_context:\nYou are talking to {}, a known contact with limited sharing. Be polite, professional, and conservative. Share only public information and answer questions about liz's own capabilities. Do not discuss owner work details, preferences, emotional state, or private context without permission.{}",
+            relationship.participant_name,
+            stance
         ),
         TrustLevel::Stranger => "\n\nrelationship_context:\nYou are talking to someone not recognized by the owner. Be polite but extremely conservative. Share only that liz is a personal agent. Do not reveal owner information, work, contacts, preferences, active state, or commitments. If asked for more, say you need the owner's permission.".to_owned(),
     }

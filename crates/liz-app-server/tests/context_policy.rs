@@ -215,6 +215,33 @@ fn context_assembly_filters_relationship_boundaries() {
         interaction_stance: "friendly_bounded".to_owned(),
         notes: None,
     });
+    snapshot.relationships.push(RelationshipEntry {
+        person_id: "discord_user_9".to_owned(),
+        display_name: "Bob".to_owned(),
+        trust_level: TrustLevel::Acquaintance,
+        info_boundary: InfoBoundary {
+            shared_topics: Vec::new(),
+            forbidden_topics: vec!["personal plans".to_owned(), "project status".to_owned()],
+            share_active_state: false,
+            share_commitments: false,
+        },
+        interaction_stance: "brief_public_only".to_owned(),
+        notes: None,
+    });
+
+    let owner = assembler.assemble(
+        &snapshot,
+        &thread,
+        &[],
+        "What is active?",
+        Some(&ParticipantRef {
+            external_participant_id: "owner".to_owned(),
+            display_name: Some("Owner".to_owned()),
+        }),
+    );
+    assert!(owner.layers.resident.contains("Owner prefers direct Chinese updates"));
+    assert!(owner.layers.resident.contains("private relocation"));
+    assert!(!owner.developer_prompt.contains("relationship_context:"));
 
     let trusted = assembler.assemble(
         &snapshot,
@@ -230,6 +257,23 @@ fn context_assembly_filters_relationship_boundaries() {
     assert!(!trusted.layers.resident.contains("private relocation"));
     assert!(!trusted.layers.resident.contains("Owner prefers direct Chinese updates"));
     assert!(trusted.developer_prompt.contains("relationship_context:"));
+    assert!(trusted.developer_prompt.contains("friendly_bounded"));
+
+    let acquaintance = assembler.assemble(
+        &snapshot,
+        &thread,
+        &[],
+        "What can you share with Bob?",
+        Some(&ParticipantRef {
+            external_participant_id: "discord_user_9".to_owned(),
+            display_name: Some("Bob".to_owned()),
+        }),
+    );
+    assert!(!acquaintance.layers.resident.contains("Project status is green"));
+    assert!(!acquaintance.layers.resident.contains("private relocation"));
+    assert!(!acquaintance.layers.resident.contains("Owner prefers direct Chinese updates"));
+    assert!(acquaintance.developer_prompt.contains("known contact with limited sharing"));
+    assert!(acquaintance.developer_prompt.contains("brief_public_only"));
 
     let stranger = assembler.assemble(
         &snapshot,
