@@ -6,7 +6,7 @@ use liz_app_server::storage::{
     StoredArtifact, StoredMemoryFact, StoredTopicRecord, ThreadStore, TurnLog, TurnLogEntry,
 };
 use liz_protocol::{
-    ArtifactId, ArtifactKind, ArtifactRef, Checkpoint, CheckpointId, CheckpointScope,
+    ArtifactId, ArtifactKind, ArtifactRef, Checkpoint, CheckpointId, CheckpointScope, InfoBoundary,
     MemoryCitationRef, MemoryFactId, MemoryFactKind, MemoryTopicStatus, Thread, ThreadId,
     ThreadStatus, Timestamp, TurnId,
 };
@@ -57,6 +57,8 @@ fn global_memory_store_round_trips_snapshot() {
                 note: "Foreground memory evidence".to_owned(),
             }],
         }],
+        relationships: Vec::new(),
+        default_stranger_boundary: InfoBoundary::stranger_default(),
     };
 
     store.write_snapshot(&snapshot).expect("snapshot should be written");

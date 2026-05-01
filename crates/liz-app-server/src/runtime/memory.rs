@@ -10,6 +10,7 @@ use liz_protocol::{
     MemorySessionEntry, MemorySessionView, MemoryTopicStatus, MemoryTopicSummary, MemoryWakeup,
     RecentConversationWakeupView, Thread, ThreadId, ThreadStatus,
 };
+use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 
 const DEFAULT_TOPIC_LIMIT: usize = 12;
@@ -22,29 +23,43 @@ const RECENT_ENTRY_LIMIT: usize = 8;
 pub struct ForegroundMemoryEngine;
 
 #[derive(Debug, Clone)]
-struct MemoryCompilationInput {
-    thread: Thread,
-    recent_entries: Vec<TurnLogEntry>,
-    citations: Vec<MemoryCitationRef>,
-    existing_facts: Vec<StoredMemoryFact>,
+pub(crate) struct MemoryCompilationInput {
+    pub(crate) thread: Thread,
+    pub(crate) recent_entries: Vec<TurnLogEntry>,
+    pub(crate) citations: Vec<MemoryCitationRef>,
+    pub(crate) existing_facts: Vec<StoredMemoryFact>,
 }
 
 #[derive(Debug, Clone, Default)]
-struct MemoryCompilationDelta {
-    identity_summary_update: Option<String>,
-    active_state_summary: Option<String>,
-    recent_topics: Vec<String>,
-    recent_keywords: Vec<String>,
-    commitments: Vec<String>,
-    candidate_procedures: Vec<String>,
-    used_fallback: bool,
+pub(crate) struct MemoryCompilationDelta {
+    pub(crate) identity_summary_update: Option<String>,
+    pub(crate) active_state_summary: Option<String>,
+    pub(crate) recent_topics: Vec<String>,
+    pub(crate) recent_keywords: Vec<String>,
+    pub(crate) commitments: Vec<String>,
+    pub(crate) candidate_procedures: Vec<String>,
+    pub(crate) durable_facts: Vec<MemoryDeltaFact>,
+    pub(crate) invalidation_candidates: Vec<String>,
+    pub(crate) used_fallback: bool,
 }
 
 #[derive(Debug, Clone, Default)]
-struct HeuristicMemoryCompiler;
+pub(crate) struct MemoryDeltaFact {
+    pub(crate) kind: Option<MemoryFactKind>,
+    pub(crate) subject: String,
+    pub(crate) value: String,
+    pub(crate) keywords: Vec<String>,
+}
 
-impl HeuristicMemoryCompiler {
-    fn compile(&self, input: &MemoryCompilationInput) -> MemoryCompilationDelta {
+#[derive(Debug, Clone, Default)]
+pub(crate) struct HeuristicMemoryCompiler;
+
+pub(crate) trait MemoryCompiler {
+    fn compile(&self, input: &MemoryCompilationInput) -> RuntimeResult<MemoryCompilationDelta>;
+}
+
+impl MemoryCompiler for HeuristicMemoryCompiler {
+    fn compile(&self, input: &MemoryCompilationInput) -> RuntimeResult<MemoryCompilationDelta> {
         let recent_summaries = input
             .recent_entries
             .iter()
@@ -62,16 +77,97 @@ impl HeuristicMemoryCompiler {
             derive_candidate_procedures(&input.recent_entries, &recent_topics);
         let identity_summary_update = derive_identity_summary_update(input);
 
-        MemoryCompilationDelta {
+        Ok(MemoryCompilationDelta {
             identity_summary_update,
             active_state_summary: input.thread.active_summary.clone(),
             recent_topics,
             recent_keywords,
             commitments: input.thread.pending_commitments.clone(),
             candidate_procedures,
+            durable_facts: Vec::new(),
+            invalidation_candidates: Vec::new(),
             used_fallback: true,
-        }
+        })
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct LlmMemoryCompilationDelta {
+    #[serde(default)]
+    identity_summary_update: Option<String>,
+    #[serde(default)]
+    active_state_summary: Option<String>,
+    #[serde(default)]
+    recent_topics: Vec<String>,
+    #[serde(default)]
+    recent_keywords: Vec<String>,
+    #[serde(default)]
+    commitments: Vec<String>,
+    #[serde(default)]
+    candidate_procedures: Vec<String>,
+    #[serde(default)]
+    durable_facts: Vec<LlmMemoryDeltaFact>,
+    #[serde(default)]
+    invalidation_candidates: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LlmMemoryDeltaFact {
+    #[serde(default)]
+    kind: Option<MemoryFactKind>,
+    subject: String,
+    value: String,
+    #[serde(default)]
+    keywords: Vec<String>,
+}
+
+pub(crate) fn parse_llm_memory_delta(
+    raw_json: &str,
+    input: &MemoryCompilationInput,
+) -> RuntimeResult<MemoryCompilationDelta> {
+    let parsed = serde_json::from_str::<LlmMemoryCompilationDelta>(raw_json).map_err(|error| {
+        RuntimeError::invalid_state(
+            "memory_compilation_json_invalid",
+            format!("memory compiler returned invalid JSON: {error}"),
+        )
+    })?;
+
+    let recent_summaries =
+        input.recent_entries.iter().map(|entry| entry.summary.as_str()).collect::<Vec<_>>();
+    let fallback_topics = derive_topics_from_text(recent_summaries.as_slice(), 6);
+    let fallback_keywords = derive_keywords_from_text(recent_summaries.as_slice(), 8);
+    let identity_summary_update = sanitize_optional_string(parsed.identity_summary_update)
+        .filter(|_| !input.citations.is_empty());
+
+    Ok(MemoryCompilationDelta {
+        identity_summary_update,
+        active_state_summary: sanitize_optional_string(parsed.active_state_summary)
+            .or_else(|| input.thread.active_summary.clone()),
+        recent_topics: prefer_sanitized_list(parsed.recent_topics, fallback_topics, 8),
+        recent_keywords: prefer_sanitized_list(parsed.recent_keywords, fallback_keywords, 12),
+        commitments: prefer_sanitized_list(
+            parsed.commitments,
+            input.thread.pending_commitments.clone(),
+            12,
+        ),
+        candidate_procedures: sanitize_string_list(parsed.candidate_procedures, 8),
+        durable_facts: parsed
+            .durable_facts
+            .into_iter()
+            .filter_map(|fact| {
+                let subject = fact.subject.trim();
+                let value = fact.value.trim();
+                (!subject.is_empty() && !value.is_empty()).then(|| MemoryDeltaFact {
+                    kind: fact.kind,
+                    subject: subject.to_owned(),
+                    value: value.to_owned(),
+                    keywords: sanitize_string_list(fact.keywords, 12),
+                })
+            })
+            .collect(),
+        invalidation_candidates: sanitize_string_list(parsed.invalidation_candidates, 16),
+        used_fallback: false,
+    })
 }
 
 impl ForegroundMemoryEngine {
@@ -111,7 +207,7 @@ impl ForegroundMemoryEngine {
             citations: citations.clone(),
             existing_facts: snapshot.facts.clone(),
         };
-        let delta = HeuristicMemoryCompiler::default().compile(&input);
+        let delta = HeuristicMemoryCompiler::default().compile(&input)?;
         let now = ids.now_timestamp();
         if let Some(identity_summary) = delta.identity_summary_update.clone() {
             snapshot.identity_summary = Some(identity_summary);
@@ -189,6 +285,38 @@ impl ForegroundMemoryEngine {
             );
         }
 
+        for fact in delta.durable_facts.iter().filter(|fact| {
+            fact.kind.unwrap_or(MemoryFactKind::Identity) != MemoryFactKind::ProcedureCandidate
+        }) {
+            upsert_fact(
+                &mut snapshot,
+                ids,
+                &mut updated_fact_ids,
+                &mut invalidated_fact_ids,
+                FactSpec {
+                    kind: fact.kind.unwrap_or(MemoryFactKind::Identity),
+                    subject: fact.subject.clone(),
+                    value: fact.value.clone(),
+                    keywords: if fact.keywords.is_empty() {
+                        delta.recent_keywords.clone()
+                    } else {
+                        fact.keywords.clone()
+                    },
+                    related_thread_ids: vec![thread.id.clone()],
+                    citations: citations.clone(),
+                    updated_at: now.clone(),
+                },
+            );
+        }
+
+        invalidate_candidate_subjects(
+            &mut snapshot,
+            ids,
+            &delta.invalidation_candidates,
+            &now,
+            &mut invalidated_fact_ids,
+        );
+
         for procedure in delta.candidate_procedures.iter().cloned() {
             upsert_fact(
                 &mut snapshot,
@@ -222,10 +350,11 @@ impl ForegroundMemoryEngine {
 
         Ok(MemoryCompilationSummary {
             delta_summary: format!(
-                "{} compiled {} topics, {} commitments, and {} procedure candidates",
+                "{} compiled {} topics, {} commitments, {} durable facts, and {} procedure candidates",
                 if delta.used_fallback { "Heuristic fallback" } else { "LLM compiler" },
                 delta.recent_topics.len(),
                 delta.commitments.len(),
+                delta.durable_facts.len(),
                 delta.candidate_procedures.len()
             ),
             updated_fact_ids,
@@ -767,6 +896,35 @@ fn upsert_fact(
     updated_fact_ids.push(id);
 }
 
+fn invalidate_candidate_subjects(
+    snapshot: &mut GlobalMemorySnapshot,
+    ids: &IdGenerator,
+    subjects: &[String],
+    now: &liz_protocol::Timestamp,
+    invalidated_fact_ids: &mut Vec<MemoryFactId>,
+) {
+    if subjects.is_empty() {
+        return;
+    }
+    let subject_set = subjects
+        .iter()
+        .map(|subject| subject.trim())
+        .filter(|subject| !subject.is_empty())
+        .collect::<BTreeSet<_>>();
+    if subject_set.is_empty() {
+        return;
+    }
+
+    for fact in snapshot.facts.iter_mut() {
+        if fact.invalidated_at.is_some() || !subject_set.contains(fact.subject.as_str()) {
+            continue;
+        }
+        fact.invalidated_at = Some(now.clone());
+        fact.invalidated_by = Some(ids.next_memory_fact_id());
+        invalidated_fact_ids.push(fact.id.clone());
+    }
+}
+
 fn recent_entries(entries: &[TurnLogEntry]) -> Vec<TurnLogEntry> {
     let mut slice = entries
         .iter()
@@ -880,6 +1038,38 @@ fn derive_identity_summary_update(input: &MemoryCompilationInput) -> Option<Stri
     Some(update)
 }
 
+fn sanitize_optional_string(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        let trimmed = value.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_owned())
+    })
+}
+
+fn prefer_sanitized_list(values: Vec<String>, fallback: Vec<String>, limit: usize) -> Vec<String> {
+    let sanitized = sanitize_string_list(values, limit);
+    if sanitized.is_empty() {
+        fallback
+    } else {
+        sanitized
+    }
+}
+
+fn sanitize_string_list(values: Vec<String>, limit: usize) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    let mut sanitized = Vec::new();
+    for value in values {
+        let trimmed = value.trim();
+        if trimmed.is_empty() || !seen.insert(trimmed.to_ascii_lowercase()) {
+            continue;
+        }
+        sanitized.push(trimmed.to_owned());
+        if sanitized.len() == limit {
+            break;
+        }
+    }
+    sanitized
+}
+
 fn derive_topics_from_text(texts: &[&str], limit: usize) -> Vec<String> {
     let mut seen = BTreeSet::new();
     let mut topics = Vec::new();
@@ -962,4 +1152,110 @@ fn slugify(text: &str) -> String {
         return "item".to_owned();
     }
     tokens.into_iter().take(6).collect::<Vec<_>>().join("_")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use liz_protocol::{Timestamp, TurnId};
+
+    #[test]
+    fn parses_llm_memory_delta_with_cited_identity() {
+        let input = test_compilation_input(true);
+        let delta = parse_llm_memory_delta(
+            r#"{
+                "identity_summary_update": "Owner prefers concise implementation notes.",
+                "active_state_summary": "Rebuilding memory compilation.",
+                "recent_topics": ["memory", "identity", "memory"],
+                "recent_keywords": ["compiler", "delta"],
+                "commitments": ["finish parser tests"],
+                "candidate_procedures": ["reuse JSON parser fixtures"],
+                "durable_facts": [
+                    {
+                        "kind": "identity",
+                        "subject": "owner:preference:notes",
+                        "value": "Owner prefers concise implementation notes.",
+                        "keywords": ["owner", "preference"]
+                    }
+                ],
+                "invalidation_candidates": ["owner:preference:old_notes"]
+            }"#,
+            &input,
+        )
+        .expect("valid compiler JSON should parse");
+
+        assert_eq!(
+            delta.identity_summary_update.as_deref(),
+            Some("Owner prefers concise implementation notes.")
+        );
+        assert_eq!(delta.recent_topics, vec!["memory".to_owned(), "identity".to_owned()]);
+        assert_eq!(delta.commitments, vec!["finish parser tests".to_owned()]);
+        assert_eq!(delta.durable_facts.len(), 1);
+        assert_eq!(delta.invalidation_candidates, vec!["owner:preference:old_notes".to_owned()]);
+        assert!(!delta.used_fallback);
+    }
+
+    #[test]
+    fn drops_identity_update_without_citation() {
+        let input = test_compilation_input(false);
+        let delta = parse_llm_memory_delta(
+            r#"{"identity_summary_update":"Owner prefers cited facts only."}"#,
+            &input,
+        )
+        .expect("valid compiler JSON should parse");
+
+        assert_eq!(delta.identity_summary_update, None);
+    }
+
+    #[test]
+    fn rejects_invalid_llm_memory_delta_json() {
+        let input = test_compilation_input(true);
+        let error = parse_llm_memory_delta("{not json", &input)
+            .expect_err("invalid compiler JSON should be rejected");
+
+        assert_eq!(error.code(), "memory_compilation_json_invalid");
+    }
+
+    fn test_compilation_input(with_citation: bool) -> MemoryCompilationInput {
+        let thread_id = ThreadId::new("thread_test");
+        let turn_id = TurnId::new("turn_test");
+        let timestamp = Timestamp::new("unix:0.0");
+        MemoryCompilationInput {
+            thread: Thread {
+                id: thread_id.clone(),
+                title: "Memory test".to_owned(),
+                status: ThreadStatus::Active,
+                created_at: timestamp.clone(),
+                updated_at: timestamp.clone(),
+                active_goal: Some("Compile memory".to_owned()),
+                active_summary: Some("Memory compiler active".to_owned()),
+                last_interruption: None,
+                workspace_ref: None,
+                pending_commitments: vec!["keep fallback available".to_owned()],
+                latest_turn_id: Some(turn_id.clone()),
+                latest_checkpoint_id: None,
+                parent_thread_id: None,
+            },
+            recent_entries: vec![TurnLogEntry {
+                thread_id: thread_id.clone(),
+                sequence: 1,
+                turn_id: Some(turn_id.clone()),
+                recorded_at: timestamp,
+                event: "turn_completed".to_owned(),
+                summary: "Owner says I prefer concise implementation notes.".to_owned(),
+                artifact_ids: Vec::new(),
+            }],
+            citations: with_citation
+                .then(|| {
+                    vec![MemoryCitationRef {
+                        thread_id,
+                        turn_id: Some(turn_id),
+                        artifact_id: None,
+                        note: "Owner preference evidence".to_owned(),
+                    }]
+                })
+                .unwrap_or_default(),
+            existing_facts: Vec::new(),
+        }
+    }
 }
