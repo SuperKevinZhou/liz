@@ -9,6 +9,7 @@ export interface Preferences {
   density: DensityPreference;
   markdown: MarkdownPreference;
   toolVerbosity: ToolVerbosityPreference;
+  developerMode: boolean;
   browserInstanceId: string;
 }
 
@@ -20,6 +21,7 @@ const defaultPreferences: Preferences = {
   density: "comfortable",
   markdown: "rendered",
   toolVerbosity: "brief",
+  developerMode: false,
   browserInstanceId: "",
 };
 

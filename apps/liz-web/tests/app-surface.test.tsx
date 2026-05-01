@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/App";
 
@@ -15,6 +15,9 @@ const runtime = {
     providerProfiles: [],
     runtimeConfig: null,
     modelStatus: null,
+    memoryTopics: [],
+    memorySearch: null,
+    selectedEvidence: null,
   },
   activeThread: null,
   activeTranscript: [],
@@ -22,7 +25,7 @@ const runtime = {
   activeToolCalls: [],
   activeApprovals: [],
   allApprovals: [],
-  activeMemory: null,
+  activeMemory: { wakeup: null, recentConversation: null, compilation: null },
   activeResumePanel: null,
   selectedToolCall: null,
   selectToolCall: vi.fn(),
@@ -79,5 +82,20 @@ describe("App product surface", () => {
     expect(screen.queryByText("Wakeup")).not.toBeInTheDocument();
     expect(screen.queryByText("Compile now")).not.toBeInTheDocument();
     expect(screen.queryByText("Inspector")).not.toBeInTheDocument();
+  });
+
+  it("reveals Diagnostics only after developer mode is enabled", () => {
+    render(<App />);
+
+    const nav = screen.getByLabelText("Primary navigation");
+    expect(within(nav).queryByLabelText("Diagnostics")).not.toBeInTheDocument();
+
+    fireEvent.click(within(nav).getByLabelText("Settings"));
+    fireEvent.click(screen.getByLabelText("Enable Diagnostics"));
+
+    expect(within(nav).getByLabelText("Diagnostics")).toBeInTheDocument();
+    fireEvent.click(within(nav).getByLabelText("Diagnostics"));
+    expect(screen.getByRole("heading", { name: "Memory" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Approvals" })).toBeInTheDocument();
   });
 });

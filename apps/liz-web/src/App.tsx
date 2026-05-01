@@ -44,9 +44,13 @@ export function App() {
     savePreferences(preferences);
   }, [preferences]);
 
+  const visibleActiveView =
+    activeView === "diagnostics" && !preferences.developerMode ? "home" : activeView;
+
   const shellClassName = useMemo(
-    () => `liz-shell view-${activeView} density-${preferences.density} theme-${preferences.theme}`,
-    [activeView, preferences.density, preferences.theme],
+    () =>
+      `liz-shell view-${visibleActiveView} density-${preferences.density} theme-${preferences.theme}`,
+    [visibleActiveView, preferences.density, preferences.theme],
   );
 
   return (
@@ -61,7 +65,7 @@ export function App() {
             return (
               <button
                 key={view.id}
-                className={activeView === view.id ? "rail-button active" : "rail-button"}
+                className={visibleActiveView === view.id ? "rail-button active" : "rail-button"}
                 onClick={() => setActiveView(view.id)}
                 title={view.label}
                 aria-label={view.label}
@@ -70,13 +74,23 @@ export function App() {
               </button>
             );
           })}
+          {preferences.developerMode ? (
+            <button
+              className={visibleActiveView === "diagnostics" ? "rail-button active" : "rail-button"}
+              onClick={() => setActiveView("diagnostics")}
+              title="Diagnostics"
+              aria-label="Diagnostics"
+            >
+              <TerminalSquare size={18} />
+            </button>
+          ) : null}
         </nav>
         <div className={`rail-status ${runtime.connectionState}`} title={runtime.connectionState}>
           <CircleDot size={14} />
         </div>
       </aside>
 
-      {activeView === "home" ? (
+      {visibleActiveView === "home" ? (
         <aside className="thread-panel">
           <ContinuityPanel runtime={runtime} />
         </aside>
@@ -84,20 +98,20 @@ export function App() {
 
       <main className="workspace">
         <TopBar
-          activeView={activeView}
+          activeView={visibleActiveView}
           preferences={preferences}
           runtime={runtime}
           setPreferences={setPreferences}
         />
         <WorkspaceView
-          activeView={activeView}
+          activeView={visibleActiveView}
           preferences={preferences}
           runtime={runtime}
           setPreferences={setPreferences}
         />
       </main>
 
-      {activeView === "diagnostics" ? null : null}
+      {visibleActiveView === "diagnostics" ? null : null}
     </div>
   );
 }
@@ -1161,6 +1175,24 @@ function SettingsSurface({
             <span>Browser instance</span>
             <strong>{preferences.browserInstanceId}</strong>
           </div>
+        </section>
+
+        <section className="settings-section">
+          <p className="eyebrow">Developer</p>
+          <label className="setting-row checkbox-setting">
+            <span>Diagnostics</span>
+            <input
+              type="checkbox"
+              checked={preferences.developerMode}
+              onChange={(event) =>
+                setPreferences((current) => ({
+                  ...current,
+                  developerMode: event.target.checked,
+                }))
+              }
+              aria-label="Enable Diagnostics"
+            />
+          </label>
         </section>
 
         <section className="settings-section">
