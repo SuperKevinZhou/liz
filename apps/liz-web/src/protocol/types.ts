@@ -5,6 +5,8 @@ export type EventId = string;
 export type ApprovalId = string;
 export type ArtifactId = string;
 export type MemoryFactId = string;
+export type NodeId = string;
+export type WorkspaceMountId = string;
 
 export type ConnectionState = "idle" | "connecting" | "connected" | "reconnecting" | "closed";
 
@@ -18,6 +20,7 @@ export interface Thread {
   active_summary: string | null;
   last_interruption: string | null;
   workspace_ref?: string | null;
+  workspace_mount_id?: WorkspaceMountId | null;
   pending_commitments: string[];
   latest_turn_id: TurnId | null;
   latest_checkpoint_id: string | null;
@@ -85,7 +88,18 @@ export type ClientMethod =
   | "memory/list_topics"
   | "memory/search"
   | "memory/open_session"
-  | "memory/open_evidence";
+  | "memory/open_evidence"
+  | "memory_surface/about_you/read"
+  | "memory_surface/about_you/update"
+  | "memory_surface/carrying/read"
+  | "memory_surface/knowledge/list"
+  | "memory_surface/knowledge/correct"
+  | "node/list"
+  | "node/read"
+  | "node/update_policy"
+  | "workspace_mount/list"
+  | "workspace_mount/attach"
+  | "workspace_mount/detach";
 
 export interface ErrorResponseEnvelope {
   ok: false;
@@ -172,6 +186,7 @@ export interface ThreadStartRequest {
   title: string | null;
   initial_goal: string | null;
   workspace_ref: string | null;
+  workspace_mount_id?: WorkspaceMountId | null;
 }
 
 export interface ThreadResumeRequest {
@@ -195,6 +210,63 @@ export interface TurnStartRequest {
   input_kind: "user_message" | "steering_note" | "resume_command";
   channel?: ChannelRef;
   participant?: ParticipantRef;
+  interaction_context?: InteractionContext | null;
+}
+
+export interface InteractionContext {
+  ingress: { kind: string; source_id: string; conversation_id: string | null };
+  actor: {
+    actor_id: string;
+    kind:
+      | "owner"
+      | "human_contact"
+      | "stranger"
+      | "external_agent"
+      | "local_node"
+      | "remote_node"
+      | "system_service"
+      | "webhook_source"
+      | "automation";
+    display_name: string | null;
+    proof: string | null;
+  };
+  audience: {
+    visibility: "private" | "direct" | "group" | "public" | "machine";
+    participants: string[];
+  };
+  role:
+    | "private_companion"
+    | "task_executor"
+    | "owner_delegate"
+    | "public_representative"
+    | "group_participant"
+    | "agent_peer"
+    | "agent_coordinator"
+    | "node_controller"
+    | "webhook_observer"
+    | "background_automation";
+  authority: {
+    can_speak_for_owner: boolean;
+    can_start_work: boolean;
+    can_call_tools: boolean;
+    can_write_memory: boolean;
+    requires_owner_confirmation: boolean;
+  };
+  disclosure: {
+    allowed_topics: string[];
+    forbidden_topics: string[];
+    share_active_state: boolean;
+    share_commitments: boolean;
+    share_identity: boolean;
+    evidence_policy: "summary_only" | "expandable" | "hidden";
+  };
+  task_mandate: string | null;
+  provenance: {
+    channel: ChannelRef | null;
+    received_at: string | null;
+    authenticated_by: string | null;
+    raw_event_ref: string | null;
+  };
 }
 
 export interface TurnCancelRequest {
@@ -215,6 +287,8 @@ export interface ApprovalRequest {
   risk_level: "low" | "medium" | "high" | "critical";
   reason: string;
   sandbox_context: string | null;
+  node_id?: NodeId | null;
+  workspace_mount_id?: WorkspaceMountId | null;
   status: "pending" | "approved" | "denied" | "expired";
 }
 
@@ -441,6 +515,108 @@ export interface MemoryOpenEvidenceResponse {
 
 export interface MemoryOpenSessionResponse {
   session: MemorySessionView;
+}
+
+export interface AboutYouItem {
+  key: string;
+  label: string;
+  value: string;
+  confirmed: boolean;
+  source_fact_id?: MemoryFactId | null;
+}
+
+export interface AboutYouSurface {
+  identity_summary: string | null;
+  items: AboutYouItem[];
+}
+
+export interface CarryingItem {
+  thread_id: ThreadId;
+  title: string;
+  status: ThreadStatus;
+  summary: string | null;
+  pending_commitments: string[];
+  suggested_next_step: string | null;
+  updated_at: string;
+}
+
+export interface CarryingSurface {
+  active: CarryingItem[];
+  completed: CarryingItem[];
+}
+
+export interface KnowledgeItem {
+  fact_id: MemoryFactId;
+  kind: string;
+  subject: string;
+  summary: string;
+  stale: boolean;
+  updated_at: string;
+  citations: MemoryCitationRef[];
+}
+
+export interface KnowledgeSurface {
+  items: KnowledgeItem[];
+}
+
+export interface MemorySurfaceAboutYouReadResponse {
+  surface: AboutYouSurface;
+}
+
+export interface MemorySurfaceCarryingReadResponse {
+  surface: CarryingSurface;
+}
+
+export interface MemorySurfaceKnowledgeListResponse {
+  surface: KnowledgeSurface;
+}
+
+export interface NodeRecord {
+  identity: {
+    node_id: NodeId;
+    display_name: string;
+    kind: "desktop" | "server" | "laptop" | "phone" | "container" | "browser_host";
+    owner_device: boolean;
+  };
+  status: {
+    online: boolean;
+    last_seen_at: string | null;
+    app_version: string | null;
+    os: string | null;
+    hostname: string | null;
+  };
+  capabilities: {
+    workspace_tools: boolean;
+    shell_tools: boolean;
+    browser_tools: boolean;
+    web_ui_host: boolean;
+    notifications: boolean;
+    max_concurrent_tasks: number;
+    supported_sandbox_modes: string[];
+  };
+  policy: {
+    allowed_roots: string[];
+    protected_paths: string[];
+    default_sandbox: string;
+    network_policy: string;
+    approval_policy: "on-request" | "danger-full-access";
+  };
+}
+
+export interface WorkspaceMount {
+  workspace_id: WorkspaceMountId;
+  node_id: NodeId;
+  root_path: string;
+  label: string;
+  permissions: { read: boolean; write: boolean; shell: boolean };
+}
+
+export interface NodeListResponse {
+  nodes: NodeRecord[];
+}
+
+export interface WorkspaceMountListResponse {
+  mounts: WorkspaceMount[];
 }
 
 export interface RuntimeConfigResponse {

@@ -7,6 +7,11 @@ import type {
   ExecutorOutputChunkEventPayload,
   MemoryCompilationSummary,
   MemoryEvidenceView,
+  AboutYouSurface,
+  CarryingSurface,
+  KnowledgeSurface,
+  NodeRecord,
+  WorkspaceMount,
   MemorySessionEntry,
   MemorySessionView,
   MemorySearchHit,
@@ -113,6 +118,11 @@ export interface WorkbenchState {
   memoryTopics: MemoryTopicSummary[];
   memorySearch: { query: string; mode: "keyword" | "semantic"; hits: MemorySearchHit[] } | null;
   selectedEvidence: MemoryEvidenceView | null;
+  aboutYou: AboutYouSurface | null;
+  carrying: CarryingSurface | null;
+  knowledge: KnowledgeSurface | null;
+  nodes: NodeRecord[];
+  workspaceMounts: WorkspaceMount[];
   resumeByThread: Record<ThreadId, ResumePanel>;
   runtimeConfig: RuntimeConfigResponse | null;
   providerProfiles: ProviderAuthProfile[];
@@ -154,6 +164,11 @@ export type WorkbenchAction =
       hits: MemorySearchHit[];
     }
   | { type: "memory_evidence_set"; evidence: MemoryEvidenceView | null }
+  | { type: "about_you_set"; surface: AboutYouSurface }
+  | { type: "carrying_set"; surface: CarryingSurface }
+  | { type: "knowledge_set"; surface: KnowledgeSurface }
+  | { type: "nodes_set"; nodes: NodeRecord[] }
+  | { type: "workspace_mounts_set"; mounts: WorkspaceMount[] }
   | { type: "runtime_config_set"; config: RuntimeConfigResponse }
   | { type: "provider_profiles_set"; profiles: ProviderAuthProfile[] }
   | { type: "provider_profile_upsert"; profile: ProviderAuthProfile }
@@ -171,6 +186,11 @@ export const initialWorkbenchState: WorkbenchState = {
   memoryTopics: [],
   memorySearch: null,
   selectedEvidence: null,
+  aboutYou: null,
+  carrying: null,
+  knowledge: null,
+  nodes: [],
+  workspaceMounts: [],
   resumeByThread: {},
   runtimeConfig: null,
   providerProfiles: [],
@@ -350,6 +370,21 @@ export const workbenchReducer = (
 
     case "memory_evidence_set":
       return { ...state, selectedEvidence: action.evidence };
+
+    case "about_you_set":
+      return { ...state, aboutYou: action.surface };
+
+    case "carrying_set":
+      return { ...state, carrying: action.surface };
+
+    case "knowledge_set":
+      return { ...state, knowledge: action.surface };
+
+    case "nodes_set":
+      return { ...state, nodes: action.nodes };
+
+    case "workspace_mounts_set":
+      return { ...state, workspaceMounts: action.mounts };
 
     case "runtime_config_set":
       return { ...state, runtimeConfig: action.config };

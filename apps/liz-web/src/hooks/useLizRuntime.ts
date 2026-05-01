@@ -3,6 +3,9 @@ import { createProtocolClient, type LizProtocolClient } from "../protocol/client
 import type {
   ApprovalRespondRequest,
   ApprovalRespondResponse,
+  MemorySurfaceAboutYouReadResponse,
+  MemorySurfaceCarryingReadResponse,
+  MemorySurfaceKnowledgeListResponse,
   ConnectionState,
   MemoryCompileNowRequest,
   MemoryCompileNowResponse,
@@ -17,6 +20,7 @@ import type {
   MemorySearchRequest,
   MemorySearchResponse,
   ModelStatusResponse,
+  NodeListResponse,
   ProviderAuthDeleteRequest,
   ProviderAuthDeleteResponse,
   ProviderAuthListRequest,
@@ -40,6 +44,7 @@ import type {
   TurnCancelResponse,
   TurnStartRequest,
   TurnStartResponse,
+  WorkspaceMountListResponse,
 } from "../protocol/types";
 import {
   activeApprovals,
@@ -85,6 +90,7 @@ export interface LizRuntime {
   searchMemory: (query: string, mode: "keyword" | "semantic") => Promise<void>;
   openMemoryEvidence: (request: MemoryOpenEvidenceRequest) => Promise<void>;
   loadRuntimeState: () => Promise<void>;
+  loadOwnerSurfaces: () => Promise<void>;
   updateRuntimeConfig: (request: RuntimeConfigUpdateRequest) => Promise<void>;
   upsertProviderProfile: (profile: ProviderAuthProfile) => Promise<void>;
   deleteProviderProfile: (profileId: string) => Promise<void>;
@@ -106,6 +112,7 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
       setConnectionState(nextState);
       if (nextState === "connected") {
         void requestThreadList(client, dispatch, setError);
+        void loadOwnerSurfacesWithClient(client, dispatch, setError);
       }
     });
     client.onEvent((event) => dispatch({ type: "server_event", event }));
@@ -210,9 +217,20 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
 
   const startTurn = useCallback(
     async (input: string, inputKind: TurnStartRequest["input_kind"] = "user_message") => {
-      const thread = activeThread(state);
-      if (!thread || !input.trim()) {
+      let thread = activeThread(state);
+      if (!input.trim()) {
         return;
+      }
+
+      if (!thread) {
+        const started = await request<ThreadStartResponse, ThreadStartRequest>("thread/start", {
+          title: input.trim().slice(0, 48) || null,
+          initial_goal: input.trim(),
+          workspace_ref: null,
+          workspace_mount_id: null,
+        });
+        thread = started.data.thread;
+        dispatch({ type: "thread_upsert", thread, activate: true });
       }
 
       dispatch({
@@ -234,6 +252,7 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
           external_participant_id: "owner",
           display_name: "Owner",
         },
+        interaction_context: ownerInteractionContext(preferences.browserInstanceId, thread.id),
       };
 
       try {
@@ -365,16 +384,42 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
   );
 
   const loadRuntimeState = useCallback(async () => {
-    const [runtimeConfig, providers, model] = await Promise.all([
+    const [runtimeConfig, providers, model, nodes, mounts] = await Promise.all([
       request<RuntimeConfigResponse, Record<string, never>>("runtime/config_get", {}),
       request<ProviderAuthListResponse, ProviderAuthListRequest>("provider_auth/list", {
         provider_id: null,
       }),
       request<ModelStatusResponse, Record<string, never>>("model/status", {}),
+      request<NodeListResponse, Record<string, never>>("node/list", {}),
+      request<WorkspaceMountListResponse, { node_id: null }>("workspace_mount/list", {
+        node_id: null,
+      }),
     ]);
     dispatch({ type: "runtime_config_set", config: runtimeConfig.data });
     dispatch({ type: "provider_profiles_set", profiles: providers.data.profiles });
     dispatch({ type: "model_status_set", status: model.data });
+    dispatch({ type: "nodes_set", nodes: nodes.data.nodes });
+    dispatch({ type: "workspace_mounts_set", mounts: mounts.data.mounts });
+  }, [request]);
+
+  const loadOwnerSurfaces = useCallback(async () => {
+    const [aboutYou, carrying, knowledge] = await Promise.all([
+      request<MemorySurfaceAboutYouReadResponse, Record<string, never>>(
+        "memory_surface/about_you/read",
+        {},
+      ),
+      request<MemorySurfaceCarryingReadResponse, { limit: number | null }>(
+        "memory_surface/carrying/read",
+        { limit: 20 },
+      ),
+      request<MemorySurfaceKnowledgeListResponse, { limit: number | null }>(
+        "memory_surface/knowledge/list",
+        { limit: 40 },
+      ),
+    ]);
+    dispatch({ type: "about_you_set", surface: aboutYou.data.surface });
+    dispatch({ type: "carrying_set", surface: carrying.data.surface });
+    dispatch({ type: "knowledge_set", surface: knowledge.data.surface });
   }, [request]);
 
   const updateRuntimeConfig = useCallback(
@@ -440,6 +485,7 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
       searchMemory,
       openMemoryEvidence,
       loadRuntimeState,
+      loadOwnerSurfaces,
       updateRuntimeConfig,
       upsertProviderProfile,
       deleteProviderProfile,
@@ -457,6 +503,7 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
       deleteProviderProfile,
       listMemoryTopics,
       loadRuntimeState,
+      loadOwnerSurfaces,
       memory,
       openMemoryEvidence,
       readMemoryWakeup,
@@ -479,6 +526,44 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
     ],
   );
 };
+
+const ownerInteractionContext = (browserInstanceId: string, threadId: ThreadId) => ({
+  ingress: {
+    kind: "web",
+    source_id: browserInstanceId,
+    conversation_id: `web:${browserInstanceId}:${threadId}`,
+  },
+  actor: {
+    actor_id: "owner",
+    kind: "owner" as const,
+    display_name: "Owner",
+    proof: "web-owner-session",
+  },
+  audience: { visibility: "private" as const, participants: ["owner"] },
+  role: "private_companion" as const,
+  authority: {
+    can_speak_for_owner: false,
+    can_start_work: true,
+    can_call_tools: true,
+    can_write_memory: true,
+    requires_owner_confirmation: false,
+  },
+  disclosure: {
+    allowed_topics: [],
+    forbidden_topics: [],
+    share_active_state: true,
+    share_commitments: true,
+    share_identity: true,
+    evidence_policy: "expandable" as const,
+  },
+  task_mandate: null,
+  provenance: {
+    channel: { kind: "web" as const, external_conversation_id: `web:${browserInstanceId}:${threadId}` },
+    received_at: null,
+    authenticated_by: "web",
+    raw_event_ref: null,
+  },
+});
 
 const requestThreadList = async (
   client: LizProtocolClient,
@@ -517,6 +602,40 @@ const loadThreadSession = async (
       { thread_id: threadId },
     );
     dispatch({ type: "session_loaded", session: response.data.session });
+  } catch (caught) {
+    setError(messageFromError(caught));
+  }
+};
+
+const loadOwnerSurfacesWithClient = async (
+  client: LizProtocolClient,
+  dispatch: React.Dispatch<any>,
+  setError: (error: string | null) => void,
+) => {
+  try {
+    const [aboutYou, carrying, knowledge] = await Promise.all([
+      client.request<MemorySurfaceAboutYouReadResponse, Record<string, never>>(
+        "memory_surface/about_you/read",
+        {},
+      ),
+      client.request<MemorySurfaceCarryingReadResponse, { limit: number | null }>(
+        "memory_surface/carrying/read",
+        { limit: 20 },
+      ),
+      client.request<MemorySurfaceKnowledgeListResponse, { limit: number | null }>(
+        "memory_surface/knowledge/list",
+        { limit: 40 },
+      ),
+    ]);
+    if (aboutYou.ok) {
+      dispatch({ type: "about_you_set", surface: aboutYou.data.surface });
+    }
+    if (carrying.ok) {
+      dispatch({ type: "carrying_set", surface: carrying.data.surface });
+    }
+    if (knowledge.ok) {
+      dispatch({ type: "knowledge_set", surface: knowledge.data.surface });
+    }
   } catch (caught) {
     setError(messageFromError(caught));
   }

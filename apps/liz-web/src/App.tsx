@@ -1,10 +1,11 @@
 import {
   Bot,
   Brain,
-  CheckSquare,
   CircleDot,
   Command,
+  FolderKanban,
   GitFork,
+  HardDrive,
   MessageSquareText,
   PlugZap,
   Search,
@@ -14,25 +15,29 @@ import {
   Sparkles,
   Square,
   TerminalSquare,
+  UserRound,
+  Wrench,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useLizRuntime, type LizRuntime } from "./hooks/useLizRuntime";
 import { loadPreferences, savePreferences, type Preferences } from "./preferences";
-import type { Thread } from "./protocol/types";
+import type { KnowledgeItem, Thread } from "./protocol/types";
 import type { TranscriptEntry } from "./state/workbench";
 
-type ViewId = "chat" | "memory" | "approvals" | "channels" | "settings";
+type ViewId = "home" | "people" | "channels" | "devices" | "workspaces" | "settings" | "diagnostics";
 
 const views: Array<{ id: ViewId; label: string; icon: React.ComponentType<{ size?: number }> }> = [
-  { id: "chat", label: "Chat", icon: MessageSquareText },
-  { id: "memory", label: "Memory", icon: Brain },
-  { id: "approvals", label: "Approvals", icon: CheckSquare },
+  { id: "home", label: "Home", icon: MessageSquareText },
+  { id: "people", label: "People", icon: UserRound },
   { id: "channels", label: "Channels", icon: PlugZap },
+  { id: "devices", label: "Devices", icon: HardDrive },
+  { id: "workspaces", label: "Workspaces", icon: FolderKanban },
   { id: "settings", label: "Settings", icon: Settings },
+  { id: "diagnostics", label: "Diagnostics", icon: Wrench },
 ];
 
 export function App() {
-  const [activeView, setActiveView] = useState<ViewId>("chat");
+  const [activeView, setActiveView] = useState<ViewId>("home");
   const [preferences, setPreferences] = useState<Preferences>(() => loadPreferences());
   const runtime = useLizRuntime(preferences);
 
@@ -41,7 +46,7 @@ export function App() {
   }, [preferences]);
 
   const shellClassName = useMemo(
-    () => `console-shell view-${activeView} density-${preferences.density} theme-${preferences.theme}`,
+    () => `liz-shell view-${activeView} density-${preferences.density} theme-${preferences.theme}`,
     [activeView, preferences.density, preferences.theme],
   );
 
@@ -72,9 +77,9 @@ export function App() {
         </div>
       </aside>
 
-      {activeView === "chat" ? (
+      {activeView === "home" ? (
         <aside className="thread-panel">
-          <ThreadPanel runtime={runtime} />
+          <ContinuityPanel runtime={runtime} />
         </aside>
       ) : null}
 
@@ -93,14 +98,12 @@ export function App() {
         />
       </main>
 
-      <aside className="inspector">
-        <Inspector runtime={runtime} />
-      </aside>
+      {activeView === "diagnostics" ? null : null}
     </div>
   );
 }
 
-function ThreadPanel({ runtime }: { runtime: LizRuntime }) {
+function ContinuityPanel({ runtime }: { runtime: LizRuntime }) {
   const [search, setSearch] = useState("");
   const [newTitle, setNewTitle] = useState("");
   const [workspaceRef, setWorkspaceRef] = useState("");
@@ -115,6 +118,7 @@ function ThreadPanel({ runtime }: { runtime: LizRuntime }) {
       title: newTitle.trim() || null,
       initial_goal: newTitle.trim() || null,
       workspace_ref: workspaceRef.trim() || null,
+      workspace_mount_id: null,
     });
     setNewTitle("");
   };
@@ -123,14 +127,14 @@ function ThreadPanel({ runtime }: { runtime: LizRuntime }) {
     <>
       <header className="panel-header">
           <div>
-            <p className="eyebrow">Threads</p>
-            <h1>Liz Console</h1>
+            <p className="eyebrow">Continuity</p>
+            <h1>liz</h1>
           </div>
           <button
             className="icon-button"
             type="button"
-            title="Refresh threads"
-            aria-label="Refresh threads"
+            title="Refresh continuity"
+            aria-label="Refresh continuity"
             onClick={() => void runtime.refreshThreads()}
           >
             <MessageSquareText size={17} />
@@ -140,7 +144,7 @@ function ThreadPanel({ runtime }: { runtime: LizRuntime }) {
         <label className="search-field">
           <Search size={15} />
           <input
-            placeholder="Search threads"
+            placeholder="Search what we're carrying"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
@@ -150,7 +154,7 @@ function ThreadPanel({ runtime }: { runtime: LizRuntime }) {
           <input
             value={newTitle}
             onChange={(event) => setNewTitle(event.target.value)}
-            placeholder="New thread goal"
+            placeholder="Start a new line"
           />
           <input
             value={workspaceRef}
@@ -158,7 +162,7 @@ function ThreadPanel({ runtime }: { runtime: LizRuntime }) {
             placeholder="Workspace path optional"
           />
           <button className="secondary-button" type="button" onClick={createThread}>
-            New
+            Start
           </button>
         </form>
 
@@ -186,7 +190,7 @@ function ThreadPanel({ runtime }: { runtime: LizRuntime }) {
 
         <section className="side-section">
           <div className="section-row">
-            <span>Workspace</span>
+          <span>Workspace</span>
             <strong>{runtime.activeThread ? workspaceLabel(runtime.activeThread) : "None"}</strong>
           </div>
           <div className="section-row">
@@ -239,6 +243,174 @@ function TopBar({
   );
 }
 
+function PeopleSurface({ runtime }: { runtime: LizRuntime }) {
+  const aboutYou = runtime.state.aboutYou;
+  const knowledge = runtime.state.knowledge;
+
+  return (
+    <section className="settings-surface control-surface">
+      <div className="settings-header">
+        <div>
+          <UserRound size={20} />
+          <h2>People</h2>
+        </div>
+        <button className="secondary-button" type="button" onClick={() => void runtime.loadOwnerSurfaces()}>
+          Refresh
+        </button>
+      </div>
+      <div className="settings-grid">
+        <section className="settings-section">
+          <p className="eyebrow">About You</p>
+          <h3>{aboutYou?.identity_summary ?? "liz is still learning the owner profile."}</h3>
+          <div className="topic-list">
+            {(aboutYou?.items ?? []).map((item) => (
+              <article key={item.key}>
+                <strong>{item.label}</strong>
+                <p>{item.value}</p>
+                <small>{item.confirmed ? "confirmed" : "learned"}</small>
+              </article>
+            ))}
+            {!aboutYou || aboutYou.items.length === 0 ? (
+              <div className="empty-panel">No owner profile details are confirmed yet.</div>
+            ) : null}
+          </div>
+        </section>
+        <section className="settings-section">
+          <p className="eyebrow">Boundaries</p>
+          <div className="setting-row">
+            <span>Owner context</span>
+            <strong>private by default</strong>
+          </div>
+          <div className="setting-row">
+            <span>External people</span>
+            <strong>minimum disclosure</strong>
+          </div>
+          <div className="setting-row">
+            <span>External agents</span>
+            <strong>task-scoped only</strong>
+          </div>
+        </section>
+        <section className="settings-section provider-section">
+          <p className="eyebrow">Knowledge / Decisions</p>
+          <KnowledgeList items={knowledge?.items ?? []} />
+        </section>
+      </div>
+    </section>
+  );
+}
+
+function DevicesSurface({ runtime }: { runtime: LizRuntime }) {
+  return (
+    <section className="settings-surface control-surface">
+      <div className="settings-header">
+        <div>
+          <HardDrive size={20} />
+          <h2>Devices</h2>
+        </div>
+        <button className="secondary-button" type="button" onClick={() => void runtime.loadRuntimeState()}>
+          Refresh
+        </button>
+      </div>
+      <div className="channel-list">
+        {runtime.state.nodes.map((node) => (
+          <article className="channel-row" key={node.identity.node_id}>
+            <div>
+              <span>{node.identity.kind}</span>
+              <strong>{node.identity.display_name}</strong>
+              <p>
+                {node.status.online ? "online" : "offline"}
+                {node.status.os ? ` on ${node.status.os}` : ""}
+                {node.status.hostname ? ` · ${node.status.hostname}` : ""}
+              </p>
+            </div>
+            <small>
+              {[
+                node.capabilities.workspace_tools ? "workspace" : null,
+                node.capabilities.shell_tools ? "shell" : null,
+                node.capabilities.web_ui_host ? "web host" : null,
+              ]
+                .filter(Boolean)
+                .join(" / ")}
+            </small>
+          </article>
+        ))}
+        {runtime.state.nodes.length === 0 ? <div className="empty-panel">No nodes loaded.</div> : null}
+      </div>
+    </section>
+  );
+}
+
+function WorkspacesSurface({ runtime }: { runtime: LizRuntime }) {
+  return (
+    <section className="settings-surface control-surface">
+      <div className="settings-header">
+        <div>
+          <FolderKanban size={20} />
+          <h2>Workspaces</h2>
+        </div>
+        <button className="secondary-button" type="button" onClick={() => void runtime.loadRuntimeState()}>
+          Refresh
+        </button>
+      </div>
+      <div className="channel-list">
+        {runtime.state.workspaceMounts.map((mount) => (
+          <article className="channel-row" key={mount.workspace_id}>
+            <div>
+              <span>{mount.node_id}</span>
+              <strong>{mount.label}</strong>
+              <p>{mount.root_path}</p>
+            </div>
+            <small>
+              {[
+                mount.permissions.read ? "read" : null,
+                mount.permissions.write ? "write" : null,
+                mount.permissions.shell ? "shell" : null,
+              ]
+                .filter(Boolean)
+                .join(" / ")}
+            </small>
+          </article>
+        ))}
+        {runtime.state.workspaceMounts.length === 0 ? (
+          <div className="empty-panel">No workspace mounts are attached yet.</div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function DiagnosticsSurface({ runtime }: { runtime: LizRuntime }) {
+  return (
+    <section className="diagnostics-shell">
+      <div className="diagnostics-main">
+        <MemorySurface runtime={runtime} />
+        <ApprovalsSurface runtime={runtime} />
+      </div>
+      <aside className="diagnostics-inspector">
+        <Inspector runtime={runtime} />
+      </aside>
+    </section>
+  );
+}
+
+function KnowledgeList({ items }: { items: KnowledgeItem[] }) {
+  if (items.length === 0) {
+    return <div className="empty-panel">No decisions or knowledge items loaded.</div>;
+  }
+
+  return (
+    <div className="topic-list">
+      {items.map((item) => (
+        <article key={item.fact_id}>
+          <strong>{item.subject}</strong>
+          <p>{item.summary}</p>
+          <small>{item.stale ? "stale" : item.kind}</small>
+        </article>
+      ))}
+    </div>
+  );
+}
+
 function WorkspaceView({
   activeView,
   preferences,
@@ -250,7 +422,7 @@ function WorkspaceView({
   runtime: LizRuntime;
   setPreferences: React.Dispatch<React.SetStateAction<Preferences>>;
 }) {
-  if (activeView === "chat") {
+  if (activeView === "home") {
     return <ChatSurface runtime={runtime} />;
   }
 
@@ -264,16 +436,24 @@ function WorkspaceView({
     );
   }
 
-  if (activeView === "approvals") {
-    return <ApprovalsSurface runtime={runtime} />;
+  if (activeView === "people") {
+    return <PeopleSurface runtime={runtime} />;
   }
 
-  if (activeView === "memory") {
-    return <MemorySurface runtime={runtime} />;
+  if (activeView === "devices") {
+    return <DevicesSurface runtime={runtime} />;
+  }
+
+  if (activeView === "workspaces") {
+    return <WorkspacesSurface runtime={runtime} />;
   }
 
   if (activeView === "channels") {
     return <ChannelsSurface runtime={runtime} />;
+  }
+
+  if (activeView === "diagnostics") {
+    return <DiagnosticsSurface runtime={runtime} />;
   }
 
   return (
@@ -486,6 +666,8 @@ function ChatSurface({ runtime }: { runtime: LizRuntime }) {
     setMessage("");
   };
   const activeTurnId = runtime.activeRuntime.activeTurnId;
+  const pendingApprovals = runtime.activeApprovals.filter((approval) => approval.status === "pending");
+  const carrying = runtime.state.carrying?.active ?? [];
 
   return (
     <section className="chat-surface">
@@ -498,14 +680,51 @@ function ChatSurface({ runtime }: { runtime: LizRuntime }) {
             {runtime.activeTranscript.length > 0 ? (
               runtime.activeTranscript.map((entry) => <TranscriptRow key={entry.id} entry={entry} />)
             ) : (
-              <div className="empty-panel">Start a turn to build this transcript.</div>
+              <div className="empty-panel">Say what you want to pick up or start.</div>
             )}
           </>
         ) : (
-          <div className="empty-panel">Connect to the app server and create or select a thread.</div>
+          <HomeOverview runtime={runtime} carryingCount={carrying.length} />
         )}
+        {pendingApprovals.map((approval) => (
+          <article className={`approval-row inline-approval ${approval.risk_level}`} key={approval.id}>
+            <div>
+              <span>Needs confirmation</span>
+              <h3>{approval.action_type}</h3>
+              <p>{approval.reason}</p>
+              {approval.sandbox_context ? <small>{approval.sandbox_context}</small> : null}
+            </div>
+            <div className="approval-actions">
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() =>
+                  void runtime.respondToApproval({
+                    approval_id: approval.id,
+                    decision: "deny",
+                  })
+                }
+              >
+                Deny
+              </button>
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() =>
+                  void runtime.respondToApproval({
+                    approval_id: approval.id,
+                    decision: "approve_once",
+                  })
+                }
+              >
+                Approve once
+              </button>
+            </div>
+          </article>
+        ))}
         {runtime.activeToolCalls.length > 0 ? (
-          <div className="tool-timeline" aria-label="Tool timeline">
+          <details className="tool-timeline" aria-label="Tool timeline">
+            <summary>Working details</summary>
             {runtime.activeToolCalls.map((toolCall) => (
               <button
                 key={toolCall.callId}
@@ -521,7 +740,7 @@ function ChatSurface({ runtime }: { runtime: LizRuntime }) {
                 <span>{toolCall.status}</span>
               </button>
             ))}
-          </div>
+          </details>
         ) : null}
       </div>
       <form className="composer">
@@ -540,7 +759,7 @@ function ChatSurface({ runtime }: { runtime: LizRuntime }) {
               <option value="resume_command">Resume</option>
             </select>
           </label>
-          <span>{runtime.activeThread ? workspaceLabel(runtime.activeThread) : "no thread selected"}</span>
+          <span>{runtime.activeThread ? workspaceLabel(runtime.activeThread) : "new line starts when you send"}</span>
         </div>
         <textarea
           placeholder="Message Liz"
@@ -568,7 +787,7 @@ function ChatSurface({ runtime }: { runtime: LizRuntime }) {
           <button
             className="primary-button"
             type="button"
-            disabled={!runtime.activeThread || !message.trim()}
+            disabled={!message.trim()}
             onClick={submit}
           >
             <Send size={14} />
@@ -576,6 +795,25 @@ function ChatSurface({ runtime }: { runtime: LizRuntime }) {
           </button>
         </div>
       </form>
+    </section>
+  );
+}
+
+function HomeOverview({ runtime, carryingCount }: { runtime: LizRuntime; carryingCount: number }) {
+  return (
+    <section className="home-overview">
+      <p className="eyebrow">Home</p>
+      <h2>{runtime.state.aboutYou?.identity_summary ?? "liz is here."}</h2>
+      <div className="metric-grid">
+        <div>
+          <span>Active lines</span>
+          <strong>{carryingCount}</strong>
+        </div>
+        <div>
+          <span>Pending confirmations</span>
+          <strong>{runtime.allApprovals.filter((approval) => approval.status === "pending").length}</strong>
+        </div>
+      </div>
     </section>
   );
 }
@@ -968,16 +1206,20 @@ function Inspector({ runtime }: { runtime: LizRuntime }) {
 
 function viewTitle(view: ViewId) {
   switch (view) {
-    case "chat":
-      return "Chat workbench";
-    case "memory":
-      return "Memory";
-    case "approvals":
-      return "Approvals";
+    case "home":
+      return "Home";
+    case "people":
+      return "People";
     case "channels":
       return "Channels";
+    case "devices":
+      return "Devices";
+    case "workspaces":
+      return "Workspaces";
     case "settings":
       return "Settings";
+    case "diagnostics":
+      return "Diagnostics";
   }
 }
 
