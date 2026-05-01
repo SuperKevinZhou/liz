@@ -21,6 +21,59 @@ const RECENT_ENTRY_LIMIT: usize = 8;
 #[derive(Debug, Clone, Default)]
 pub struct ForegroundMemoryEngine;
 
+#[derive(Debug, Clone)]
+struct MemoryCompilationInput {
+    thread: Thread,
+    recent_entries: Vec<TurnLogEntry>,
+    citations: Vec<MemoryCitationRef>,
+    existing_facts: Vec<StoredMemoryFact>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct MemoryCompilationDelta {
+    identity_summary_update: Option<String>,
+    active_state_summary: Option<String>,
+    recent_topics: Vec<String>,
+    recent_keywords: Vec<String>,
+    commitments: Vec<String>,
+    candidate_procedures: Vec<String>,
+    used_fallback: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+struct HeuristicMemoryCompiler;
+
+impl HeuristicMemoryCompiler {
+    fn compile(&self, input: &MemoryCompilationInput) -> MemoryCompilationDelta {
+        let recent_summaries = input
+            .recent_entries
+            .iter()
+            .map(|entry| entry.summary.clone())
+            .filter(|summary| !summary.trim().is_empty())
+            .collect::<Vec<_>>();
+        let text_refs = std::iter::once(input.thread.title.as_str())
+            .chain(input.thread.active_goal.iter().map(String::as_str))
+            .chain(input.thread.active_summary.iter().map(String::as_str))
+            .chain(recent_summaries.iter().map(String::as_str))
+            .collect::<Vec<_>>();
+        let recent_topics = derive_topics_from_text(text_refs.as_slice(), 6);
+        let recent_keywords = derive_keywords_from_text(text_refs.as_slice(), 8);
+        let candidate_procedures =
+            derive_candidate_procedures(&input.recent_entries, &recent_topics);
+        let identity_summary_update = derive_identity_summary_update(input);
+
+        MemoryCompilationDelta {
+            identity_summary_update,
+            active_state_summary: input.thread.active_summary.clone(),
+            recent_topics,
+            recent_keywords,
+            commitments: input.thread.pending_commitments.clone(),
+            candidate_procedures,
+            used_fallback: true,
+        }
+    }
+}
+
 impl ForegroundMemoryEngine {
     /// Reads the current wake-up slice and recent-conversation view for a thread.
     pub fn read_wakeup(
@@ -51,36 +104,21 @@ impl ForegroundMemoryEngine {
         let entries = stores.read_turn_log(thread_id)?;
         let recent_entries = recent_entries(&entries);
         let citations = citations_from_entries(thread_id, &recent_entries);
-        let recent_summaries = recent_entries
-            .iter()
-            .map(|entry| entry.summary.clone())
-            .filter(|summary| !summary.trim().is_empty())
-            .collect::<Vec<_>>();
-        let recent_topics = derive_topics_from_text(
-            std::iter::once(thread.title.as_str())
-                .chain(thread.active_goal.iter().map(String::as_str))
-                .chain(thread.active_summary.iter().map(String::as_str))
-                .chain(recent_summaries.iter().map(String::as_str))
-                .collect::<Vec<_>>()
-                .as_slice(),
-            6,
-        );
-        let recent_keywords = derive_keywords_from_text(
-            std::iter::once(thread.title.as_str())
-                .chain(thread.active_goal.iter().map(String::as_str))
-                .chain(thread.active_summary.iter().map(String::as_str))
-                .chain(recent_summaries.iter().map(String::as_str))
-                .collect::<Vec<_>>()
-                .as_slice(),
-            8,
-        );
-        let candidate_procedures = derive_candidate_procedures(&recent_entries, &recent_topics);
-
         let mut snapshot = stores.read_global_memory()?;
+        let input = MemoryCompilationInput {
+            thread: thread.clone(),
+            recent_entries: recent_entries.clone(),
+            citations: citations.clone(),
+            existing_facts: snapshot.facts.clone(),
+        };
+        let delta = HeuristicMemoryCompiler::default().compile(&input);
         let now = ids.now_timestamp();
-        snapshot.active_state_summary = thread.active_summary.clone();
-        snapshot.recent_topics = recent_topics.clone();
-        snapshot.recent_keywords = recent_keywords.clone();
+        if let Some(identity_summary) = delta.identity_summary_update.clone() {
+            snapshot.identity_summary = Some(identity_summary);
+        }
+        snapshot.active_state_summary = delta.active_state_summary.clone();
+        snapshot.recent_topics = delta.recent_topics.clone();
+        snapshot.recent_keywords = delta.recent_keywords.clone();
 
         let mut updated_fact_ids = Vec::new();
         let mut invalidated_fact_ids = Vec::new();
@@ -95,7 +133,7 @@ impl ForegroundMemoryEngine {
                     kind: MemoryFactKind::ActiveState,
                     subject: format!("thread:{}:active_state", thread.id),
                     value: active_summary.clone(),
-                    keywords: recent_keywords.clone(),
+                    keywords: delta.recent_keywords.clone(),
                     related_thread_ids: vec![thread.id.clone()],
                     citations: citations.clone(),
                     updated_at: now.clone(),
@@ -113,7 +151,7 @@ impl ForegroundMemoryEngine {
                     kind: MemoryFactKind::Decision,
                     subject: format!("thread:{}:current_goal", thread.id),
                     value: goal.clone(),
-                    keywords: recent_keywords.clone(),
+                    keywords: delta.recent_keywords.clone(),
                     related_thread_ids: vec![thread.id.clone()],
                     citations: citations.clone(),
                     updated_at: now.clone(),
@@ -125,14 +163,33 @@ impl ForegroundMemoryEngine {
             &mut snapshot,
             ids,
             &thread,
-            &recent_keywords,
+            &delta.commitments,
+            &delta.recent_keywords,
             &citations,
             &now,
             &mut updated_fact_ids,
             &mut invalidated_fact_ids,
         );
 
-        for procedure in candidate_procedures.iter().cloned() {
+        if let Some(identity_summary) = delta.identity_summary_update.clone() {
+            upsert_fact(
+                &mut snapshot,
+                ids,
+                &mut updated_fact_ids,
+                &mut invalidated_fact_ids,
+                FactSpec {
+                    kind: MemoryFactKind::Identity,
+                    subject: "owner:identity_summary".to_owned(),
+                    value: identity_summary,
+                    keywords: delta.recent_keywords.clone(),
+                    related_thread_ids: vec![thread.id.clone()],
+                    citations: citations.clone(),
+                    updated_at: now.clone(),
+                },
+            );
+        }
+
+        for procedure in delta.candidate_procedures.iter().cloned() {
             upsert_fact(
                 &mut snapshot,
                 ids,
@@ -142,7 +199,7 @@ impl ForegroundMemoryEngine {
                     kind: MemoryFactKind::ProcedureCandidate,
                     subject: format!("thread:{}:procedure:{}", thread.id, slugify(&procedure)),
                     value: procedure,
-                    keywords: recent_keywords.clone(),
+                    keywords: delta.recent_keywords.clone(),
                     related_thread_ids: vec![thread.id.clone()],
                     citations: citations.clone(),
                     updated_at: now.clone(),
@@ -154,8 +211,8 @@ impl ForegroundMemoryEngine {
             &mut snapshot,
             &thread,
             &recent_entries,
-            &recent_topics,
-            &recent_keywords,
+            &delta.recent_topics,
+            &delta.recent_keywords,
             &updated_fact_ids,
             &citations,
             &now,
@@ -165,16 +222,17 @@ impl ForegroundMemoryEngine {
 
         Ok(MemoryCompilationSummary {
             delta_summary: format!(
-                "Compiled {} topics, {} commitments, and {} procedure candidates",
-                recent_topics.len(),
-                thread.pending_commitments.len(),
-                candidate_procedures.len()
+                "{} compiled {} topics, {} commitments, and {} procedure candidates",
+                if delta.used_fallback { "Heuristic fallback" } else { "LLM compiler" },
+                delta.recent_topics.len(),
+                delta.commitments.len(),
+                delta.candidate_procedures.len()
             ),
             updated_fact_ids,
             invalidated_fact_ids,
-            recent_topics,
-            recent_keywords,
-            candidate_procedures,
+            recent_topics: delta.recent_topics,
+            recent_keywords: delta.recent_keywords,
+            candidate_procedures: delta.candidate_procedures,
         })
     }
 
@@ -549,14 +607,14 @@ fn sync_commitment_facts(
     snapshot: &mut GlobalMemorySnapshot,
     ids: &IdGenerator,
     thread: &Thread,
+    commitments: &[String],
     recent_keywords: &[String],
     citations: &[MemoryCitationRef],
     now: &liz_protocol::Timestamp,
     updated_fact_ids: &mut Vec<MemoryFactId>,
     invalidated_fact_ids: &mut Vec<MemoryFactId>,
 ) {
-    let active_subjects = thread
-        .pending_commitments
+    let active_subjects = commitments
         .iter()
         .map(|commitment| format!("thread:{}:commitment:{}", thread.id, slugify(commitment)))
         .collect::<BTreeSet<_>>();
@@ -576,7 +634,7 @@ fn sync_commitment_facts(
         invalidated_fact_ids.push(fact.id.clone());
     }
 
-    for commitment in thread.pending_commitments.iter().cloned() {
+    for commitment in commitments.iter().cloned() {
         upsert_fact(
             snapshot,
             ids,
@@ -776,6 +834,50 @@ fn derive_candidate_procedures(entries: &[TurnLogEntry], topics: &[String]) -> V
 
     let topic_prefix = topics.first().map(|topic| format!("For {topic}, ")).unwrap_or_default();
     vec![format!("{topic_prefix}repeat the proven flow: {}", tool_steps.join(" -> "))]
+}
+
+fn derive_identity_summary_update(input: &MemoryCompilationInput) -> Option<String> {
+    if input.citations.is_empty() {
+        return None;
+    }
+
+    let mut identity_lines = Vec::new();
+    for summary in input.recent_entries.iter().map(|entry| entry.summary.trim()) {
+        let normalized = summary.to_ascii_lowercase();
+        let has_identity_signal = [
+            "my name is",
+            "call me",
+            "i am ",
+            "i'm ",
+            "i work on",
+            "i prefer",
+            "prefers",
+            "likes",
+            "wants to be called",
+        ]
+        .iter()
+        .any(|needle| normalized.contains(needle));
+        if has_identity_signal {
+            identity_lines.push(summary.to_owned());
+        }
+        if identity_lines.len() == 3 {
+            break;
+        }
+    }
+
+    if identity_lines.is_empty() {
+        return None;
+    }
+
+    let previous_identity = input.existing_facts.iter().find_map(|fact| {
+        (fact.kind == MemoryFactKind::Identity && fact.invalidated_at.is_none())
+            .then_some(fact.value.as_str())
+    });
+    let update = identity_lines.join(" ");
+    if previous_identity == Some(update.as_str()) {
+        return None;
+    }
+    Some(update)
 }
 
 fn derive_topics_from_text(texts: &[&str], limit: usize) -> Vec<String> {
