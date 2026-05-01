@@ -207,6 +207,17 @@ export interface ApprovalRespondRequest {
   decision: "approve_once" | "approve_and_persist" | "deny";
 }
 
+export interface ApprovalRequest {
+  id: ApprovalId;
+  thread_id: ThreadId;
+  turn_id: TurnId;
+  action_type: string;
+  risk_level: "low" | "medium" | "high" | "critical";
+  reason: string;
+  sandbox_context: string | null;
+  status: "pending" | "approved" | "denied" | "expired";
+}
+
 export interface MemoryReadWakeupRequest {
   thread_id: ThreadId;
 }
@@ -254,6 +265,10 @@ export interface TurnStartResponse {
 
 export interface TurnCancelResponse {
   turn: Turn;
+}
+
+export interface ApprovalRespondResponse {
+  approval: ApprovalRequest;
 }
 
 export interface ResumeSummary {
@@ -321,4 +336,13 @@ export interface ExecutorOutputChunkEventPayload {
   executor_task_id: string;
   stream: "stdout" | "stderr";
   chunk: string;
+}
+
+export interface ApprovalRequestedEventPayload {
+  approval: ApprovalRequest;
+}
+
+export interface ApprovalResolvedEventPayload {
+  approval: ApprovalRequest;
+  decision: "approve_once" | "approve_and_persist" | "deny";
 }

@@ -244,16 +244,15 @@ function WorkspaceView({
     return <SettingsSurface preferences={preferences} />;
   }
 
+  if (activeView === "approvals") {
+    return <ApprovalsSurface runtime={runtime} />;
+  }
+
   const panels = {
     memory: {
       icon: Brain,
       title: "Memory",
       rows: ["Wakeup", "Compile now", "Search", "Evidence"],
-    },
-    approvals: {
-      icon: ShieldCheck,
-      title: "Approvals",
-      rows: ["Pending", "Resolved", "Risk", "Decision"],
     },
     channels: {
       icon: PlugZap,
@@ -275,6 +274,63 @@ function WorkspaceView({
             <small>Not loaded</small>
           </button>
         ))}
+      </div>
+    </section>
+  );
+}
+
+function ApprovalsSurface({ runtime }: { runtime: LizRuntime }) {
+  const approvals = runtime.allApprovals;
+
+  return (
+    <section className="approval-surface">
+      <header>
+        <ShieldCheck size={20} />
+        <h2>Approvals</h2>
+      </header>
+      <div className="approval-list">
+        {approvals.map((approval) => (
+          <article key={approval.id} className={`approval-row ${approval.risk_level}`}>
+            <div>
+              <span>{approval.risk_level}</span>
+              <h3>{approval.action_type}</h3>
+              <p>{approval.reason}</p>
+              {approval.sandbox_context ? <small>{approval.sandbox_context}</small> : null}
+            </div>
+            <div className="approval-actions">
+              <strong>{approval.status}</strong>
+              {approval.status === "pending" ? (
+                <>
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={() =>
+                      void runtime.respondToApproval({
+                        approval_id: approval.id,
+                        decision: "deny",
+                      })
+                    }
+                  >
+                    Deny
+                  </button>
+                  <button
+                    className="primary-button"
+                    type="button"
+                    onClick={() =>
+                      void runtime.respondToApproval({
+                        approval_id: approval.id,
+                        decision: "approve_once",
+                      })
+                    }
+                  >
+                    Approve once
+                  </button>
+                </>
+              ) : null}
+            </div>
+          </article>
+        ))}
+        {approvals.length === 0 ? <div className="empty-panel">No approvals loaded.</div> : null}
       </div>
     </section>
   );
@@ -467,8 +523,10 @@ function Inspector({ runtime }: { runtime: LizRuntime }) {
             <strong>{runtime.activeRuntime.activeTurnId ? "Live" : "Idle"}</strong>
           </div>
           <div>
-            <span>Messages</span>
-            <strong>{runtime.activeToolCalls.length}</strong>
+            <span>Pending approvals</span>
+            <strong>
+              {runtime.activeApprovals.filter((approval) => approval.status === "pending").length}
+            </strong>
           </div>
         </section>
       </div>

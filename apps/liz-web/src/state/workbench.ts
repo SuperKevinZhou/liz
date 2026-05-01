@@ -1,6 +1,10 @@
 import type {
   AssistantChunkEventPayload,
   AssistantCompletedEventPayload,
+  ApprovalRequest,
+  ApprovalResolvedEventPayload,
+  ApprovalRequestedEventPayload,
+  ExecutorOutputChunkEventPayload,
   ServerEvent,
   Thread,
   ThreadEventPayload,
@@ -14,7 +18,6 @@ import type {
   TurnEventPayload,
   TurnFailedEventPayload,
   TurnId,
-  ExecutorOutputChunkEventPayload,
 } from "../protocol/types";
 
 export type TranscriptEntry =
@@ -79,6 +82,7 @@ export interface WorkbenchState {
   transcriptByThread: Record<ThreadId, TranscriptEntry[]>;
   runtimeByThread: Record<ThreadId, ThreadRuntime>;
   toolCallsByThread: Record<ThreadId, ToolCallProjection[]>;
+  approvalsByThread: Record<ThreadId, ApprovalRequest[]>;
   selectedToolCallId: string | null;
 }
 
@@ -91,7 +95,8 @@ export type WorkbenchAction =
   | { type: "server_event"; event: ServerEvent }
   | { type: "resume_summary_added"; threadId: ThreadId; content: string; createdAt: string }
   | { type: "thread_error"; threadId: ThreadId; message: string }
-  | { type: "tool_selected"; callId: string | null };
+  | { type: "tool_selected"; callId: string | null }
+  | { type: "approval_upsert"; approval: ApprovalRequest };
 
 export const initialWorkbenchState: WorkbenchState = {
   threads: [],
@@ -99,6 +104,7 @@ export const initialWorkbenchState: WorkbenchState = {
   transcriptByThread: {},
   runtimeByThread: {},
   toolCallsByThread: {},
+  approvalsByThread: {},
   selectedToolCallId: null,
 };
 
@@ -209,6 +215,9 @@ export const workbenchReducer = (
         ...state,
         selectedToolCallId: action.callId,
       };
+
+    case "approval_upsert":
+      return upsertApproval(state, action.approval.thread_id, action.approval);
   }
 };
 
@@ -230,6 +239,11 @@ export const selectedToolCall = (state: WorkbenchState) => {
   const calls = Object.values(state.toolCallsByThread).flat();
   return calls.find((call) => call.callId === state.selectedToolCallId) ?? null;
 };
+
+export const activeApprovals = (state: WorkbenchState) =>
+  state.activeThreadId ? (state.approvalsByThread[state.activeThreadId] ?? []) : [];
+
+export const allApprovals = (state: WorkbenchState) => Object.values(state.approvalsByThread).flat();
 
 const projectServerEvent = (state: WorkbenchState, event: ServerEvent): WorkbenchState => {
   switch (event.event_type) {
@@ -346,6 +360,34 @@ const projectServerEvent = (state: WorkbenchState, event: ServerEvent): Workbenc
         ],
         updatedAt: event.created_at,
       }));
+    }
+
+    case "approval_requested": {
+      const approval = (event.payload as ApprovalRequestedEventPayload).approval;
+      const updated = upsertApproval(state, approval.thread_id, approval);
+      return appendEntry(updated, approval.thread_id, {
+        id: `approval:${approval.id}:requested`,
+        kind: "system",
+        threadId: approval.thread_id,
+        turnId: approval.turn_id,
+        content: `Approval required: ${approval.action_type} (${approval.risk_level}). ${approval.reason}`,
+        createdAt: event.created_at,
+        tone: "info",
+      });
+    }
+
+    case "approval_resolved": {
+      const approval = (event.payload as ApprovalResolvedEventPayload).approval;
+      const updated = upsertApproval(state, approval.thread_id, approval);
+      return appendEntry(updated, approval.thread_id, {
+        id: `approval:${approval.id}:resolved`,
+        kind: "system",
+        threadId: approval.thread_id,
+        turnId: approval.turn_id,
+        content: `Approval ${approval.status}: ${approval.action_type}.`,
+        createdAt: event.created_at,
+        tone: "info",
+      });
     }
 
     default:
@@ -477,6 +519,21 @@ const upsertThread = (threads: Thread[], thread: Thread) =>
 
 const sortThreads = (threads: Thread[]) =>
   [...threads].sort((left, right) => right.updated_at.localeCompare(left.updated_at));
+
+const upsertApproval = (
+  state: WorkbenchState,
+  threadId: ThreadId,
+  approval: ApprovalRequest,
+): WorkbenchState => {
+  const approvals = state.approvalsByThread[threadId] ?? [];
+  return {
+    ...state,
+    approvalsByThread: {
+      ...state.approvalsByThread,
+      [threadId]: [approval, ...approvals.filter((current) => current.id !== approval.id)],
+    },
+  };
+};
 
 const upsertToolCall = (
   state: WorkbenchState,

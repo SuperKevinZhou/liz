@@ -125,6 +125,48 @@ describe("workbench reducer", () => {
       artifactIds: ["artifact_01"],
     });
   });
+
+  it("keeps approval requests after resolution", () => {
+    let state = workbenchReducer(initialWorkbenchState, {
+      type: "threads_loaded",
+      threads: [thread],
+    });
+    state = workbenchReducer(state, {
+      type: "server_event",
+      event: event("approval_requested", {
+        approval: {
+          id: "approval_01",
+          thread_id: "thread_01",
+          turn_id: "turn_01",
+          action_type: "shell",
+          risk_level: "high",
+          reason: "Run command",
+          sandbox_context: "workspace-write",
+          status: "pending",
+        },
+      }),
+    });
+    state = workbenchReducer(state, {
+      type: "server_event",
+      event: event("approval_resolved", {
+        approval: {
+          id: "approval_01",
+          thread_id: "thread_01",
+          turn_id: "turn_01",
+          action_type: "shell",
+          risk_level: "high",
+          reason: "Run command",
+          sandbox_context: "workspace-write",
+          status: "approved",
+        },
+        decision: "approve_once",
+      }),
+    });
+
+    expect(state.approvalsByThread.thread_01).toHaveLength(1);
+    expect(state.approvalsByThread.thread_01[0].status).toBe("approved");
+    expect(activeTranscript(state).filter((entry) => entry.kind === "system")).toHaveLength(2);
+  });
 });
 
 const event = (event_type: string, payload: unknown): ServerEvent => ({

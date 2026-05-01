@@ -2,6 +2,7 @@ import { useCallback, useMemo, useReducer, useRef, useState } from "react";
 import { createProtocolClient, type LizProtocolClient } from "../protocol/client";
 import type {
   ApprovalRespondRequest,
+  ApprovalRespondResponse,
   ConnectionState,
   ResponseError,
   ServerResponseEnvelope,
@@ -21,10 +22,12 @@ import type {
   TurnStartResponse,
 } from "../protocol/types";
 import {
+  activeApprovals,
   activeRuntime,
   activeThread,
   activeToolCalls,
   activeTranscript,
+  allApprovals,
   initialWorkbenchState,
   selectedToolCall,
   workbenchReducer,
@@ -39,6 +42,8 @@ export interface LizRuntime {
   activeTranscript: ReturnType<typeof activeTranscript>;
   activeRuntime: ReturnType<typeof activeRuntime>;
   activeToolCalls: ReturnType<typeof activeToolCalls>;
+  activeApprovals: ReturnType<typeof activeApprovals>;
+  allApprovals: ReturnType<typeof allApprovals>;
   selectedToolCall: ReturnType<typeof selectedToolCall>;
   selectToolCall: (callId: string | null) => void;
   connect: () => void;
@@ -95,6 +100,8 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
   const runtime = activeRuntime(state);
   const toolCalls = activeToolCalls(state);
   const selectedTool = selectedToolCall(state);
+  const approvals = activeApprovals(state);
+  const everyApproval = allApprovals(state);
 
   const connect = useCallback(() => {
     setError(null);
@@ -234,7 +241,11 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
 
   const respondToApproval = useCallback(
     async (approvalRequest: ApprovalRespondRequest) => {
-      await request("approval/respond", approvalRequest);
+      const response = await request<ApprovalRespondResponse, ApprovalRespondRequest>(
+        "approval/respond",
+        approvalRequest,
+      );
+      dispatch({ type: "approval_upsert", approval: response.data.approval });
     },
     [request],
   );
@@ -252,6 +263,8 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
       activeTranscript: transcript,
       activeRuntime: runtime,
       activeToolCalls: toolCalls,
+      activeApprovals: approvals,
+      allApprovals: everyApproval,
       selectedToolCall: selectedTool,
       selectToolCall: selectTool,
       connect,
@@ -271,9 +284,11 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
       connectionState,
       currentThread,
       error,
+      everyApproval,
       forkThread,
       refreshThreads,
       respondToApproval,
+      approvals,
       runtime,
       selectedTool,
       selectTool,

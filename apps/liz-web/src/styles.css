@@ -465,6 +465,67 @@ button {
   padding: 24px;
 }
 
+.approval-surface {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  height: 100%;
+  overflow: auto;
+  padding: 24px;
+}
+
+.approval-surface header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.approval-surface h2,
+.approval-row h3 {
+  margin: 0;
+}
+
+.approval-list {
+  display: grid;
+  gap: 10px;
+}
+
+.approval-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 16px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(251, 250, 247, 0.72);
+}
+
+.approval-row.high,
+.approval-row.critical {
+  border-left: 3px solid var(--danger);
+}
+
+.approval-row span {
+  color: var(--approval);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.approval-row p,
+.approval-row small {
+  display: block;
+  margin: 5px 0 0;
+  color: var(--ink-2);
+  line-height: 1.45;
+}
+
+.approval-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .empty-panel {
   padding: 14px;
   color: var(--ink-2);
