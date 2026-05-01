@@ -1,6 +1,7 @@
 //! Runtime-owned node registry and workspace mounts.
 
 use crate::runtime::{RuntimeError, RuntimeResult};
+use crate::storage::NodeRegistrySnapshot;
 use liz_protocol::{
     ApprovalPolicy, NodeCapabilities, NodeId, NodeIdentity, NodeKind, NodePolicy, NodeRecord,
     NodeStatus, SandboxMode, WorkspaceMount, WorkspaceMountAttachRequest,
@@ -26,9 +27,37 @@ impl Default for NodeRegistry {
 }
 
 impl NodeRegistry {
+    /// Creates a registry from persisted state and refreshes the built-in local node.
+    pub fn from_snapshot(snapshot: NodeRegistrySnapshot) -> Self {
+        let mut nodes = snapshot
+            .nodes
+            .into_iter()
+            .map(|node| (node.identity.node_id.clone(), node))
+            .collect::<HashMap<_, _>>();
+        let local = local_node_record();
+        nodes.insert(local.identity.node_id.clone(), local);
+        let workspace_mounts = snapshot
+            .workspace_mounts
+            .into_iter()
+            .map(|mount| (mount.workspace_id.clone(), mount))
+            .collect::<HashMap<_, _>>();
+        Self { nodes, workspace_mounts }
+    }
+
+    /// Returns a stable snapshot suitable for persistence.
+    pub fn snapshot(&self) -> NodeRegistrySnapshot {
+        let mut nodes = self.nodes.values().cloned().collect::<Vec<_>>();
+        nodes.sort_by(|left, right| left.identity.node_id.cmp(&right.identity.node_id));
+        let mut workspace_mounts = self.workspace_mounts.values().cloned().collect::<Vec<_>>();
+        workspace_mounts.sort_by(|left, right| left.workspace_id.cmp(&right.workspace_id));
+        NodeRegistrySnapshot { nodes, workspace_mounts }
+    }
+
     /// Lists all registered nodes.
     pub fn list_nodes(&self) -> Vec<NodeRecord> {
-        self.nodes.values().cloned().collect()
+        let mut nodes = self.nodes.values().cloned().collect::<Vec<_>>();
+        nodes.sort_by(|left, right| left.identity.node_id.cmp(&right.identity.node_id));
+        nodes
     }
 
     /// Reads one node record.
@@ -85,8 +114,7 @@ impl NodeRegistry {
         if !self.nodes.contains_key(&request.node_id) {
             return Err(RuntimeError::not_found("node_not_found", "node does not exist"));
         }
-        let workspace_id =
-            WorkspaceMountId::new(format!("workspace_{}", self.workspace_mounts.len() + 1));
+        let workspace_id = self.next_workspace_mount_id();
         let label = request.label.unwrap_or_else(|| request.root_path.clone());
         let mount = WorkspaceMount {
             workspace_id: workspace_id.clone(),
@@ -133,6 +161,17 @@ impl NodeRegistry {
             ));
         }
         Ok(request.workspace_id)
+    }
+
+    fn next_workspace_mount_id(&self) -> WorkspaceMountId {
+        let mut index = self.workspace_mounts.len() + 1;
+        loop {
+            let candidate = WorkspaceMountId::new(format!("workspace_{index}"));
+            if !self.workspace_mounts.contains_key(&candidate) {
+                return candidate;
+            }
+            index += 1;
+        }
     }
 }
 

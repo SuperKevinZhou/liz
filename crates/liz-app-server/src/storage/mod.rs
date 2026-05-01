@@ -6,6 +6,7 @@ pub mod checkpoint_store;
 pub mod error;
 mod fs;
 pub mod global_memory_store;
+pub mod node_registry_store;
 pub mod paths;
 pub mod thread_store;
 pub mod turn_log;
@@ -18,6 +19,7 @@ pub use global_memory_store::{
     FsGlobalMemoryStore, GlobalMemorySnapshot, GlobalMemoryStore, StoredMemoryFact,
     StoredTopicRecord,
 };
+pub use node_registry_store::{FsNodeRegistryStore, NodeRegistrySnapshot, NodeRegistryStore};
 pub use paths::StoragePaths;
 pub use thread_store::{FsThreadStore, ThreadStore};
 pub use turn_log::{FsTurnLog, TurnLog, TurnLogEntry};

@@ -76,6 +76,10 @@ pub struct RuntimeCoordinator {
 impl RuntimeCoordinator {
     /// Creates a runtime coordinator backed by the provided stores.
     pub fn new(stores: RuntimeStores) -> Self {
+        let node_registry = stores
+            .read_node_registry()
+            .map(NodeRegistry::from_snapshot)
+            .unwrap_or_else(|_| NodeRegistry::default());
         Self {
             stores,
             ids: IdGenerator::default(),
@@ -85,7 +89,7 @@ impl RuntimeCoordinator {
             memory_engine: ForegroundMemoryEngine::default(),
             policy_engine: PolicyEngine::default(),
             approvals: HashMap::new(),
-            node_registry: NodeRegistry::default(),
+            node_registry,
         }
     }
 
@@ -704,6 +708,7 @@ impl RuntimeCoordinator {
         request: NodeUpdatePolicyRequest,
     ) -> RuntimeResult<NodeUpdatePolicyResponse> {
         let node = self.node_registry.update_node_policy(&request.node_id, request.policy)?;
+        self.persist_node_registry()?;
         Ok(NodeUpdatePolicyResponse { node })
     }
 
@@ -722,6 +727,7 @@ impl RuntimeCoordinator {
         request: WorkspaceMountAttachRequest,
     ) -> RuntimeResult<WorkspaceMountAttachResponse> {
         let mount = self.node_registry.attach_workspace_mount(request)?;
+        self.persist_node_registry()?;
         Ok(WorkspaceMountAttachResponse { mount })
     }
 
@@ -731,6 +737,7 @@ impl RuntimeCoordinator {
         request: WorkspaceMountDetachRequest,
     ) -> RuntimeResult<WorkspaceMountDetachResponse> {
         let workspace_id = self.node_registry.detach_workspace_mount(request)?;
+        self.persist_node_registry()?;
         Ok(WorkspaceMountDetachResponse { workspace_id })
     }
 
@@ -908,6 +915,7 @@ impl RuntimeCoordinator {
             }
             (None, Some(workspace_ref)) if !workspace_ref.trim().is_empty() => {
                 let mount = self.node_registry.resolve_or_attach_local_workspace(workspace_ref)?;
+                self.persist_node_registry()?;
                 request.workspace_mount_id = Some(mount.workspace_id);
             }
             _ => {}
@@ -1096,6 +1104,11 @@ impl RuntimeCoordinator {
 
     fn next_tool_sequence(&self, thread_id: &ThreadId) -> RuntimeResult<u64> {
         Ok(self.stores.read_turn_log(thread_id)?.len() as u64 + 1)
+    }
+
+    fn persist_node_registry(&self) -> RuntimeResult<()> {
+        self.stores.write_node_registry(&self.node_registry.snapshot())?;
+        Ok(())
     }
 }
 

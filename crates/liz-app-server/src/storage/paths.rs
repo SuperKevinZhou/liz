@@ -56,6 +56,11 @@ impl StoragePaths {
         self.root.join("auth_profiles.json")
     }
 
+    /// Returns the file used to persist node and workspace-mount state.
+    pub fn node_registry_file(&self) -> PathBuf {
+        self.root.join("node_registry.json")
+    }
+
     /// Returns the JSON file for a thread record.
     pub fn thread_file(&self, thread_id: &ThreadId) -> PathBuf {
         self.threads_dir().join(format!("{thread_id}.json"))

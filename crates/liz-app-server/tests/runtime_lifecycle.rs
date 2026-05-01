@@ -5,7 +5,7 @@ use liz_app_server::storage::FsTurnLog;
 use liz_app_server::storage::{StoragePaths, TurnLog};
 use liz_protocol::requests::{
     ThreadForkRequest, ThreadResumeRequest, ThreadStartRequest, TurnCancelRequest, TurnInputKind,
-    TurnStartRequest,
+    TurnStartRequest, WorkspaceMountListRequest,
 };
 use liz_protocol::{ThreadStatus, TurnStatus};
 use tempfile::TempDir;
@@ -156,6 +156,46 @@ fn thread_start_resolves_workspace_ref_to_local_mount() {
     assert_eq!(mount.root_path, workspace_root.display().to_string());
     assert_eq!(node_id.as_str(), "local");
     assert_eq!(scoped_mount_id, Some(workspace_mount_id));
+}
+
+#[test]
+fn workspace_mount_registry_survives_runtime_restart() {
+    let temp_dir = TempDir::new().expect("temp dir should be created");
+    let storage_paths = StoragePaths::new(temp_dir.path().join(".liz"));
+    let workspace_root = temp_dir.path().join("restartable-workspace");
+    std::fs::create_dir_all(&workspace_root).expect("workspace root should be created");
+
+    let (thread_id, workspace_mount_id) = {
+        let mut runtime = RuntimeCoordinator::from_storage_paths(storage_paths.clone());
+        let thread = runtime
+            .start_thread(ThreadStartRequest {
+                title: Some("Restartable mount".to_owned()),
+                initial_goal: Some("Keep node-scoped workspace identity".to_owned()),
+                workspace_ref: Some(workspace_root.display().to_string()),
+                workspace_mount_id: None,
+            })
+            .expect("thread start should resolve workspace mount")
+            .thread;
+        (thread.id, thread.workspace_mount_id.expect("thread should reference workspace mount"))
+    };
+
+    let restarted_runtime = RuntimeCoordinator::from_storage_paths(storage_paths);
+    let mount = restarted_runtime
+        .read_workspace_mount(&workspace_mount_id)
+        .expect("persisted workspace mount should be readable");
+    let (node_id, scoped_mount_id) = restarted_runtime
+        .thread_execution_scope(&thread_id)
+        .expect("thread scope should survive restart");
+    let listed_mounts = restarted_runtime
+        .list_workspace_mounts(WorkspaceMountListRequest { node_id: None })
+        .expect("workspace mounts should list")
+        .mounts;
+
+    assert_eq!(mount.node_id.as_str(), "local");
+    assert_eq!(mount.root_path, workspace_root.display().to_string());
+    assert_eq!(node_id.as_str(), "local");
+    assert_eq!(scoped_mount_id, Some(workspace_mount_id.clone()));
+    assert!(listed_mounts.iter().any(|mount| mount.workspace_id == workspace_mount_id));
 }
 
 #[test]

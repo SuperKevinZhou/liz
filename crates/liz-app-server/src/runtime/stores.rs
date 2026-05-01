@@ -1,10 +1,11 @@
 //! Runtime-facing storage bundle helpers.
 
+use crate::storage::FsNodeRegistryStore;
 use crate::storage::{
     ArtifactStore, AuthProfileSnapshot, AuthProfileStore, CheckpointStore, FsArtifactStore,
     FsAuthProfileStore, FsCheckpointStore, FsGlobalMemoryStore, FsThreadStore, FsTurnLog,
-    GlobalMemorySnapshot, GlobalMemoryStore, StoragePaths, StorageResult, StoredArtifact,
-    ThreadStore, TurnLog, TurnLogEntry,
+    GlobalMemorySnapshot, GlobalMemoryStore, NodeRegistrySnapshot, NodeRegistryStore, StoragePaths,
+    StorageResult, StoredArtifact, ThreadStore, TurnLog, TurnLogEntry,
 };
 use liz_protocol::{ArtifactId, Checkpoint, CheckpointId, Thread, ThreadId};
 
@@ -18,6 +19,7 @@ pub struct RuntimeStores {
     global_memory_store: FsGlobalMemoryStore,
     artifact_store: FsArtifactStore,
     auth_profile_store: FsAuthProfileStore,
+    node_registry_store: FsNodeRegistryStore,
 }
 
 impl RuntimeStores {
@@ -30,7 +32,8 @@ impl RuntimeStores {
             checkpoint_store: FsCheckpointStore::new(paths.clone()),
             global_memory_store: FsGlobalMemoryStore::new(paths.clone()),
             artifact_store: FsArtifactStore::new(paths.clone()),
-            auth_profile_store: FsAuthProfileStore::new(paths),
+            auth_profile_store: FsAuthProfileStore::new(paths.clone()),
+            node_registry_store: FsNodeRegistryStore::new(paths),
         }
     }
 
@@ -110,5 +113,15 @@ impl RuntimeStores {
     /// Writes the persisted auth profile snapshot.
     pub fn write_auth_profiles(&self, snapshot: &AuthProfileSnapshot) -> StorageResult<()> {
         self.auth_profile_store.write_snapshot(snapshot)
+    }
+
+    /// Reads the persisted node registry snapshot.
+    pub fn read_node_registry(&self) -> StorageResult<NodeRegistrySnapshot> {
+        self.node_registry_store.read_snapshot()
+    }
+
+    /// Writes the persisted node registry snapshot.
+    pub fn write_node_registry(&self, snapshot: &NodeRegistrySnapshot) -> StorageResult<()> {
+        self.node_registry_store.write_snapshot(snapshot)
     }
 }
