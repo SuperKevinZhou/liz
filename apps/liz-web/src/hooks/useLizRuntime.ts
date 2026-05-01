@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { createProtocolClient, type LizProtocolClient } from "../protocol/client";
 import type {
   ApprovalRespondRequest,
@@ -453,6 +453,14 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
     );
     dispatch({ type: "people_set", surface: response.data.surface });
   }, [request]);
+
+  useEffect(() => {
+    if (connectionState !== "connected") {
+      return;
+    }
+    void loadRuntimeState();
+    void loadOwnerSurfaces();
+  }, [connectionState, loadOwnerSurfaces, loadRuntimeState]);
 
   const updateAboutYou = useCallback(
     async (update: AboutYouUpdate) => {

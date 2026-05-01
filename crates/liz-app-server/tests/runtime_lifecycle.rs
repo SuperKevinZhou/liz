@@ -4,12 +4,13 @@ use liz_app_server::runtime::RuntimeCoordinator;
 use liz_app_server::storage::FsTurnLog;
 use liz_app_server::storage::{StoragePaths, TurnLog};
 use liz_protocol::requests::{
-    ThreadForkRequest, ThreadResumeRequest, ThreadStartRequest, TurnCancelRequest, TurnInputKind,
-    TurnStartRequest, WorkspaceMountListRequest,
+    MemorySurfaceAboutYouReadRequest, MemorySurfaceAboutYouUpdateRequest, ThreadForkRequest,
+    ThreadResumeRequest, ThreadStartRequest, TurnCancelRequest, TurnInputKind, TurnStartRequest,
+    WorkspaceMountListRequest,
 };
 use liz_protocol::{
-    InboundEventAction, NodeHeartbeatRequest, NodeId, NodeStatus, ThreadStatus, Timestamp,
-    TurnStatus,
+    AboutYouItem, AboutYouUpdate, InboundEventAction, NodeHeartbeatRequest, NodeId, NodeStatus,
+    ThreadStatus, Timestamp, TurnStatus,
 };
 use tempfile::TempDir;
 
@@ -238,6 +239,47 @@ fn node_heartbeat_updates_liveness_without_turn_action() {
         .node;
 
     assert_eq!(node.status.last_seen_at, Some(heartbeat_at));
+}
+
+#[test]
+fn about_you_items_persist_as_identity_facts() {
+    let temp_dir = TempDir::new().expect("temp dir should be created");
+    let storage_paths = StoragePaths::new(temp_dir.path().join(".liz"));
+
+    {
+        let runtime = RuntimeCoordinator::from_storage_paths(storage_paths.clone());
+        runtime
+            .update_about_you_surface(MemorySurfaceAboutYouUpdateRequest {
+                update: AboutYouUpdate {
+                    identity_summary: Some(
+                        "Owner prefers direct implementation updates".to_owned(),
+                    ),
+                    items: vec![AboutYouItem {
+                        key: "language".to_owned(),
+                        label: "Language preference".to_owned(),
+                        value: "Chinese".to_owned(),
+                        confirmed: true,
+                        source_fact_id: None,
+                    }],
+                },
+            })
+            .expect("about you update should persist");
+    }
+
+    let restarted_runtime = RuntimeCoordinator::from_storage_paths(storage_paths);
+    let surface = restarted_runtime
+        .read_about_you_surface(MemorySurfaceAboutYouReadRequest {})
+        .expect("about you surface should load")
+        .surface;
+
+    assert_eq!(
+        surface.identity_summary.as_deref(),
+        Some("Owner prefers direct implementation updates")
+    );
+    assert!(surface
+        .items
+        .iter()
+        .any(|item| { item.key == "language" && item.value == "Chinese" && item.confirmed }));
 }
 
 #[test]

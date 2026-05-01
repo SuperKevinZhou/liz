@@ -17,7 +17,7 @@ use crate::runtime::policy_engine::{PolicyDecision, PolicyEngine};
 use crate::runtime::stores::RuntimeStores;
 use crate::runtime::thread_manager::ThreadManager;
 use crate::runtime::turn_manager::TurnManager;
-use crate::storage::StoredArtifact;
+use crate::storage::{StoredArtifact, StoredMemoryFact};
 use liz_protocol::memory::ResumeSummary;
 use liz_protocol::requests::{
     ApprovalRespondRequest, GitHubCopilotDevicePollRequest, GitHubCopilotDeviceStartRequest,
@@ -597,9 +597,50 @@ impl RuntimeCoordinator {
         request: MemorySurfaceAboutYouUpdateRequest,
     ) -> RuntimeResult<MemorySurfaceAboutYouUpdateResponse> {
         let mut snapshot = self.stores.read_global_memory()?;
+        let now = self.ids.now_timestamp();
         snapshot.identity_summary = request.update.identity_summary.clone();
+        for item in request.update.items.iter().filter(|item| item.key != "identity_summary") {
+            let subject = item.key.trim();
+            if subject.is_empty() {
+                continue;
+            }
+            let value = item.value.trim();
+            if value.is_empty() {
+                for fact in snapshot.facts.iter_mut().filter(|fact| {
+                    fact.kind == MemoryFactKind::Identity
+                        && fact.subject == subject
+                        && fact.invalidated_at.is_none()
+                }) {
+                    fact.invalidated_at = Some(now.clone());
+                }
+                continue;
+            }
+            if let Some(existing) = snapshot.facts.iter_mut().find(|fact| {
+                fact.kind == MemoryFactKind::Identity
+                    && fact.subject == subject
+                    && fact.invalidated_at.is_none()
+            }) {
+                existing.value = value.to_owned();
+                existing.keywords = about_you_keywords(subject, value);
+                existing.updated_at = now.clone();
+                existing.invalidated_by = None;
+                continue;
+            }
+            snapshot.facts.push(StoredMemoryFact {
+                id: self.ids.next_memory_fact_id(),
+                kind: MemoryFactKind::Identity,
+                subject: subject.to_owned(),
+                value: value.to_owned(),
+                keywords: about_you_keywords(subject, value),
+                related_thread_ids: Vec::new(),
+                citations: Vec::new(),
+                updated_at: now.clone(),
+                invalidated_at: None,
+                invalidated_by: None,
+            });
+        }
         self.stores.write_global_memory(&snapshot)?;
-        Ok(MemorySurfaceAboutYouUpdateResponse { surface: request.update.into_surface() })
+        Ok(MemorySurfaceAboutYouUpdateResponse { surface: self.build_about_you_surface()? })
     }
 
     /// Reads active work and commitments liz is carrying.
@@ -1221,16 +1262,6 @@ impl RuntimeCoordinator {
     }
 }
 
-trait AboutYouUpdateExt {
-    fn into_surface(self) -> AboutYouSurface;
-}
-
-impl AboutYouUpdateExt for liz_protocol::AboutYouUpdate {
-    fn into_surface(self) -> AboutYouSurface {
-        AboutYouSurface { identity_summary: self.identity_summary, items: self.items }
-    }
-}
-
 impl RuntimeCoordinator {
     fn build_about_you_surface(&self) -> RuntimeResult<AboutYouSurface> {
         let snapshot = self.stores.read_global_memory()?;
@@ -1240,7 +1271,7 @@ impl RuntimeCoordinator {
                 key: "identity_summary".to_owned(),
                 label: "How liz understands you".to_owned(),
                 value: summary.clone(),
-                confirmed: false,
+                confirmed: true,
                 source_fact_id: None,
             });
         }
@@ -1257,7 +1288,7 @@ impl RuntimeCoordinator {
                     key: fact.subject.clone(),
                     label: humanize_key(&fact.subject),
                     value: fact.value.clone(),
-                    confirmed: false,
+                    confirmed: true,
                     source_fact_id: Some(fact.id.clone()),
                 }),
         );
@@ -1370,6 +1401,19 @@ fn validate_person_boundary(person: &PersonBoundary) -> RuntimeResult<()> {
         ));
     }
     Ok(())
+}
+
+fn about_you_keywords(subject: &str, value: &str) -> Vec<String> {
+    let mut keywords = subject
+        .split([':', '_', '-'])
+        .chain(value.split_whitespace())
+        .map(|token| token.trim_matches(|ch: char| !ch.is_alphanumeric()))
+        .filter(|token| token.len() >= 3)
+        .map(|token| token.to_lowercase())
+        .collect::<Vec<_>>();
+    keywords.sort();
+    keywords.dedup();
+    keywords
 }
 
 impl Default for RuntimeCoordinator {
