@@ -28,6 +28,7 @@ fn thread_can_start_turn_interrupt_and_resume() {
 
     assert_eq!(thread.status, ThreadStatus::Active);
     assert_eq!(thread.active_goal.as_deref(), Some("Stand up runtime lifecycle"));
+    assert_eq!(thread.workspace_ref, None);
 
     let turn = runtime
         .start_turn(TurnStartRequest {
@@ -75,6 +76,7 @@ fn thread_can_start_turn_interrupt_and_resume() {
         .expect("thread resume should succeed");
 
     assert_eq!(resumed.thread.status, ThreadStatus::Active);
+    assert_eq!(resumed.thread.workspace_ref, None);
     assert_eq!(
         resumed.resume_summary.expect("resume summary should exist").pending_commitments,
         vec!["Resume interrupted work: Implement thread and turn managers".to_owned()]
@@ -96,7 +98,7 @@ fn forked_thread_inherits_parent_state_without_reusing_latest_turn() {
         .start_thread(ThreadStartRequest {
             title: Some("Main thread".to_owned()),
             initial_goal: Some("Ship Phase 3".to_owned()),
-            workspace_ref: None,
+            workspace_ref: Some("D:/workspace/main".to_owned()),
         })
         .expect("thread start should succeed")
         .thread;
@@ -111,6 +113,7 @@ fn forked_thread_inherits_parent_state_without_reusing_latest_turn() {
         .thread;
 
     assert_eq!(child.parent_thread_id, Some(parent.id));
+    assert_eq!(child.workspace_ref.as_deref(), Some("D:/workspace/main"));
     assert_eq!(child.active_goal.as_deref(), Some("Ship Phase 3"));
     assert!(child.latest_turn_id.is_none());
     assert!(child

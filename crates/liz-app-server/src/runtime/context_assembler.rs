@@ -227,7 +227,7 @@ impl ContextAssembler {
             layers.task_local,
             layers.executor_boundary,
             liz_tool_surface_summary(thread.workspace_ref.as_deref()),
-            liz_execution_boundary_contract(),
+            liz_execution_boundary_contract(thread.workspace_ref.is_some()),
             onboarding,
             relationship_stance,
         );
@@ -350,18 +350,43 @@ Executor boundaries:
 }
 
 fn liz_tool_surface_summary(workspace_ref: Option<&str>) -> String {
-    let workspace_root = workspace_ref.unwrap_or("not attached");
-    format!(
-        concat!(
-            "workspace_root: {workspace_root}\n",
-            "provider_tool_aliases: workspace_list, workspace_search, workspace_read, workspace_write_text, workspace_apply_patch, shell_exec, shell_spawn, shell_wait, shell_read_output, shell_terminate\n",
-            "canonical_runtime_tools: workspace.list, workspace.search, workspace.read, workspace.write_text, workspace.apply_patch, shell.exec, shell.spawn, shell.wait, shell.read_output, shell.terminate"
-        ),
-        workspace_root = workspace_root,
+    if let Some(workspace_root) = workspace_ref {
+        return format!(
+            concat!(
+                "mode: standard\n",
+                "workspace_root: {workspace_root}\n",
+                "provider_tool_aliases: workspace_list, workspace_search, workspace_read, workspace_write_text, workspace_apply_patch, shell_exec, shell_spawn, shell_wait, shell_read_output, shell_terminate\n",
+                "canonical_runtime_tools: workspace.list, workspace.search, workspace.read, workspace.write_text, workspace.apply_patch, shell.exec, shell.spawn, shell.wait, shell.read_output, shell.terminate"
+            ),
+            workspace_root = workspace_root,
+        );
+    }
+
+    concat!(
+        "mode: conversation_only\n",
+        "workspace_root: not attached\n",
+        "provider_tool_aliases: none\n",
+        "canonical_runtime_tools: none\n",
+        "tool_policy: answer in plain text; workspace and shell actions require an attached workspace thread"
     )
+    .to_owned()
 }
 
-fn liz_execution_boundary_contract() -> &'static str {
+fn liz_execution_boundary_contract(has_workspace: bool) -> &'static str {
+    if !has_workspace {
+        return r#"# Execution Boundaries
+
+Conversation-only mode:
+- This thread has no attached workspace.
+- Do not request runtime tools.
+- Answer in plain text from conversation context and memory.
+- If file, shell, or workspace action is required, explain that the thread needs an attached workspace before that action can run.
+
+Safety:
+- Do not pretend to inspect files, run commands, or edit a workspace in conversation-only mode.
+- Keep commitments explicit when a workspace attachment is needed later."#;
+    }
+
     r#"# Execution Boundaries
 
 Tool usage:

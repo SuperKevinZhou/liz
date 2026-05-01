@@ -102,6 +102,56 @@ fn context_assembly_surfaces_recent_conversation_wakeup_and_executor_boundary() 
 }
 
 #[test]
+fn context_assembly_uses_conversation_only_surface_without_workspace() {
+    let temp_dir = TempDir::new().expect("temp dir should be created");
+    let mut runtime =
+        RuntimeCoordinator::from_storage_paths(StoragePaths::new(temp_dir.path().join(".liz")));
+    let thread = runtime
+        .start_thread(ThreadStartRequest {
+            title: Some("Conversation only".to_owned()),
+            initial_goal: Some("Talk without workspace".to_owned()),
+            workspace_ref: None,
+        })
+        .expect("thread start should succeed")
+        .thread;
+
+    let context = runtime
+        .assemble_context(&thread.id, "Let's just talk")
+        .expect("context assembly should succeed");
+
+    assert!(context.developer_prompt.contains("mode: conversation_only"));
+    assert!(context.developer_prompt.contains("canonical_runtime_tools: none"));
+    assert!(!context.developer_prompt.contains("workspace.list"));
+    assert!(!context.developer_prompt.contains("shell.exec"));
+}
+
+#[test]
+fn context_assembly_uses_standard_surface_with_workspace() {
+    let temp_dir = TempDir::new().expect("temp dir should be created");
+    let workspace_ref = temp_dir.path().join("workspace").display().to_string();
+    let mut runtime =
+        RuntimeCoordinator::from_storage_paths(StoragePaths::new(temp_dir.path().join(".liz")));
+    let thread = runtime
+        .start_thread(ThreadStartRequest {
+            title: Some("Workspace thread".to_owned()),
+            initial_goal: Some("Use workspace tools".to_owned()),
+            workspace_ref: Some(workspace_ref.clone()),
+        })
+        .expect("thread start should succeed")
+        .thread;
+
+    let context = runtime
+        .assemble_context(&thread.id, "Read the project")
+        .expect("context assembly should succeed");
+
+    assert_eq!(thread.workspace_ref.as_deref(), Some(workspace_ref.as_str()));
+    assert!(context.developer_prompt.contains("mode: standard"));
+    assert!(context.developer_prompt.contains(&format!("workspace_root: {workspace_ref}")));
+    assert!(context.developer_prompt.contains("workspace.list"));
+    assert!(context.developer_prompt.contains("shell.exec"));
+}
+
+#[test]
 fn context_assembly_filters_relationship_boundaries() {
     let assembler = ContextAssembler;
     let thread = Thread {
