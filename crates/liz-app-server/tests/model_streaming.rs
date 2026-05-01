@@ -23,7 +23,7 @@ fn turn_start_streams_assistant_and_tool_events_before_completion() {
             ClientRequest::ThreadStart(ThreadStartRequest {
                 title: Some("Model stream".to_owned()),
                 initial_goal: Some("Test normalized tool streaming".to_owned()),
-                workspace_ref: None,
+                workspace_ref: Some(temp_dir.path().display().to_string()),
             }),
         ))
         .expect("thread request should be sent");
@@ -105,7 +105,7 @@ fn turn_start_executes_committed_shell_tool_calls() {
             ClientRequest::ThreadStart(ThreadStartRequest {
                 title: Some("Model exec".to_owned()),
                 initial_goal: Some("Test committed tool execution".to_owned()),
-                workspace_ref: None,
+                workspace_ref: Some(temp_dir.path().display().to_string()),
             }),
         ))
         .expect("thread request should be sent");
