@@ -87,7 +87,10 @@ fn context_assembly_surfaces_recent_conversation_wakeup_and_executor_boundary() 
         .active_topics
         .iter()
         .any(|topic| topic == "websocket" || topic == "transport"));
-    assert!(context.system_prompt.contains("coding-first general-purpose personal agent"));
+    assert!(context.system_prompt.contains("personal agent and AI Twin"));
+    assert!(context.system_prompt.contains("one continuous self"));
+    assert!(context.developer_prompt.contains("first_meeting:"));
+    assert!(context.developer_prompt.contains("First Meeting"));
     assert!(context.layers.recent_conversation.contains("recent_summaries:"));
     assert!(context.developer_prompt.contains("thread_projection:"));
     assert!(context.layers.executor_boundary.contains("memory_owner: liz"));
