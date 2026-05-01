@@ -38,8 +38,8 @@ export function App() {
   }, [preferences]);
 
   const shellClassName = useMemo(
-    () => `console-shell density-${preferences.density} theme-${preferences.theme}`,
-    [preferences.density, preferences.theme],
+    () => `console-shell view-${activeView} density-${preferences.density} theme-${preferences.theme}`,
+    [activeView, preferences.density, preferences.theme],
   );
 
   return (
@@ -69,9 +69,11 @@ export function App() {
         </div>
       </aside>
 
-      <aside className="thread-panel">
-        <ThreadPanel runtime={runtime} />
-      </aside>
+      {activeView === "chat" ? (
+        <aside className="thread-panel">
+          <ThreadPanel runtime={runtime} />
+        </aside>
+      ) : null}
 
       <main className="workspace">
         <TopBar
@@ -164,11 +166,13 @@ function ThreadPanel({ runtime }: { runtime: LizRuntime }) {
               className={runtime.activeThread?.id === thread.id ? "thread-item active" : "thread-item"}
               onClick={() => void runtime.setActiveThread(thread.id)}
             >
-              <span className={`status-dot ${thread.status}`} />
               <span>
                 <strong>{thread.title}</strong>
                 <small>{thread.active_summary ?? thread.active_goal ?? "No summary yet"}</small>
-                <em>{workspaceLabel(thread)}</em>
+                <em>
+                  <span className={`thread-status-label ${thread.status}`}>{thread.status}</span>
+                  {workspaceLabel(thread)}
+                </em>
               </span>
             </button>
           ))}

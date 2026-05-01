@@ -66,6 +66,10 @@ button:disabled {
     var(--surface-0);
 }
 
+.console-shell:not(.view-chat) {
+  grid-template-columns: 58px minmax(620px, 1fr) minmax(280px, 360px);
+}
+
 .rail,
 .thread-panel,
 .workspace,
@@ -230,9 +234,6 @@ button:disabled {
 }
 
 .thread-item {
-  display: grid;
-  grid-template-columns: 10px 1fr;
-  gap: 10px;
   width: 100%;
   padding: 12px;
   text-align: left;
@@ -270,16 +271,22 @@ button:disabled {
   line-height: 1.45;
 }
 
-.status-dot {
-  width: 8px;
-  height: 8px;
-  margin-top: 4px;
+.thread-status-label {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 8px;
+  padding: 2px 6px;
+  color: var(--accent);
+  border: 1px solid rgba(15, 118, 110, 0.22);
   border-radius: 999px;
-  background: var(--accent);
+  font-size: 10px;
+  font-style: normal;
+  line-height: 1.2;
 }
 
-.status-dot.waiting_approval {
-  background: var(--approval);
+.thread-status-label.waiting_approval {
+  color: var(--approval);
+  border-color: rgba(180, 83, 9, 0.26);
 }
 
 .side-section,
@@ -780,6 +787,10 @@ button:disabled {
     grid-template-columns: 54px minmax(220px, 280px) 1fr;
   }
 
+  .console-shell:not(.view-chat) {
+    grid-template-columns: 54px 1fr;
+  }
+
   .inspector {
     position: fixed;
     right: 16px;
@@ -800,6 +811,10 @@ button:disabled {
   .console-shell {
     grid-template-columns: 52px 1fr;
     min-height: 100%;
+  }
+
+  .console-shell:not(.view-chat) {
+    grid-template-columns: 52px 1fr;
   }
 
   .thread-panel {
