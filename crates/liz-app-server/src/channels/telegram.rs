@@ -61,12 +61,13 @@ impl TelegramHttpClient for ReqwestTelegramHttpClient {
             config.bot_token
         );
         let client = reqwest::blocking::Client::new();
+        let escaped_text = escape_markdown_v2(text);
         let response = client
             .post(url)
             .json(&serde_json::json!({
                 "chat_id": chat_id,
-                "text": text,
-                "parse_mode": "Markdown"
+                "text": escaped_text,
+                "parse_mode": "MarkdownV2"
             }))
             .send()
             .map_err(|error| TelegramError::Http(error.to_string()))?;
@@ -351,4 +352,47 @@ fn display_name_for_user(user: &TelegramUser) -> Option<String> {
         return Some(name);
     }
     user.username.clone()
+}
+
+fn escape_markdown_v2(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for character in text.chars() {
+        if matches!(
+            character,
+            '_' | '*'
+                | '['
+                | ']'
+                | '('
+                | ')'
+                | '~'
+                | '`'
+                | '>'
+                | '#'
+                | '+'
+                | '-'
+                | '='
+                | '|'
+                | '{'
+                | '}'
+                | '.'
+                | '!'
+                | '\\'
+        ) {
+            escaped.push('\\');
+        }
+        escaped.push(character);
+    }
+    escaped
+}
+
+#[cfg(test)]
+mod tests {
+    use super::escape_markdown_v2;
+
+    #[test]
+    fn markdown_v2_escape_covers_reserved_characters() {
+        let escaped = escape_markdown_v2(r#"hello_world [x](y) a+b=c! \done."#);
+
+        assert_eq!(escaped, r#"hello\_world \[x\]\(y\) a\+b\=c\! \\done\."#);
+    }
 }
