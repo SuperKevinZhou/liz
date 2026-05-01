@@ -698,75 +698,176 @@ function SettingsSurface({
           Load runtime
         </button>
       </div>
-      <div className="setting-row">
-        <span>Server URL</span>
-        <strong>{preferences.serverUrl}</strong>
-      </div>
-      <div className="setting-row">
-        <span>Density</span>
-        <select
-          value={preferences.density}
-          onChange={(event) =>
-            setPreferences((current) => ({ ...current, density: event.target.value as Preferences["density"] }))
-          }
-        >
-          <option value="comfortable">Comfortable</option>
-          <option value="compact">Compact</option>
-        </select>
-      </div>
-      <div className="setting-row">
-        <span>Markdown</span>
-        <select
-          value={preferences.markdown}
-          onChange={(event) =>
-            setPreferences((current) => ({ ...current, markdown: event.target.value as Preferences["markdown"] }))
-          }
-        >
-          <option value="rendered">Rendered</option>
-          <option value="plain">Plain</option>
-        </select>
-      </div>
-      <div className="setting-row">
-        <span>Approval policy</span>
-        <select
-          value={runtime.state.runtimeConfig?.approval_policy ?? "on-request"}
-          onChange={(event) =>
-            void runtime.updateRuntimeConfig({
-              sandbox: null,
-              approval_policy: event.target.value as "on-request" | "danger-full-access",
-            })
-          }
-        >
-          <option value="on-request">On request</option>
-          <option value="danger-full-access">Danger full access</option>
-        </select>
-      </div>
-      <section className="provider-form">
-        <p className="eyebrow">Provider auth</p>
-        <input value={providerId} onChange={(event) => setProviderId(event.target.value)} placeholder="Provider id" />
-        <input value={profileId} onChange={(event) => setProfileId(event.target.value)} placeholder="Profile id" />
-        <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Display name" />
-        <input value={secret} onChange={(event) => setSecret(event.target.value)} placeholder="API key or token" type="password" />
-        <button className="primary-button" type="button" onClick={saveProvider}>
-          Save profile
-        </button>
-      </section>
-      <div className="provider-list">
-        {runtime.state.providerProfiles.map((profile) => (
-          <article key={profile.profile_id}>
-            <div>
-              <strong>{profile.display_name ?? profile.profile_id}</strong>
-              <small>{profile.provider_id}</small>
-            </div>
-            <button
-              className="secondary-button"
-              type="button"
-              onClick={() => void runtime.deleteProviderProfile(profile.profile_id)}
+      <div className="settings-grid">
+        <section className="settings-section">
+          <p className="eyebrow">Connection</p>
+          <div className="setting-row">
+            <span>Server URL</span>
+            <input
+              value={preferences.serverUrl}
+              onChange={(event) =>
+                setPreferences((current) => ({ ...current, serverUrl: event.target.value }))
+              }
+            />
+          </div>
+          <div className="setting-row">
+            <span>Connection state</span>
+            <strong>{runtime.connectionState}</strong>
+          </div>
+          <div className="setting-row">
+            <span>Browser instance</span>
+            <strong>{preferences.browserInstanceId}</strong>
+          </div>
+        </section>
+
+        <section className="settings-section">
+          <p className="eyebrow">Appearance</p>
+          <div className="setting-row">
+            <span>Theme</span>
+            <select
+              value={preferences.theme}
+              onChange={(event) =>
+                setPreferences((current) => ({
+                  ...current,
+                  theme: event.target.value as Preferences["theme"],
+                }))
+              }
             >
-              Delete
+              <option value="system">System</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </div>
+          <div className="setting-row">
+            <span>Density</span>
+            <select
+              value={preferences.density}
+              onChange={(event) =>
+                setPreferences((current) => ({
+                  ...current,
+                  density: event.target.value as Preferences["density"],
+                }))
+              }
+            >
+              <option value="comfortable">Comfortable</option>
+              <option value="compact">Compact</option>
+            </select>
+          </div>
+          <div className="setting-row">
+            <span>Markdown</span>
+            <select
+              value={preferences.markdown}
+              onChange={(event) =>
+                setPreferences((current) => ({
+                  ...current,
+                  markdown: event.target.value as Preferences["markdown"],
+                }))
+              }
+            >
+              <option value="rendered">Rendered</option>
+              <option value="plain">Plain</option>
+            </select>
+          </div>
+          <div className="setting-row">
+            <span>Tool cards</span>
+            <select
+              value={preferences.toolVerbosity}
+              onChange={(event) =>
+                setPreferences((current) => ({
+                  ...current,
+                  toolVerbosity: event.target.value as Preferences["toolVerbosity"],
+                }))
+              }
+            >
+              <option value="brief">Brief</option>
+              <option value="detailed">Detailed</option>
+            </select>
+          </div>
+        </section>
+
+        <section className="settings-section">
+          <p className="eyebrow">Runtime</p>
+          <div className="setting-row">
+            <span>Approval policy</span>
+            <select
+              value={runtime.state.runtimeConfig?.approval_policy ?? "on-request"}
+              onChange={(event) =>
+                void runtime.updateRuntimeConfig({
+                  sandbox: null,
+                  approval_policy: event.target.value as "on-request" | "danger-full-access",
+                })
+              }
+            >
+              <option value="on-request">On request</option>
+              <option value="danger-full-access">Danger full access</option>
+            </select>
+          </div>
+          <div className="setting-row">
+            <span>Sandbox mode</span>
+            <strong>{runtime.state.runtimeConfig?.sandbox.mode ?? "not loaded"}</strong>
+          </div>
+          <div className="setting-row">
+            <span>Network</span>
+            <strong>{runtime.state.runtimeConfig?.sandbox.network ?? "not loaded"}</strong>
+          </div>
+          <div className="setting-row">
+            <span>Working directory</span>
+            <strong>{runtime.state.runtimeConfig?.sandbox.working_directory ?? "not set"}</strong>
+          </div>
+        </section>
+
+        <section className="settings-section">
+          <p className="eyebrow">Model</p>
+          <div className="setting-row">
+            <span>Provider</span>
+            <strong>{runtime.state.modelStatus?.provider_id ?? "not loaded"}</strong>
+          </div>
+          <div className="setting-row">
+            <span>Model</span>
+            <strong>{runtime.state.modelStatus?.model_id ?? "not selected"}</strong>
+          </div>
+          <div className="setting-row">
+            <span>Credential</span>
+            <strong>{runtime.state.modelStatus?.credential_configured ? "configured" : "missing"}</strong>
+          </div>
+          <div className="setting-row">
+            <span>Ready</span>
+            <strong>{runtime.state.modelStatus?.ready ? "yes" : "no"}</strong>
+          </div>
+        </section>
+
+        <section className="settings-section provider-section">
+          <p className="eyebrow">Provider auth</p>
+          <div className="provider-form">
+            <input value={providerId} onChange={(event) => setProviderId(event.target.value)} placeholder="Provider id" />
+            <input value={profileId} onChange={(event) => setProfileId(event.target.value)} placeholder="Profile id" />
+            <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Display name" />
+            <input value={secret} onChange={(event) => setSecret(event.target.value)} placeholder="API key or token" type="password" />
+            <button className="primary-button" type="button" onClick={saveProvider}>
+              Save profile
             </button>
-          </article>
-        ))}
+          </div>
+          <div className="provider-list">
+            {runtime.state.providerProfiles.map((profile) => (
+              <article key={profile.profile_id}>
+                <div>
+                  <strong>{profile.display_name ?? profile.profile_id}</strong>
+                  <small>{profile.provider_id}</small>
+                </div>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() => void runtime.deleteProviderProfile(profile.profile_id)}
+                >
+                  Delete
+                </button>
+              </article>
+            ))}
+            {runtime.state.providerProfiles.length === 0 ? (
+              <div className="empty-panel">No provider profiles loaded.</div>
+            ) : null}
+          </div>
+        </section>
       </div>
     </section>
   );

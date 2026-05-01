@@ -317,14 +317,21 @@ button:disabled {
   font-size: 12px;
 }
 
+.setting-row input,
 .setting-row select,
 .provider-form input {
   min-height: 36px;
   min-width: 180px;
+  max-width: 100%;
   color: var(--ink-0);
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface-1);
+}
+
+.setting-row input {
+  width: min(360px, 62%);
+  padding: 0 10px;
 }
 
 .workspace {
@@ -731,6 +738,33 @@ button:disabled {
   margin: 0;
 }
 
+.settings-surface {
+  height: 100%;
+  overflow: auto;
+  margin-top: 0;
+  padding: 24px;
+  border-top: 0;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.settings-section {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(251, 250, 247, 0.72);
+}
+
+.provider-section {
+  grid-column: 1 / -1;
+}
+
 .channel-list,
 .provider-list {
   display: grid;
@@ -745,6 +779,11 @@ button:disabled {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: rgba(251, 250, 247, 0.72);
+}
+
+.settings-section .provider-form {
+  margin-top: 0;
+  background: rgba(255, 255, 255, 0.38);
 }
 
 .channel-row.disabled {
@@ -905,7 +944,8 @@ button:disabled {
   }
 
   .memory-grid,
-  .approval-row {
+  .approval-row,
+  .settings-grid {
     grid-template-columns: 1fr;
   }
 
