@@ -971,7 +971,7 @@ impl ViewModel {
                 );
                 self.status_line = format!("{tool_name} finished");
             }
-            ServerEventPayload::ToolFailed(ToolFailedEvent { tool_name, summary }) => {
+            ServerEventPayload::ToolFailed(ToolFailedEvent { tool_name, summary, .. }) => {
                 self.push_thread_entry(
                     event.thread_id.clone(),
                     TranscriptEntryKind::Tool,

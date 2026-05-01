@@ -19,6 +19,7 @@ fn client_request_envelope_serializes_method_names() {
             title: Some("Bootstrap".to_owned()),
             initial_goal: Some("Start liz".to_owned()),
             workspace_ref: Some("D:/zzh/Code/liz/liz".to_owned()),
+            workspace_mount_id: None,
         }),
     };
 
@@ -42,6 +43,7 @@ fn success_response_envelope_round_trips() {
         active_summary: Some("Ready for the first turn".to_owned()),
         last_interruption: None,
         workspace_ref: Some("D:/zzh/Code/liz/liz".to_owned()),
+        workspace_mount_id: None,
         pending_commitments: vec![],
         latest_turn_id: None,
         latest_checkpoint_id: None,
@@ -140,6 +142,7 @@ fn server_event_envelope_round_trips() {
                 active_summary: Some("First turn started".to_owned()),
                 last_interruption: None,
                 workspace_ref: Some("D:/zzh/Code/liz/liz".to_owned()),
+                workspace_mount_id: None,
                 pending_commitments: vec!["Add protocol events".to_owned()],
                 latest_turn_id: Some(TurnId::new("turn_01")),
                 latest_checkpoint_id: None,
@@ -172,6 +175,8 @@ fn protocol_messages_cover_approval_and_memory_shapes() {
                 risk_level: RiskLevel::High,
                 reason: "High-risk shell command".to_owned(),
                 sandbox_context: Some("workspace-write".to_owned()),
+                node_id: None,
+                workspace_mount_id: None,
                 status: ApprovalStatus::Approved,
             },
         }),
@@ -221,6 +226,7 @@ fn transport_messages_round_trip_through_json() {
             title: Some("Transport bootstrap".to_owned()),
             initial_goal: Some("Exercise websocket frames".to_owned()),
             workspace_ref: None,
+            workspace_mount_id: None,
         }),
     });
     let response = ServerTransportMessage::response(ServerResponseEnvelope::Success(Box::new(
@@ -238,6 +244,7 @@ fn transport_messages_round_trip_through_json() {
                     active_summary: Some("Transport ready".to_owned()),
                     last_interruption: None,
                     workspace_ref: None,
+                    workspace_mount_id: None,
                     pending_commitments: Vec::new(),
                     latest_turn_id: None,
                     latest_checkpoint_id: None,
@@ -262,6 +269,7 @@ fn transport_messages_round_trip_through_json() {
                 active_summary: Some("Transport ready".to_owned()),
                 last_interruption: None,
                 workspace_ref: None,
+                workspace_mount_id: None,
                 pending_commitments: Vec::new(),
                 latest_turn_id: None,
                 latest_checkpoint_id: None,
@@ -298,6 +306,8 @@ fn tool_call_messages_round_trip() {
         request: ClientRequest::ToolCall(ToolCallRequest {
             thread_id: ThreadId::new("thread_01"),
             turn_id: Some(TurnId::new("turn_04")),
+            node_id: None,
+            workspace_mount_id: None,
             invocation: ToolInvocation::WorkspaceRead(WorkspaceReadRequest {
                 path: "crates/liz-protocol/src/lib.rs".to_owned(),
                 start_line: Some(1),

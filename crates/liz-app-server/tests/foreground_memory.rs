@@ -21,6 +21,7 @@ fn foreground_memory_compile_and_recall_flows_round_trip() {
             title: Some("Phase 8 memory".to_owned()),
             initial_goal: Some("Implement foreground recall".to_owned()),
             workspace_ref: None,
+            workspace_mount_id: None,
         })
         .expect("thread start should succeed")
         .thread;
@@ -32,6 +33,7 @@ fn foreground_memory_compile_and_recall_flows_round_trip() {
             input_kind: TurnInputKind::UserMessage,
             channel: None,
             participant: None,
+            interaction_context: None,
         })
         .expect("turn start should succeed")
         .turn;
@@ -167,6 +169,7 @@ fn foreground_memory_marks_superseded_commitments_as_invalidated() {
             title: Some("Invalidate commitments".to_owned()),
             initial_goal: Some("Track commitment invalidation".to_owned()),
             workspace_ref: None,
+            workspace_mount_id: None,
         })
         .expect("thread start should succeed")
         .thread;
@@ -178,6 +181,7 @@ fn foreground_memory_marks_superseded_commitments_as_invalidated() {
             input_kind: TurnInputKind::UserMessage,
             channel: None,
             participant: None,
+            interaction_context: None,
         })
         .expect("turn start should succeed")
         .turn;
@@ -206,6 +210,7 @@ fn foreground_memory_marks_superseded_commitments_as_invalidated() {
             input_kind: TurnInputKind::ResumeCommand,
             channel: None,
             participant: None,
+            interaction_context: None,
         })
         .expect("resumed turn should start")
         .turn;
@@ -234,6 +239,7 @@ fn foreground_memory_updates_identity_summary_from_cited_turns() {
             title: Some("Identity memory".to_owned()),
             initial_goal: Some("Remember stable owner preferences".to_owned()),
             workspace_ref: None,
+            workspace_mount_id: None,
         })
         .expect("thread start should succeed")
         .thread;
@@ -245,6 +251,7 @@ fn foreground_memory_updates_identity_summary_from_cited_turns() {
             input_kind: TurnInputKind::UserMessage,
             channel: None,
             participant: None,
+            interaction_context: None,
         })
         .expect("turn start should succeed")
         .turn;
@@ -310,6 +317,7 @@ fn foreground_memory_can_emit_a_reflection_summary() {
             title: Some("Reflection thread".to_owned()),
             initial_goal: Some("Capture compiled experience".to_owned()),
             workspace_ref: None,
+            workspace_mount_id: None,
         })
         .expect("thread start should succeed")
         .thread;
@@ -321,6 +329,7 @@ fn foreground_memory_can_emit_a_reflection_summary() {
             input_kind: TurnInputKind::UserMessage,
             channel: None,
             participant: None,
+            interaction_context: None,
         })
         .expect("turn start should succeed")
         .turn;

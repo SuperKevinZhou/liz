@@ -25,6 +25,7 @@ fn websocket_app_client_exchanges_requests_and_events_with_real_server() {
                 title: Some("CLI websocket".to_owned()),
                 initial_goal: Some("Talk to the app server".to_owned()),
                 workspace_ref: None,
+                workspace_mount_id: None,
             }),
         ))
         .expect("thread request should be sent");
@@ -49,6 +50,7 @@ fn websocket_app_client_exchanges_requests_and_events_with_real_server() {
                 input_kind: TurnInputKind::UserMessage,
                 channel: None,
                 participant: None,
+                interaction_context: None,
             }),
         ))
         .expect("turn request should be sent");

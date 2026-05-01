@@ -6,7 +6,10 @@ pub mod auth;
 pub mod checkpoint;
 pub mod events;
 pub mod ids;
+pub mod interaction;
 pub mod memory;
+pub mod memory_surface;
+pub mod node;
 pub mod primitives;
 pub mod requests;
 pub mod responses;
@@ -35,8 +38,12 @@ pub use events::{
     ToolFailedEvent, TurnCancelledEvent, TurnCompletedEvent, TurnFailedEvent, TurnStartedEvent,
 };
 pub use ids::{
-    ApprovalId, ArtifactId, CheckpointId, EventId, ExecutorTaskId, MemoryFactId, RequestId,
-    ThreadId, TurnId,
+    ApprovalId, ArtifactId, CheckpointId, EventId, ExecutorTaskId, MemoryFactId, NodeId, RequestId,
+    ThreadId, TurnId, WorkspaceMountId,
+};
+pub use interaction::{
+    ActorKind, ActorRef, Audience, AudienceVisibility, AuthorityScope, DisclosurePolicy,
+    EvidencePolicy, IngressRef, InteractionContext, InteractionRole, Provenance,
 };
 pub use memory::{
     ChannelKind, ChannelRef, InfoBoundary, MemoryCitationRef, MemoryCompilationSummary,
@@ -44,29 +51,44 @@ pub use memory::{
     MemorySessionEntry, MemorySessionView, MemoryTopicStatus, MemoryTopicSummary, MemoryWakeup,
     ParticipantRef, RecentConversationWakeupView, RelationshipEntry, ResumeSummary, TrustLevel,
 };
+pub use memory_surface::{
+    AboutYouItem, AboutYouSurface, AboutYouUpdate, CarryingItem, CarryingSurface,
+    KnowledgeCorrection, KnowledgeItem, KnowledgeSurface,
+};
+pub use node::{
+    NodeCapabilities, NodeIdentity, NodeKind, NodePolicy, NodeRecord, NodeStatus, WorkspaceMount,
+    WorkspaceMountPermissions,
+};
 pub use primitives::{ProtocolVersion, RiskLevel, Timestamp};
 pub use requests::{
     ApprovalRespondRequest, ClientRequest, ClientRequestEnvelope, GitHubCopilotDevicePollRequest,
     GitHubCopilotDeviceStartRequest, GitLabOAuthCompleteRequest, GitLabOAuthStartRequest,
     GitLabPatSaveRequest, MemoryCompileNowRequest, MemoryListTopicsRequest,
     MemoryOpenEvidenceRequest, MemoryOpenSessionRequest, MemoryReadWakeupRequest,
-    MemorySearchRequest, ModelStatusRequest, OpenAiCodexOAuthCompleteRequest,
-    OpenAiCodexOAuthStartRequest, ProviderAuthDeleteRequest, ProviderAuthListRequest,
-    ProviderAuthUpsertRequest, RuntimeConfigGetRequest, RuntimeConfigUpdateRequest,
-    ThreadForkRequest, ThreadListRequest, ThreadResumeRequest, ThreadRollbackRequest,
-    ThreadStartRequest, TurnCancelRequest, TurnInputKind, TurnStartRequest,
+    MemorySearchRequest, MemorySurfaceAboutYouReadRequest, MemorySurfaceAboutYouUpdateRequest,
+    MemorySurfaceCarryingReadRequest, MemorySurfaceKnowledgeCorrectRequest,
+    MemorySurfaceKnowledgeListRequest, ModelStatusRequest, NodeListRequest, NodeReadRequest,
+    NodeUpdatePolicyRequest, OpenAiCodexOAuthCompleteRequest, OpenAiCodexOAuthStartRequest,
+    ProviderAuthDeleteRequest, ProviderAuthListRequest, ProviderAuthUpsertRequest,
+    RuntimeConfigGetRequest, RuntimeConfigUpdateRequest, ThreadForkRequest, ThreadListRequest,
+    ThreadResumeRequest, ThreadRollbackRequest, ThreadStartRequest, TurnCancelRequest,
+    TurnInputKind, TurnStartRequest, WorkspaceMountAttachRequest, WorkspaceMountDetachRequest,
+    WorkspaceMountListRequest,
 };
 pub use responses::{
     ApprovalRespondResponse, ErrorResponseEnvelope, GitHubCopilotDevicePollResponse,
     GitHubCopilotDeviceStartResponse, GitLabOAuthCompleteResponse, GitLabOAuthStartResponse,
     GitLabPatSaveResponse, MemoryCompileNowResponse, MemoryListTopicsResponse,
     MemoryOpenEvidenceResponse, MemoryOpenSessionResponse, MemoryReadWakeupResponse,
-    MemorySearchResponse, ModelStatusResponse, OpenAiCodexOAuthCompleteResponse,
-    OpenAiCodexOAuthStartResponse, ProviderAuthDeleteResponse, ProviderAuthListResponse,
-    ProviderAuthUpsertResponse, ResponseError, ResponsePayload, RuntimeConfigResponse,
-    ServerResponseEnvelope, SuccessResponseEnvelope, ThreadForkResponse, ThreadListResponse,
-    ThreadResumeResponse, ThreadRollbackResponse, ThreadStartResponse, TurnCancelResponse,
-    TurnStartResponse,
+    MemorySearchResponse, MemorySurfaceAboutYouReadResponse, MemorySurfaceAboutYouUpdateResponse,
+    MemorySurfaceCarryingReadResponse, MemorySurfaceKnowledgeCorrectResponse,
+    MemorySurfaceKnowledgeListResponse, ModelStatusResponse, NodeListResponse, NodeReadResponse,
+    NodeUpdatePolicyResponse, OpenAiCodexOAuthCompleteResponse, OpenAiCodexOAuthStartResponse,
+    ProviderAuthDeleteResponse, ProviderAuthListResponse, ProviderAuthUpsertResponse,
+    ResponseError, ResponsePayload, RuntimeConfigResponse, ServerResponseEnvelope,
+    SuccessResponseEnvelope, ThreadForkResponse, ThreadListResponse, ThreadResumeResponse,
+    ThreadRollbackResponse, ThreadStartResponse, TurnCancelResponse, TurnStartResponse,
+    WorkspaceMountAttachResponse, WorkspaceMountDetachResponse, WorkspaceMountListResponse,
 };
 pub use sandbox::{
     SandboxBackendKind, SandboxMode, SandboxNetworkAccess, ShellSandboxRequest, ShellSandboxSummary,

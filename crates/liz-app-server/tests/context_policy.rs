@@ -25,6 +25,7 @@ fn focused_change_requests_keep_context_narrow() {
             title: Some("Policy scope".to_owned()),
             initial_goal: Some("Stay narrow by default".to_owned()),
             workspace_ref: None,
+            workspace_mount_id: None,
         })
         .expect("thread start should succeed")
         .thread;
@@ -59,6 +60,7 @@ fn context_assembly_surfaces_recent_conversation_wakeup_and_executor_boundary() 
             title: Some("Wake-up context".to_owned()),
             initial_goal: Some("Carry recent conversation forward".to_owned()),
             workspace_ref: None,
+            workspace_mount_id: None,
         })
         .expect("thread start should succeed")
         .thread;
@@ -70,6 +72,7 @@ fn context_assembly_surfaces_recent_conversation_wakeup_and_executor_boundary() 
             input_kind: TurnInputKind::UserMessage,
             channel: None,
             participant: None,
+            interaction_context: None,
         })
         .expect("turn start should succeed")
         .turn;
@@ -111,6 +114,7 @@ fn context_assembly_uses_conversation_only_surface_without_workspace() {
             title: Some("Conversation only".to_owned()),
             initial_goal: Some("Talk without workspace".to_owned()),
             workspace_ref: None,
+            workspace_mount_id: None,
         })
         .expect("thread start should succeed")
         .thread;
@@ -136,6 +140,7 @@ fn context_assembly_uses_standard_surface_with_workspace() {
             title: Some("Workspace thread".to_owned()),
             initial_goal: Some("Use workspace tools".to_owned()),
             workspace_ref: Some(workspace_ref.clone()),
+            workspace_mount_id: None,
         })
         .expect("thread start should succeed")
         .thread;
@@ -166,6 +171,7 @@ fn context_assembly_filters_relationship_boundaries() {
         ),
         last_interruption: None,
         workspace_ref: None,
+        workspace_mount_id: None,
         pending_commitments: vec![
             "Share project status update".to_owned(),
             "Keep personal plans private".to_owned(),
@@ -238,6 +244,7 @@ fn context_assembly_filters_relationship_boundaries() {
             external_participant_id: "owner".to_owned(),
             display_name: Some("Owner".to_owned()),
         }),
+        None,
     );
     assert!(owner.layers.resident.contains("Owner prefers direct Chinese updates"));
     assert!(owner.layers.resident.contains("private relocation"));
@@ -252,6 +259,7 @@ fn context_assembly_filters_relationship_boundaries() {
             external_participant_id: "telegram_user_7".to_owned(),
             display_name: Some("Alice".to_owned()),
         }),
+        None,
     );
     assert!(trusted.layers.resident.contains("Project status is green"));
     assert!(!trusted.layers.resident.contains("private relocation"));
@@ -268,6 +276,7 @@ fn context_assembly_filters_relationship_boundaries() {
             external_participant_id: "discord_user_9".to_owned(),
             display_name: Some("Bob".to_owned()),
         }),
+        None,
     );
     assert!(!acquaintance.layers.resident.contains("Project status is green"));
     assert!(!acquaintance.layers.resident.contains("private relocation"));
@@ -281,6 +290,7 @@ fn context_assembly_filters_relationship_boundaries() {
         &[],
         "What do you know about the owner?",
         Some(&ParticipantRef { external_participant_id: "unknown".to_owned(), display_name: None }),
+        None,
     );
     assert!(!stranger.layers.resident.contains("Project status is green"));
     assert!(!stranger.layers.resident.contains("private relocation"));
@@ -300,6 +310,7 @@ fn risky_turn_stops_for_checkpoint_and_approval_then_resumes_after_approval() {
                 title: Some("Approval flow".to_owned()),
                 initial_goal: Some("Guard risky turns".to_owned()),
                 workspace_ref: None,
+                workspace_mount_id: None,
             }),
         ))
         .expect("thread request should be sent");
@@ -322,6 +333,7 @@ fn risky_turn_stops_for_checkpoint_and_approval_then_resumes_after_approval() {
                 input_kind: TurnInputKind::UserMessage,
                 channel: None,
                 participant: None,
+                interaction_context: None,
             }),
         ))
         .expect("turn request should be sent");

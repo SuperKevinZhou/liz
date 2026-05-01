@@ -145,6 +145,7 @@ impl AppServer {
                     &handled.response,
                     request.input,
                     request.participant,
+                    request.interaction_context,
                 );
             }
             liz_protocol::ClientRequest::TurnCancel(request) => {
@@ -186,6 +187,7 @@ impl AppServer {
         response: &ServerResponseEnvelope,
         input: String,
         participant: Option<ParticipantRef>,
+        interaction_context: Option<liz_protocol::InteractionContext>,
     ) {
         let (thread, turn) = match response {
             ServerResponseEnvelope::Success(success) => match &success.response {
@@ -205,9 +207,12 @@ impl AppServer {
             ServerResponseEnvelope::Error(_) => return,
         };
 
-        let Ok(context) =
-            self.runtime.assemble_context_for_participant(&thread.id, &input, participant.as_ref())
-        else {
+        let Ok(context) = self.runtime.assemble_context_for_interaction(
+            &thread.id,
+            &input,
+            participant.as_ref(),
+            interaction_context.as_ref(),
+        ) else {
             return;
         };
         let decision = self.runtime.evaluate_policy(&input, &context);
@@ -458,6 +463,8 @@ impl AppServer {
                         tool_name: tool_name.clone(),
                         arguments_summary: arguments.clone(),
                         risk_hint: None,
+                        node_id: Some(liz_protocol::NodeId::new("local")),
+                        workspace_mount_id: None,
                     }),
                 ));
             }
@@ -480,6 +487,8 @@ impl AppServer {
                     ServerEventPayload::ToolFailed(liz_protocol::ToolFailedEvent {
                         tool_name: tool_call.tool_name.clone(),
                         summary: message.clone(),
+                        node_id: Some(liz_protocol::NodeId::new("local")),
+                        workspace_mount_id: None,
                     }),
                 ));
                 return ToolResultInjection {
@@ -495,6 +504,8 @@ impl AppServer {
         let request = ToolCallRequest {
             thread_id: thread_id.clone(),
             turn_id: Some(turn_id.clone()),
+            node_id: Some(liz_protocol::NodeId::new("local")),
+            workspace_mount_id: None,
             invocation,
         };
         let executed = match self.executor.execute_tool(&request) {
@@ -507,6 +518,8 @@ impl AppServer {
                     ServerEventPayload::ToolFailed(liz_protocol::ToolFailedEvent {
                         tool_name: tool_call.tool_name.clone(),
                         summary: summary.clone(),
+                        node_id: Some(liz_protocol::NodeId::new("local")),
+                        workspace_mount_id: None,
                     }),
                 ));
                 return ToolResultInjection {
@@ -542,6 +555,8 @@ impl AppServer {
                     ServerEventPayload::ToolFailed(liz_protocol::ToolFailedEvent {
                         tool_name: executed.tool_name.as_str().to_owned(),
                         summary: summary.clone(),
+                        node_id: Some(liz_protocol::NodeId::new("local")),
+                        workspace_mount_id: None,
                     }),
                 ));
                 return ToolResultInjection {
@@ -580,6 +595,8 @@ impl AppServer {
                     executor_task_id: executor_task_id.clone(),
                     stream: chunk.stream,
                     chunk: chunk.chunk,
+                    node_id: Some(liz_protocol::NodeId::new("local")),
+                    workspace_mount_id: None,
                 }),
             ));
         }
@@ -591,6 +608,8 @@ impl AppServer {
                 tool_name: executed.tool_name.as_str().to_owned(),
                 summary: executed.summary,
                 artifact_ids: artifact_refs.iter().map(|artifact| artifact.id.clone()).collect(),
+                node_id: Some(liz_protocol::NodeId::new("local")),
+                workspace_mount_id: None,
             }),
         ));
 
@@ -1019,6 +1038,7 @@ mod tests {
                 title: Some("High risk".to_owned()),
                 initial_goal: None,
                 workspace_ref: None,
+                workspace_mount_id: None,
             }),
         ));
         let thread = match response {
@@ -1036,6 +1056,7 @@ mod tests {
                 input_kind: TurnInputKind::UserMessage,
                 channel: None,
                 participant: None,
+                interaction_context: None,
             }),
         ));
 

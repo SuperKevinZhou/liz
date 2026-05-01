@@ -24,6 +24,7 @@ fn memory_requests_emit_wakeup_and_compilation_events() {
             title: Some("Memory events".to_owned()),
             initial_goal: Some("Surface foreground memory".to_owned()),
             workspace_ref: None,
+            workspace_mount_id: None,
         }),
     )) {
         ServerResponseEnvelope::Success(success) => match success.response {
@@ -86,6 +87,7 @@ fn thread_list_request_returns_threads_without_emitting_events() {
                 title: Some(title.to_owned()),
                 initial_goal: Some("Populate thread list".to_owned()),
                 workspace_ref: None,
+                workspace_mount_id: None,
             }),
         ));
         assert!(matches!(

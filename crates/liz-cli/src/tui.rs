@@ -365,6 +365,7 @@ impl CliApp {
             input_kind: TurnInputKind::UserMessage,
             channel: Some(cli_channel_ref()),
             participant: Some(owner_participant_ref()),
+            interaction_context: None,
         }))?;
         self.view_model.status_line = "Message sent".to_owned();
         Ok(())
@@ -499,6 +500,7 @@ impl CliApp {
             title: Some(title),
             initial_goal: Some(input),
             workspace_ref: None,
+            workspace_mount_id: None,
         }))?;
         self.view_model.status_line = "Starting conversation".to_owned();
         Ok(())
@@ -563,6 +565,7 @@ impl CliApp {
                             input_kind: TurnInputKind::UserMessage,
                             channel: Some(cli_channel_ref()),
                             participant: Some(owner_participant_ref()),
+                            interaction_context: None,
                         }))?;
                     }
                 }
@@ -1263,6 +1266,8 @@ mod tests {
                 thread_id: thread_id.clone(),
                 turn_id: TurnId::new("turn_diff"),
                 kind: ArtifactKind::Diff,
+                node_id: None,
+                workspace_mount_id: None,
                 summary: "Updated CLI layout".to_owned(),
                 locator: "memory://artifact_diff".to_owned(),
                 created_at: Timestamp::new("2026-04-18T00:00:00Z"),
@@ -1290,6 +1295,7 @@ mod tests {
             active_summary: None,
             last_interruption: None,
             workspace_ref: None,
+            workspace_mount_id: None,
             pending_commitments: Vec::new(),
             latest_turn_id: None,
             latest_checkpoint_id: None,

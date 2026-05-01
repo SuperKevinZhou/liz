@@ -3,8 +3,14 @@
 use crate::approval::{ApprovalDecision, ApprovalPolicy};
 use crate::auth::ProviderAuthProfile;
 use crate::checkpoint::CheckpointScope;
-use crate::ids::{ApprovalId, ArtifactId, CheckpointId, MemoryFactId, RequestId, ThreadId, TurnId};
+use crate::ids::{
+    ApprovalId, ArtifactId, CheckpointId, MemoryFactId, NodeId, RequestId, ThreadId, TurnId,
+    WorkspaceMountId,
+};
+use crate::interaction::InteractionContext;
 use crate::memory::{ChannelRef, MemorySearchMode, MemoryTopicStatus, ParticipantRef};
+use crate::memory_surface::{AboutYouUpdate, KnowledgeCorrection};
+use crate::node::{NodePolicy, WorkspaceMountPermissions};
 use crate::sandbox::ShellSandboxRequest;
 use crate::tool::ToolCallRequest;
 use serde::{Deserialize, Serialize};
@@ -125,6 +131,39 @@ pub enum ClientRequest {
     /// Expands one fact or artifact citation into raw evidence.
     #[serde(rename = "memory/open_evidence")]
     MemoryOpenEvidence(MemoryOpenEvidenceRequest),
+    /// Reads the owner-facing About You memory surface.
+    #[serde(rename = "memory_surface/about_you/read")]
+    MemorySurfaceAboutYouRead(MemorySurfaceAboutYouReadRequest),
+    /// Updates the owner-facing About You memory surface.
+    #[serde(rename = "memory_surface/about_you/update")]
+    MemorySurfaceAboutYouUpdate(MemorySurfaceAboutYouUpdateRequest),
+    /// Reads active work and commitments liz is carrying.
+    #[serde(rename = "memory_surface/carrying/read")]
+    MemorySurfaceCarryingRead(MemorySurfaceCarryingReadRequest),
+    /// Lists owner-facing knowledge and decisions.
+    #[serde(rename = "memory_surface/knowledge/list")]
+    MemorySurfaceKnowledgeList(MemorySurfaceKnowledgeListRequest),
+    /// Corrects a knowledge item.
+    #[serde(rename = "memory_surface/knowledge/correct")]
+    MemorySurfaceKnowledgeCorrect(MemorySurfaceKnowledgeCorrectRequest),
+    /// Lists registered runtime nodes.
+    #[serde(rename = "node/list")]
+    NodeList(NodeListRequest),
+    /// Reads one runtime node.
+    #[serde(rename = "node/read")]
+    NodeRead(NodeReadRequest),
+    /// Updates node policy.
+    #[serde(rename = "node/update_policy")]
+    NodeUpdatePolicy(NodeUpdatePolicyRequest),
+    /// Lists workspace mounts.
+    #[serde(rename = "workspace_mount/list")]
+    WorkspaceMountList(WorkspaceMountListRequest),
+    /// Attaches a workspace mount.
+    #[serde(rename = "workspace_mount/attach")]
+    WorkspaceMountAttach(WorkspaceMountAttachRequest),
+    /// Detaches a workspace mount.
+    #[serde(rename = "workspace_mount/detach")]
+    WorkspaceMountDetach(WorkspaceMountDetachRequest),
 }
 
 /// Starts an OpenAI Codex OAuth login flow.
@@ -285,6 +324,9 @@ pub struct ThreadStartRequest {
     pub initial_goal: Option<String>,
     /// An optional workspace locator associated with the thread.
     pub workspace_ref: Option<String>,
+    /// An optional workspace mount associated with the thread.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_mount_id: Option<WorkspaceMountId>,
 }
 
 /// Resumes an existing thread.
@@ -329,6 +371,9 @@ pub struct TurnStartRequest {
     /// The participant currently talking to liz, if the client knows it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub participant: Option<ParticipantRef>,
+    /// The resolved interaction context, when the client can provide it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interaction_context: Option<InteractionContext>,
 }
 
 /// Cancels an existing turn.
@@ -412,4 +457,83 @@ pub struct MemoryOpenEvidenceRequest {
     pub artifact_id: Option<ArtifactId>,
     /// The compiled fact to expand, if any.
     pub fact_id: Option<MemoryFactId>,
+}
+
+/// Reads the About You surface.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemorySurfaceAboutYouReadRequest {}
+
+/// Updates the About You surface.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemorySurfaceAboutYouUpdateRequest {
+    /// Replacement surface values.
+    pub update: AboutYouUpdate,
+}
+
+/// Reads the What We're Carrying surface.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemorySurfaceCarryingReadRequest {
+    /// Optional result limit.
+    pub limit: Option<usize>,
+}
+
+/// Lists user-facing knowledge and decisions.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemorySurfaceKnowledgeListRequest {
+    /// Optional result limit.
+    pub limit: Option<usize>,
+}
+
+/// Corrects one knowledge item.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemorySurfaceKnowledgeCorrectRequest {
+    /// Correction payload.
+    pub correction: KnowledgeCorrection,
+}
+
+/// Lists runtime nodes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NodeListRequest {}
+
+/// Reads one runtime node.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NodeReadRequest {
+    /// The node to read.
+    pub node_id: NodeId,
+}
+
+/// Updates node policy.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NodeUpdatePolicyRequest {
+    /// The node to update.
+    pub node_id: NodeId,
+    /// Replacement policy.
+    pub policy: NodePolicy,
+}
+
+/// Lists workspace mounts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceMountListRequest {
+    /// Optional node filter.
+    pub node_id: Option<NodeId>,
+}
+
+/// Attaches a workspace mount.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceMountAttachRequest {
+    /// The node that owns the path.
+    pub node_id: NodeId,
+    /// Root path on that node.
+    pub root_path: String,
+    /// Owner-facing label.
+    pub label: Option<String>,
+    /// Mount permissions.
+    pub permissions: WorkspaceMountPermissions,
+}
+
+/// Detaches a workspace mount.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceMountDetachRequest {
+    /// The workspace mount to detach.
+    pub workspace_id: WorkspaceMountId,
 }

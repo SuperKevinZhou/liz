@@ -57,3 +57,5 @@ string_identifier!(CheckpointId, "A unique identifier for a recovery checkpoint.
 string_identifier!(ArtifactId, "A unique identifier for a persisted artifact.");
 string_identifier!(MemoryFactId, "A unique identifier for a compiled memory fact.");
 string_identifier!(ExecutorTaskId, "A unique identifier for a background executor task.");
+string_identifier!(NodeId, "A unique identifier for a device-side runtime node.");
+string_identifier!(WorkspaceMountId, "A unique identifier for a workspace mounted on a node.");

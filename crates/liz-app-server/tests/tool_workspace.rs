@@ -36,6 +36,7 @@ fn workspace_read_only_tools_return_results_and_artifacts() {
                 title: Some("Workspace tools".to_owned()),
                 initial_goal: Some("Run read-only workspace tools".to_owned()),
                 workspace_ref: Some(workspace_root.to_string_lossy().to_string()),
+                workspace_mount_id: None,
             }),
         ))
         .expect("thread request should be sent");
@@ -150,6 +151,7 @@ fn workspace_mutating_tools_write_files_and_publish_diff_artifacts() {
                 title: Some("Workspace write tools".to_owned()),
                 initial_goal: Some("Write and patch files".to_owned()),
                 workspace_ref: Some(workspace_root.to_string_lossy().to_string()),
+                workspace_mount_id: None,
             }),
         ))
         .expect("thread request should be sent");
@@ -232,6 +234,7 @@ fn shell_exec_returns_output_and_emits_executor_chunks() {
                 title: Some("Shell exec".to_owned()),
                 initial_goal: Some("Run one foreground command".to_owned()),
                 workspace_ref: Some(workspace_root.to_string_lossy().to_string()),
+                workspace_mount_id: None,
             }),
         ))
         .expect("thread request should be sent");
@@ -293,6 +296,7 @@ fn shell_exec_surfaces_external_sandbox_mode_in_trace_artifacts() {
                 title: Some("External sandbox".to_owned()),
                 initial_goal: Some("Record externally sandboxed commands".to_owned()),
                 workspace_ref: Some(workspace_root.to_string_lossy().to_string()),
+                workspace_mount_id: None,
             }),
         ))
         .expect("thread request should be sent");
@@ -355,6 +359,7 @@ fn background_shell_can_spawn_read_and_wait() {
                 title: Some("Background shell".to_owned()),
                 initial_goal: Some("Track a background process".to_owned()),
                 workspace_ref: Some(workspace_root.to_string_lossy().to_string()),
+                workspace_mount_id: None,
             }),
         ))
         .expect("thread request should be sent");
@@ -458,6 +463,7 @@ fn background_shell_can_terminate() {
                 title: Some("Background shell terminate".to_owned()),
                 initial_goal: Some("Terminate a background process".to_owned()),
                 workspace_ref: Some(workspace_root.to_string_lossy().to_string()),
+                workspace_mount_id: None,
             }),
         ))
         .expect("thread request should be sent");
@@ -531,6 +537,7 @@ fn shell_exec_fails_closed_when_default_sandbox_backend_is_unavailable() {
                 title: Some("Shell sandbox fail-closed".to_owned()),
                 initial_goal: Some("Refuse unsupported default sandbox execution".to_owned()),
                 workspace_ref: Some(workspace_root.to_string_lossy().to_string()),
+                workspace_mount_id: None,
             }),
         ))
         .expect("thread request should be sent");
@@ -550,6 +557,8 @@ fn shell_exec_fails_closed_when_default_sandbox_backend_is_unavailable() {
             ClientRequest::ToolCall(ToolCallRequest {
                 thread_id: thread.id,
                 turn_id: None,
+                node_id: None,
+                workspace_mount_id: None,
                 invocation: ToolInvocation::ShellExec(ShellExecRequest {
                     command: "Write-Output 'hello'".to_owned(),
                     working_dir: Some(workspace_root.to_string_lossy().to_string()),
@@ -610,6 +619,7 @@ fn runtime_config_update_changes_default_shell_sandbox() {
                 title: Some("Runtime sandbox default".to_owned()),
                 initial_goal: Some("Run shell command with configured default".to_owned()),
                 workspace_ref: Some(workspace_root.to_string_lossy().to_string()),
+                workspace_mount_id: None,
             }),
         ))
         .expect("thread request should be sent");
@@ -655,6 +665,8 @@ fn send_tool(
             ClientRequest::ToolCall(ToolCallRequest {
                 thread_id: thread_id.clone(),
                 turn_id: None,
+                node_id: None,
+                workspace_mount_id: None,
                 invocation,
             }),
         ))
@@ -709,6 +721,7 @@ fn shell_exec_preserves_sandbox_denial_output_in_command_artifacts() {
                 title: Some("Sandbox denied".to_owned()),
                 initial_goal: Some("Preserve denied sandbox evidence".to_owned()),
                 workspace_ref: Some(workspace_root.to_string_lossy().to_string()),
+                workspace_mount_id: None,
             }),
         ))
         .expect("thread request should be sent");

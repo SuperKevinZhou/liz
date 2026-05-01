@@ -218,6 +218,11 @@ pub fn handle_request(
                         executor_task_id: executor_task_id.clone(),
                         stream: chunk.stream,
                         chunk: chunk.chunk,
+                        node_id: request
+                            .node_id
+                            .clone()
+                            .or_else(|| Some(liz_protocol::NodeId::new("local"))),
+                        workspace_mount_id: request.workspace_mount_id.clone(),
                     }),
                 )
             }));
@@ -231,6 +236,11 @@ pub fn handle_request(
                         .iter()
                         .map(|artifact| artifact.id.clone())
                         .collect(),
+                    node_id: request
+                        .node_id
+                        .clone()
+                        .or_else(|| Some(liz_protocol::NodeId::new("local"))),
+                    workspace_mount_id: request.workspace_mount_id.clone(),
                 }),
             ));
             Ok((
@@ -297,6 +307,39 @@ pub fn handle_request(
         ClientRequest::MemoryOpenEvidence(request) => runtime
             .open_memory_evidence(request)
             .map(|response| (ResponsePayload::MemoryOpenEvidence(response), Vec::new())),
+        ClientRequest::MemorySurfaceAboutYouRead(request) => runtime
+            .read_about_you_surface(request)
+            .map(|response| (ResponsePayload::MemorySurfaceAboutYouRead(response), Vec::new())),
+        ClientRequest::MemorySurfaceAboutYouUpdate(request) => runtime
+            .update_about_you_surface(request)
+            .map(|response| (ResponsePayload::MemorySurfaceAboutYouUpdate(response), Vec::new())),
+        ClientRequest::MemorySurfaceCarryingRead(request) => runtime
+            .read_carrying_surface(request)
+            .map(|response| (ResponsePayload::MemorySurfaceCarryingRead(response), Vec::new())),
+        ClientRequest::MemorySurfaceKnowledgeList(request) => runtime
+            .list_knowledge_surface(request)
+            .map(|response| (ResponsePayload::MemorySurfaceKnowledgeList(response), Vec::new())),
+        ClientRequest::MemorySurfaceKnowledgeCorrect(request) => runtime
+            .correct_knowledge_surface(request)
+            .map(|response| (ResponsePayload::MemorySurfaceKnowledgeCorrect(response), Vec::new())),
+        ClientRequest::NodeList(request) => runtime
+            .list_nodes(request)
+            .map(|response| (ResponsePayload::NodeList(response), Vec::new())),
+        ClientRequest::NodeRead(request) => runtime
+            .read_node(request)
+            .map(|response| (ResponsePayload::NodeRead(response), Vec::new())),
+        ClientRequest::NodeUpdatePolicy(request) => runtime
+            .update_node_policy(request)
+            .map(|response| (ResponsePayload::NodeUpdatePolicy(response), Vec::new())),
+        ClientRequest::WorkspaceMountList(request) => runtime
+            .list_workspace_mounts(request)
+            .map(|response| (ResponsePayload::WorkspaceMountList(response), Vec::new())),
+        ClientRequest::WorkspaceMountAttach(request) => runtime
+            .attach_workspace_mount(request)
+            .map(|response| (ResponsePayload::WorkspaceMountAttach(response), Vec::new())),
+        ClientRequest::WorkspaceMountDetach(request) => runtime
+            .detach_workspace_mount(request)
+            .map(|response| (ResponsePayload::WorkspaceMountDetach(response), Vec::new())),
     };
 
     match response {

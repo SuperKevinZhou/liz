@@ -1,6 +1,6 @@
 //! Thread resources and state enums.
 
-use crate::ids::{CheckpointId, ThreadId, TurnId};
+use crate::ids::{CheckpointId, ThreadId, TurnId, WorkspaceMountId};
 use crate::primitives::Timestamp;
 use serde::{Deserialize, Serialize};
 
@@ -44,6 +44,9 @@ pub struct Thread {
     /// The optional workspace attached to this thread.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_ref: Option<String>,
+    /// The workspace mount attached to this thread.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_mount_id: Option<WorkspaceMountId>,
     /// Commitments that are still pending on the thread.
     pub pending_commitments: Vec<String>,
     /// The latest turn known for the thread.

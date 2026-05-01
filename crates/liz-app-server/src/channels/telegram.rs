@@ -296,6 +296,7 @@ fn start_thread_for_message(
             title: Some(format!("Telegram chat {}", message.chat_id)),
             initial_goal: Some(message.text.clone()),
             workspace_ref: None,
+            workspace_mount_id: None,
         }),
     });
     match response {
@@ -327,6 +328,7 @@ fn start_turn_for_message(
             input_kind: TurnInputKind::UserMessage,
             channel: Some(message.channel()),
             participant: Some(message.participant.clone()),
+            interaction_context: None,
         }),
     });
     match response {

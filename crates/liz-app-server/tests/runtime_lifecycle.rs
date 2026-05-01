@@ -22,6 +22,7 @@ fn thread_can_start_turn_interrupt_and_resume() {
             title: Some("Phase 3 runtime".to_owned()),
             initial_goal: Some("Stand up runtime lifecycle".to_owned()),
             workspace_ref: None,
+            workspace_mount_id: None,
         })
         .expect("thread start should succeed")
         .thread;
@@ -37,6 +38,7 @@ fn thread_can_start_turn_interrupt_and_resume() {
             input_kind: TurnInputKind::UserMessage,
             channel: None,
             participant: None,
+            interaction_context: None,
         })
         .expect("turn start should succeed")
         .turn;
@@ -100,6 +102,7 @@ fn forked_thread_inherits_parent_state_without_reusing_latest_turn() {
             title: Some("Main thread".to_owned()),
             initial_goal: Some("Ship Phase 3".to_owned()),
             workspace_ref: Some("D:/workspace/main".to_owned()),
+            workspace_mount_id: None,
         })
         .expect("thread start should succeed")
         .thread;
@@ -135,6 +138,7 @@ fn turn_log_sequence_continues_after_runtime_restart() {
                 title: Some("Restartable thread".to_owned()),
                 initial_goal: Some("Keep turn-log order stable".to_owned()),
                 workspace_ref: None,
+                workspace_mount_id: None,
             })
             .expect("thread start should succeed")
             .thread;
@@ -145,6 +149,7 @@ fn turn_log_sequence_continues_after_runtime_restart() {
                 input_kind: TurnInputKind::UserMessage,
                 channel: None,
                 participant: None,
+                interaction_context: None,
             })
             .expect("turn start should succeed")
             .turn;
@@ -162,6 +167,7 @@ fn turn_log_sequence_continues_after_runtime_restart() {
             input_kind: TurnInputKind::ResumeCommand,
             channel: None,
             participant: None,
+            interaction_context: None,
         })
         .expect("turn should restart cleanly")
         .turn;

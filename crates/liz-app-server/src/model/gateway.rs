@@ -314,6 +314,7 @@ impl ModelGateway {
             active_summary: None,
             last_interruption: None,
             workspace_ref: None,
+            workspace_mount_id: None,
             pending_commitments: Vec::new(),
             latest_turn_id: Some(turn.id.clone()),
             latest_checkpoint_id: None,

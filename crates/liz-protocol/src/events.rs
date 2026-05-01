@@ -3,7 +3,7 @@
 use crate::approval::{ApprovalDecision, ApprovalRequest};
 use crate::artifact::ArtifactRef;
 use crate::checkpoint::Checkpoint;
-use crate::ids::{ArtifactId, EventId, ExecutorTaskId, ThreadId, TurnId};
+use crate::ids::{ArtifactId, EventId, ExecutorTaskId, NodeId, ThreadId, TurnId, WorkspaceMountId};
 use crate::memory::{MemoryCompilationSummary, MemoryWakeup};
 use crate::primitives::{RiskLevel, Timestamp};
 use crate::thread::Thread;
@@ -350,6 +350,12 @@ pub struct ToolCallCommittedEvent {
     pub arguments_summary: String,
     /// An optional risk hint for the committed action.
     pub risk_hint: Option<RiskLevel>,
+    /// The node where the tool will run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<NodeId>,
+    /// The workspace mount used by the tool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_mount_id: Option<WorkspaceMountId>,
 }
 
 /// Payload for `tool_completed`.
@@ -361,6 +367,12 @@ pub struct ToolCompletedEvent {
     pub summary: String,
     /// Artifact identifiers created by the tool.
     pub artifact_ids: Vec<ArtifactId>,
+    /// The node where the tool ran.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<NodeId>,
+    /// The workspace mount used by the tool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_mount_id: Option<WorkspaceMountId>,
 }
 
 /// Payload for `tool_failed`.
@@ -370,6 +382,12 @@ pub struct ToolFailedEvent {
     pub tool_name: String,
     /// A short failure summary.
     pub summary: String,
+    /// The node where the tool failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<NodeId>,
+    /// The workspace mount used by the tool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_mount_id: Option<WorkspaceMountId>,
 }
 
 /// Payload for `executor_output_chunk`.
@@ -381,6 +399,12 @@ pub struct ExecutorOutputChunkEvent {
     pub stream: ExecutorStream,
     /// The text chunk that was emitted.
     pub chunk: String,
+    /// The node that emitted the chunk.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<NodeId>,
+    /// The workspace mount associated with the output.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_mount_id: Option<WorkspaceMountId>,
 }
 
 /// Payload for `approval_requested`.

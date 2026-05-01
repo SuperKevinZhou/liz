@@ -30,6 +30,7 @@ fn websocket_server_streams_lifecycle_events_without_polling() {
                 title: Some("Thread over websocket".to_owned()),
                 initial_goal: Some("Emit lifecycle events".to_owned()),
                 workspace_ref: None,
+                workspace_mount_id: None,
             }),
         ))
         .expect("request should succeed");
@@ -57,6 +58,7 @@ fn websocket_server_streams_lifecycle_events_without_polling() {
                 input_kind: TurnInputKind::UserMessage,
                 channel: None,
                 participant: None,
+                interaction_context: None,
             }),
         ))
         .expect("turn request should succeed");

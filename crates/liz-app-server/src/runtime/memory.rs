@@ -1443,6 +1443,7 @@ mod tests {
                 active_summary: Some("Memory compiler active".to_owned()),
                 last_interruption: None,
                 workspace_ref: None,
+                workspace_mount_id: None,
                 pending_commitments: vec!["keep fallback available".to_owned()],
                 latest_turn_id: Some(turn_id.clone()),
                 latest_checkpoint_id: None,

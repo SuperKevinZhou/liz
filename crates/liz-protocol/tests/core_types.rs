@@ -3,8 +3,10 @@
 use liz_protocol::{
     ApprovalId, ApprovalRequest, ApprovalStatus, ArtifactId, ArtifactKind, ArtifactRef,
     ChannelKind, ChannelRef, Checkpoint, CheckpointId, CheckpointScope, InfoBoundary,
-    ParticipantRef, RelationshipEntry, RiskLevel, Thread, ThreadId, ThreadStatus, Timestamp,
-    TrustLevel, Turn, TurnId, TurnKind, TurnStatus,
+    InteractionContext, InteractionRole, NodeCapabilities, NodeIdentity, NodeKind, NodePolicy,
+    NodeRecord, NodeStatus, ParticipantRef, RelationshipEntry, RiskLevel, Thread, ThreadId,
+    ThreadStatus, Timestamp, TrustLevel, Turn, TurnId, TurnKind, TurnStatus, WorkspaceMount,
+    WorkspaceMountPermissions,
 };
 
 /// Ensures thread resources serialize and deserialize without losing state.
@@ -20,6 +22,7 @@ fn thread_resource_round_trips_through_json() {
         active_summary: Some("Waiting for request envelope work".to_owned()),
         last_interruption: Some("Stopped after core type definitions".to_owned()),
         workspace_ref: Some("D:/zzh/Code/liz/liz".to_owned()),
+        workspace_mount_id: None,
         pending_commitments: vec!["Add request types".to_owned()],
         latest_turn_id: Some(TurnId::new("turn_01")),
         latest_checkpoint_id: Some(CheckpointId::new("checkpoint_01")),
@@ -110,6 +113,8 @@ fn approval_resource_serializes_with_snake_case_enums() {
         risk_level: RiskLevel::High,
         reason: "Protected path mutation".to_owned(),
         sandbox_context: Some("workspace-write".to_owned()),
+        node_id: None,
+        workspace_mount_id: None,
         status: ApprovalStatus::Pending,
     };
 
@@ -140,6 +145,8 @@ fn checkpoint_and_artifact_resources_round_trip_through_json() {
         thread_id: ThreadId::new("thread_02"),
         turn_id: TurnId::new("turn_03"),
         kind: ArtifactKind::Diff,
+        node_id: None,
+        workspace_mount_id: None,
         summary: "Patch preview".to_owned(),
         locator: ".liz/artifacts/artifact_01.json".to_owned(),
         created_at: Timestamp::new("2026-04-13T19:10:01Z"),
@@ -155,4 +162,109 @@ fn checkpoint_and_artifact_resources_round_trip_through_json() {
 
     assert_eq!(checkpoint_round_trip, checkpoint);
     assert_eq!(artifact_round_trip, artifact);
+}
+
+#[test]
+fn interaction_context_resource_round_trips_through_json() {
+    let context = InteractionContext {
+        ingress: liz_protocol::IngressRef {
+            kind: "agent_protocol".to_owned(),
+            source_id: "alice_agent".to_owned(),
+            conversation_id: Some("agent:alice:project_x".to_owned()),
+        },
+        actor: liz_protocol::ActorRef {
+            actor_id: "agent_alice".to_owned(),
+            kind: liz_protocol::ActorKind::ExternalAgent,
+            display_name: Some("Alice's agent".to_owned()),
+            proof: Some("signed-delegation".to_owned()),
+        },
+        audience: liz_protocol::Audience {
+            visibility: liz_protocol::AudienceVisibility::Machine,
+            participants: vec!["agent_alice".to_owned()],
+        },
+        role: liz_protocol::InteractionRole::AgentPeer,
+        authority: liz_protocol::AuthorityScope::restricted_default(),
+        disclosure: liz_protocol::DisclosurePolicy::stranger_default(),
+        task_mandate: Some("Share only authorized project status.".to_owned()),
+        provenance: liz_protocol::Provenance {
+            channel: None,
+            received_at: Some(Timestamp::new("2026-05-01T00:00:00Z")),
+            authenticated_by: Some("agent-handshake".to_owned()),
+            raw_event_ref: Some("event_raw_01".to_owned()),
+        },
+    };
+
+    let value = serde_json::to_value(&context).expect("context should serialize");
+
+    assert_eq!(value["actor"]["kind"], "external_agent");
+    assert_eq!(value["role"], "agent_peer");
+
+    let round_trip: InteractionContext =
+        serde_json::from_value(value).expect("context should deserialize");
+
+    assert_eq!(round_trip, context);
+}
+
+#[test]
+fn node_and_workspace_mount_resources_round_trip_through_json() {
+    let node = NodeRecord {
+        identity: NodeIdentity {
+            node_id: liz_protocol::NodeId::new("local"),
+            display_name: "Local device".to_owned(),
+            kind: NodeKind::Desktop,
+            owner_device: true,
+        },
+        status: NodeStatus {
+            online: true,
+            last_seen_at: Some(Timestamp::new("2026-05-01T00:00:00Z")),
+            app_version: Some("0.1.0".to_owned()),
+            os: Some("windows".to_owned()),
+            hostname: Some("workstation".to_owned()),
+        },
+        capabilities: NodeCapabilities {
+            workspace_tools: true,
+            shell_tools: true,
+            browser_tools: false,
+            web_ui_host: true,
+            notifications: false,
+            max_concurrent_tasks: 1,
+            supported_sandbox_modes: vec![liz_protocol::SandboxMode::WorkspaceWrite],
+        },
+        policy: NodePolicy {
+            allowed_roots: vec!["D:/zzh/Code".to_owned()],
+            protected_paths: vec!["D:/zzh/Code/liz/.git".to_owned()],
+            default_sandbox: liz_protocol::SandboxMode::WorkspaceWrite,
+            network_policy: "enabled".to_owned(),
+            approval_policy: liz_protocol::ApprovalPolicy::OnRequest,
+        },
+    };
+    let mount = WorkspaceMount {
+        workspace_id: liz_protocol::WorkspaceMountId::new("workspace_local_liz"),
+        node_id: liz_protocol::NodeId::new("local"),
+        root_path: "D:/zzh/Code/liz/liz".to_owned(),
+        label: "liz".to_owned(),
+        permissions: WorkspaceMountPermissions { read: true, write: true, shell: true },
+    };
+
+    let node_value = serde_json::to_value(&node).expect("node should serialize");
+    let mount_value = serde_json::to_value(&mount).expect("mount should serialize");
+
+    assert_eq!(node_value["identity"]["kind"], "desktop");
+    assert_eq!(mount_value["node_id"], "local");
+
+    let node_round_trip: NodeRecord =
+        serde_json::from_value(node_value).expect("node should deserialize");
+    let mount_round_trip: WorkspaceMount =
+        serde_json::from_value(mount_value).expect("mount should deserialize");
+
+    assert_eq!(node_round_trip, node);
+    assert_eq!(mount_round_trip, mount);
+}
+
+#[test]
+fn node_controller_role_serializes_as_protocol_boundary() {
+    let role = InteractionRole::NodeController;
+    let value = serde_json::to_value(role).expect("role should serialize");
+
+    assert_eq!(value, "node_controller");
 }

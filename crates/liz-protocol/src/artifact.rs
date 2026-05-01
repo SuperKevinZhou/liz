@@ -1,6 +1,6 @@
 //! Artifact resources and related enums.
 
-use crate::ids::{ArtifactId, ThreadId, TurnId};
+use crate::ids::{ArtifactId, NodeId, ThreadId, TurnId, WorkspaceMountId};
 use crate::primitives::Timestamp;
 use serde::{Deserialize, Serialize};
 
@@ -33,6 +33,12 @@ pub struct ArtifactRef {
     pub turn_id: TurnId,
     /// The kind of artifact that was persisted.
     pub kind: ArtifactKind,
+    /// The node that produced the artifact.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<NodeId>,
+    /// The workspace mount associated with the artifact.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_mount_id: Option<WorkspaceMountId>,
     /// A short user-visible summary.
     pub summary: String,
     /// The locator or path that can later retrieve the artifact.

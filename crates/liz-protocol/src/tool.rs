@@ -1,7 +1,7 @@
 //! Tool-surface request and result payloads.
 
 use crate::artifact::ArtifactRef;
-use crate::ids::{ExecutorTaskId, ThreadId, TurnId};
+use crate::ids::{ExecutorTaskId, NodeId, ThreadId, TurnId, WorkspaceMountId};
 use crate::sandbox::{ShellSandboxRequest, ShellSandboxSummary};
 use serde::{Deserialize, Serialize};
 
@@ -164,6 +164,12 @@ pub struct ToolCallRequest {
     pub thread_id: ThreadId,
     /// The turn this execution belongs to, if the call originated from a real turn.
     pub turn_id: Option<TurnId>,
+    /// The node where this invocation should run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<NodeId>,
+    /// The workspace mount used by this invocation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_mount_id: Option<WorkspaceMountId>,
     /// The typed tool invocation.
     #[serde(flatten)]
     pub invocation: ToolInvocation,

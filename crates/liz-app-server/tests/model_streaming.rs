@@ -24,6 +24,7 @@ fn turn_start_streams_assistant_and_tool_events_before_completion() {
                 title: Some("Model stream".to_owned()),
                 initial_goal: Some("Test normalized tool streaming".to_owned()),
                 workspace_ref: Some(temp_dir.path().display().to_string()),
+                workspace_mount_id: None,
             }),
         ))
         .expect("thread request should be sent");
@@ -46,6 +47,7 @@ fn turn_start_streams_assistant_and_tool_events_before_completion() {
                 input_kind: TurnInputKind::UserMessage,
                 channel: None,
                 participant: None,
+                interaction_context: None,
             }),
         ))
         .expect("turn request should be sent");
@@ -106,6 +108,7 @@ fn turn_start_executes_committed_shell_tool_calls() {
                 title: Some("Model exec".to_owned()),
                 initial_goal: Some("Test committed tool execution".to_owned()),
                 workspace_ref: Some(temp_dir.path().display().to_string()),
+                workspace_mount_id: None,
             }),
         ))
         .expect("thread request should be sent");
@@ -128,6 +131,7 @@ fn turn_start_executes_committed_shell_tool_calls() {
                 input_kind: TurnInputKind::UserMessage,
                 channel: None,
                 participant: None,
+                interaction_context: None,
             }),
         ))
         .expect("turn request should be sent");

@@ -7,12 +7,14 @@ use crate::auth::{
     MiniMaxOAuthDeviceCode, MiniMaxOAuthPollStatus, OpenAiCodexOAuthStart, ProviderAuthProfile,
 };
 use crate::checkpoint::{Checkpoint, CheckpointScope};
-use crate::ids::{RequestId, ThreadId};
+use crate::ids::{RequestId, ThreadId, WorkspaceMountId};
 use crate::memory::{
     MemoryCompilationSummary, MemoryEvidenceView, MemorySearchHit, MemorySearchMode,
     MemorySessionView, MemoryTopicSummary, MemoryWakeup, RecentConversationWakeupView,
     ResumeSummary,
 };
+use crate::memory_surface::{AboutYouSurface, CarryingSurface, KnowledgeItem, KnowledgeSurface};
+use crate::node::{NodeRecord, WorkspaceMount};
 use crate::sandbox::ShellSandboxSummary;
 use crate::thread::Thread;
 use crate::tool::ToolCallResponse;
@@ -154,6 +156,39 @@ pub enum ResponsePayload {
     /// Acknowledges `memory/open_evidence`.
     #[serde(rename = "memory/open_evidence")]
     MemoryOpenEvidence(MemoryOpenEvidenceResponse),
+    /// Acknowledges `memory_surface/about_you/read`.
+    #[serde(rename = "memory_surface/about_you/read")]
+    MemorySurfaceAboutYouRead(MemorySurfaceAboutYouReadResponse),
+    /// Acknowledges `memory_surface/about_you/update`.
+    #[serde(rename = "memory_surface/about_you/update")]
+    MemorySurfaceAboutYouUpdate(MemorySurfaceAboutYouUpdateResponse),
+    /// Acknowledges `memory_surface/carrying/read`.
+    #[serde(rename = "memory_surface/carrying/read")]
+    MemorySurfaceCarryingRead(MemorySurfaceCarryingReadResponse),
+    /// Acknowledges `memory_surface/knowledge/list`.
+    #[serde(rename = "memory_surface/knowledge/list")]
+    MemorySurfaceKnowledgeList(MemorySurfaceKnowledgeListResponse),
+    /// Acknowledges `memory_surface/knowledge/correct`.
+    #[serde(rename = "memory_surface/knowledge/correct")]
+    MemorySurfaceKnowledgeCorrect(MemorySurfaceKnowledgeCorrectResponse),
+    /// Acknowledges `node/list`.
+    #[serde(rename = "node/list")]
+    NodeList(NodeListResponse),
+    /// Acknowledges `node/read`.
+    #[serde(rename = "node/read")]
+    NodeRead(NodeReadResponse),
+    /// Acknowledges `node/update_policy`.
+    #[serde(rename = "node/update_policy")]
+    NodeUpdatePolicy(NodeUpdatePolicyResponse),
+    /// Acknowledges `workspace_mount/list`.
+    #[serde(rename = "workspace_mount/list")]
+    WorkspaceMountList(WorkspaceMountListResponse),
+    /// Acknowledges `workspace_mount/attach`.
+    #[serde(rename = "workspace_mount/attach")]
+    WorkspaceMountAttach(WorkspaceMountAttachResponse),
+    /// Acknowledges `workspace_mount/detach`.
+    #[serde(rename = "workspace_mount/detach")]
+    WorkspaceMountDetach(WorkspaceMountDetachResponse),
 }
 
 /// The response payload for `provider_auth/openai_codex_oauth_start`.
@@ -390,4 +425,81 @@ pub struct MemoryOpenSessionResponse {
 pub struct MemoryOpenEvidenceResponse {
     /// The expanded evidence view.
     pub evidence: MemoryEvidenceView,
+}
+
+/// The response payload for `memory_surface/about_you/read`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemorySurfaceAboutYouReadResponse {
+    /// The owner-facing About You surface.
+    pub surface: AboutYouSurface,
+}
+
+/// The response payload for `memory_surface/about_you/update`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemorySurfaceAboutYouUpdateResponse {
+    /// The updated About You surface.
+    pub surface: AboutYouSurface,
+}
+
+/// The response payload for `memory_surface/carrying/read`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemorySurfaceCarryingReadResponse {
+    /// The owner-facing active work surface.
+    pub surface: CarryingSurface,
+}
+
+/// The response payload for `memory_surface/knowledge/list`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemorySurfaceKnowledgeListResponse {
+    /// The owner-facing knowledge surface.
+    pub surface: KnowledgeSurface,
+}
+
+/// The response payload for `memory_surface/knowledge/correct`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemorySurfaceKnowledgeCorrectResponse {
+    /// The corrected knowledge item.
+    pub item: KnowledgeItem,
+}
+
+/// The response payload for `node/list`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NodeListResponse {
+    /// Registered nodes.
+    pub nodes: Vec<NodeRecord>,
+}
+
+/// The response payload for `node/read`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NodeReadResponse {
+    /// The requested node.
+    pub node: NodeRecord,
+}
+
+/// The response payload for `node/update_policy`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NodeUpdatePolicyResponse {
+    /// The updated node.
+    pub node: NodeRecord,
+}
+
+/// The response payload for `workspace_mount/list`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceMountListResponse {
+    /// Workspace mounts.
+    pub mounts: Vec<WorkspaceMount>,
+}
+
+/// The response payload for `workspace_mount/attach`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceMountAttachResponse {
+    /// The attached workspace mount.
+    pub mount: WorkspaceMount,
+}
+
+/// The response payload for `workspace_mount/detach`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceMountDetachResponse {
+    /// The detached workspace identifier.
+    pub workspace_id: WorkspaceMountId,
 }

@@ -2,7 +2,10 @@
 
 use crate::storage::GlobalMemorySnapshot;
 use crate::storage::TurnLogEntry;
-use liz_protocol::{InfoBoundary, MemoryWakeup, ParticipantRef, Thread, TrustLevel};
+use liz_protocol::{
+    ActorKind, DisclosurePolicy, InfoBoundary, InteractionContext, InteractionRole, MemoryWakeup,
+    ParticipantRef, Thread, TrustLevel,
+};
 
 /// The retrieval scope chosen for the current turn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,9 +104,10 @@ impl ContextAssembler {
         recent_entries: &[TurnLogEntry],
         input: &str,
         participant: Option<&ParticipantRef>,
+        interaction_context: Option<&InteractionContext>,
     ) -> AssembledContext {
         let scope = classify_scope(input);
-        let relationship = resolve_relationship(snapshot, participant);
+        let relationship = resolve_relationship(snapshot, participant, interaction_context);
         let retrieval = TaskLocalRetrieval {
             query_terms: derive_query_terms(input),
             requires_full_repo_scan: matches!(scope, RetrievalScope::Expanded),
@@ -219,8 +223,9 @@ impl ContextAssembler {
             String::new()
         };
         let relationship_stance = liz_relationship_stance_injection(&relationship);
+        let interaction_prompt = liz_interaction_role_injection(&relationship);
         let developer_prompt = format!(
-            "turn_operating_contract:\n{}\n\nrecent_conversation_wakeup:\n{}\n\nthread_projection:\n{}\n\ntask_local:\n{}\n\nexecutor_boundary:\n{}\n\ntooling_surface:\n{}\n\nexecution_boundaries:\n{}{}{}",
+            "turn_operating_contract:\n{}\n\nrecent_conversation_wakeup:\n{}\n\nthread_projection:\n{}\n\ntask_local:\n{}\n\nexecutor_boundary:\n{}\n\ntooling_surface:\n{}\n\nexecution_boundaries:\n{}{}{}{}",
             liz_turn_operating_contract(),
             layers.recent_conversation,
             layers.thread_projection,
@@ -230,6 +235,7 @@ impl ContextAssembler {
             liz_execution_boundary_contract(thread.workspace_ref.is_some()),
             onboarding,
             relationship_stance,
+            interaction_prompt,
         );
         let user_prompt = input.to_owned();
         let prompt = format!(
@@ -455,18 +461,54 @@ struct RelationshipContext {
     trust_level: TrustLevel,
     boundary: InfoBoundary,
     interaction_stance: Option<String>,
+    role: InteractionRole,
+    disclosure: Option<DisclosurePolicy>,
 }
 
 fn resolve_relationship(
     snapshot: &GlobalMemorySnapshot,
     participant: Option<&ParticipantRef>,
+    interaction_context: Option<&InteractionContext>,
 ) -> RelationshipContext {
+    if let Some(context) = interaction_context {
+        let trust_level = match context.actor.kind {
+            ActorKind::Owner => TrustLevel::Owner,
+            ActorKind::HumanContact | ActorKind::ExternalAgent => TrustLevel::Trusted,
+            ActorKind::LocalNode | ActorKind::RemoteNode | ActorKind::SystemService => {
+                TrustLevel::Acquaintance
+            }
+            ActorKind::Stranger | ActorKind::WebhookSource | ActorKind::Automation => {
+                TrustLevel::Stranger
+            }
+        };
+        let boundary = InfoBoundary {
+            shared_topics: context.disclosure.allowed_topics.clone(),
+            forbidden_topics: context.disclosure.forbidden_topics.clone(),
+            share_active_state: context.disclosure.share_active_state,
+            share_commitments: context.disclosure.share_commitments,
+        };
+        return RelationshipContext {
+            participant_name: context
+                .actor
+                .display_name
+                .clone()
+                .unwrap_or_else(|| context.actor.actor_id.clone()),
+            trust_level,
+            boundary,
+            interaction_stance: None,
+            role: context.role,
+            disclosure: Some(context.disclosure.clone()),
+        };
+    }
+
     let Some(participant) = participant else {
         return RelationshipContext {
             participant_name: "unknown participant".to_owned(),
             trust_level: TrustLevel::Stranger,
             boundary: snapshot.default_stranger_boundary.clone(),
             interaction_stance: None,
+            role: InteractionRole::PublicRepresentative,
+            disclosure: None,
         };
     };
 
@@ -479,6 +521,8 @@ fn resolve_relationship(
             trust_level: TrustLevel::Owner,
             boundary: InfoBoundary::owner_default(),
             interaction_stance: None,
+            role: InteractionRole::PrivateCompanion,
+            disclosure: Some(DisclosurePolicy::owner_default()),
         };
     }
 
@@ -492,6 +536,8 @@ fn resolve_relationship(
             trust_level: relationship.trust_level,
             boundary: relationship.info_boundary.clone(),
             interaction_stance: Some(relationship.interaction_stance.clone()),
+            role: InteractionRole::GroupParticipant,
+            disclosure: None,
         };
     }
 
@@ -503,6 +549,8 @@ fn resolve_relationship(
         trust_level: TrustLevel::Stranger,
         boundary: snapshot.default_stranger_boundary.clone(),
         interaction_stance: None,
+        role: InteractionRole::PublicRepresentative,
+        disclosure: None,
     }
 }
 
@@ -510,7 +558,9 @@ fn filter_identity_summary(
     snapshot: &GlobalMemorySnapshot,
     relationship: &RelationshipContext,
 ) -> Option<String> {
-    if relationship.trust_level == TrustLevel::Owner {
+    if relationship.trust_level == TrustLevel::Owner
+        || relationship.disclosure.as_ref().is_some_and(|policy| policy.share_identity)
+    {
         snapshot.identity_summary.clone()
     } else {
         None
@@ -597,6 +647,24 @@ fn liz_relationship_stance_injection(relationship: &RelationshipContext) -> Stri
         ),
         TrustLevel::Stranger => "\n\nrelationship_context:\nYou are talking to someone not recognized by the owner. Be polite but extremely conservative. Share only that liz is a personal agent. Do not reveal owner information, work, contacts, preferences, active state, or commitments. If asked for more, say you need the owner's permission.".to_owned(),
     }
+}
+
+fn liz_interaction_role_injection(relationship: &RelationshipContext) -> String {
+    let role = match relationship.role {
+        InteractionRole::PrivateCompanion => "private_companion",
+        InteractionRole::TaskExecutor => "task_executor",
+        InteractionRole::OwnerDelegate => "owner_delegate",
+        InteractionRole::PublicRepresentative => "public_representative",
+        InteractionRole::GroupParticipant => "group_participant",
+        InteractionRole::AgentPeer => "agent_peer",
+        InteractionRole::AgentCoordinator => "agent_coordinator",
+        InteractionRole::NodeController => "node_controller",
+        InteractionRole::WebhookObserver => "webhook_observer",
+        InteractionRole::BackgroundAutomation => "background_automation",
+    };
+    format!(
+        "\n\ninteraction_context:\nrole: {role}\nPolicy and filtering already decided what context is available. Treat this role as the current social or operational position of the same liz self, not a persona switch."
+    )
 }
 
 fn classify_scope(input: &str) -> RetrievalScope {

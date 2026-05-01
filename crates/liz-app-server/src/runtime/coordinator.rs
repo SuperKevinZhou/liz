@@ -22,26 +22,40 @@ use liz_protocol::requests::{
     GitLabOAuthCompleteRequest, GitLabOAuthStartRequest, GitLabPatSaveRequest,
     MemoryCompileNowRequest, MemoryListTopicsRequest, MemoryOpenEvidenceRequest,
     MemoryOpenSessionRequest, MemoryReadWakeupRequest, MemorySearchRequest,
-    MiniMaxOAuthPollRequest, MiniMaxOAuthStartRequest, OpenAiCodexOAuthCompleteRequest,
+    MemorySurfaceAboutYouReadRequest, MemorySurfaceAboutYouUpdateRequest,
+    MemorySurfaceCarryingReadRequest, MemorySurfaceKnowledgeCorrectRequest,
+    MemorySurfaceKnowledgeListRequest, MiniMaxOAuthPollRequest, MiniMaxOAuthStartRequest,
+    NodeListRequest, NodeReadRequest, NodeUpdatePolicyRequest, OpenAiCodexOAuthCompleteRequest,
     OpenAiCodexOAuthStartRequest, ProviderAuthDeleteRequest, ProviderAuthListRequest,
     ProviderAuthUpsertRequest, ThreadForkRequest, ThreadListRequest, ThreadResumeRequest,
-    ThreadStartRequest, TurnCancelRequest, TurnStartRequest,
+    ThreadStartRequest, TurnCancelRequest, TurnStartRequest, WorkspaceMountAttachRequest,
+    WorkspaceMountDetachRequest, WorkspaceMountListRequest,
 };
 use liz_protocol::responses::{
     ApprovalRespondResponse, GitHubCopilotDevicePollResponse, GitHubCopilotDeviceStartResponse,
     GitLabOAuthCompleteResponse, GitLabOAuthStartResponse, GitLabPatSaveResponse,
     MemoryCompileNowResponse, MemoryListTopicsResponse, MemoryOpenEvidenceResponse,
     MemoryOpenSessionResponse, MemoryReadWakeupResponse, MemorySearchResponse,
-    MiniMaxOAuthPollResponse, MiniMaxOAuthStartResponse, OpenAiCodexOAuthCompleteResponse,
+    MemorySurfaceAboutYouReadResponse, MemorySurfaceAboutYouUpdateResponse,
+    MemorySurfaceCarryingReadResponse, MemorySurfaceKnowledgeCorrectResponse,
+    MemorySurfaceKnowledgeListResponse, MiniMaxOAuthPollResponse, MiniMaxOAuthStartResponse,
+    NodeListResponse, NodeReadResponse, NodeUpdatePolicyResponse, OpenAiCodexOAuthCompleteResponse,
     OpenAiCodexOAuthStartResponse, ProviderAuthDeleteResponse, ProviderAuthListResponse,
     ProviderAuthUpsertResponse, ThreadForkResponse, ThreadListResponse, ThreadResumeResponse,
-    ThreadStartResponse, TurnCancelResponse, TurnStartResponse,
+    ThreadStartResponse, TurnCancelResponse, TurnStartResponse, WorkspaceMountAttachResponse,
+    WorkspaceMountDetachResponse, WorkspaceMountListResponse,
+};
+use liz_protocol::InteractionContext;
+use liz_protocol::{
+    AboutYouItem, AboutYouSurface, CarryingItem, CarryingSurface, KnowledgeItem, KnowledgeSurface,
 };
 use liz_protocol::{
     ApprovalDecision, ApprovalRequest, ApprovalStatus, ArtifactKind, ArtifactRef, Checkpoint,
     CheckpointScope, GitHubCopilotDeviceCode, GitHubCopilotDevicePollStatus, GitLabOAuthStart,
-    MiniMaxOAuthDeviceCode, MiniMaxOAuthPollStatus, OpenAiCodexOAuthStart, ParticipantRef,
-    ProviderAuthProfile, ProviderCredential, Thread, ThreadId, Turn, TurnId,
+    MemoryFactKind, MiniMaxOAuthDeviceCode, MiniMaxOAuthPollStatus, NodeCapabilities, NodeId,
+    NodeIdentity, NodeKind, NodePolicy, NodeRecord, NodeStatus, OpenAiCodexOAuthStart,
+    ParticipantRef, ProviderAuthProfile, ProviderCredential, SandboxMode, Thread, ThreadId, Turn,
+    TurnId, WorkspaceMount, WorkspaceMountId,
 };
 use std::collections::HashMap;
 
@@ -56,11 +70,16 @@ pub struct RuntimeCoordinator {
     memory_engine: ForegroundMemoryEngine,
     policy_engine: PolicyEngine,
     approvals: HashMap<liz_protocol::ApprovalId, ApprovalRequest>,
+    nodes: HashMap<NodeId, NodeRecord>,
+    workspace_mounts: HashMap<WorkspaceMountId, WorkspaceMount>,
 }
 
 impl RuntimeCoordinator {
     /// Creates a runtime coordinator backed by the provided stores.
     pub fn new(stores: RuntimeStores) -> Self {
+        let mut nodes = HashMap::new();
+        let local = local_node_record();
+        nodes.insert(local.identity.node_id.clone(), local);
         Self {
             stores,
             ids: IdGenerator::default(),
@@ -70,6 +89,8 @@ impl RuntimeCoordinator {
             memory_engine: ForegroundMemoryEngine::default(),
             policy_engine: PolicyEngine::default(),
             approvals: HashMap::new(),
+            nodes,
+            workspace_mounts: HashMap::new(),
         }
     }
 
@@ -554,6 +575,202 @@ impl RuntimeCoordinator {
         Ok(MemoryOpenEvidenceResponse { evidence })
     }
 
+    /// Reads the owner-facing About You memory surface.
+    pub fn read_about_you_surface(
+        &self,
+        _request: MemorySurfaceAboutYouReadRequest,
+    ) -> RuntimeResult<MemorySurfaceAboutYouReadResponse> {
+        Ok(MemorySurfaceAboutYouReadResponse { surface: self.build_about_you_surface()? })
+    }
+
+    /// Updates the owner-facing About You memory surface.
+    pub fn update_about_you_surface(
+        &self,
+        request: MemorySurfaceAboutYouUpdateRequest,
+    ) -> RuntimeResult<MemorySurfaceAboutYouUpdateResponse> {
+        let mut snapshot = self.stores.read_global_memory()?;
+        snapshot.identity_summary = request.update.identity_summary.clone();
+        self.stores.write_global_memory(&snapshot)?;
+        Ok(MemorySurfaceAboutYouUpdateResponse { surface: request.update.into_surface() })
+    }
+
+    /// Reads active work and commitments liz is carrying.
+    pub fn read_carrying_surface(
+        &self,
+        request: MemorySurfaceCarryingReadRequest,
+    ) -> RuntimeResult<MemorySurfaceCarryingReadResponse> {
+        let mut threads = self.stores.list_threads()?;
+        threads.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+        if let Some(limit) = request.limit {
+            threads.truncate(limit);
+        }
+        let mut active = Vec::new();
+        let mut completed = Vec::new();
+        for thread in threads {
+            let item = CarryingItem {
+                thread_id: thread.id.clone(),
+                title: thread.title.clone(),
+                status: thread.status,
+                summary: thread.active_summary.clone(),
+                pending_commitments: thread.pending_commitments.clone(),
+                suggested_next_step: thread
+                    .pending_commitments
+                    .first()
+                    .cloned()
+                    .or_else(|| thread.active_goal.clone()),
+                updated_at: thread.updated_at.clone(),
+            };
+            if matches!(
+                thread.status,
+                liz_protocol::ThreadStatus::Completed | liz_protocol::ThreadStatus::Archived
+            ) {
+                completed.push(item);
+            } else {
+                active.push(item);
+            }
+        }
+        Ok(MemorySurfaceCarryingReadResponse { surface: CarryingSurface { active, completed } })
+    }
+
+    /// Lists user-facing knowledge and decisions.
+    pub fn list_knowledge_surface(
+        &self,
+        request: MemorySurfaceKnowledgeListRequest,
+    ) -> RuntimeResult<MemorySurfaceKnowledgeListResponse> {
+        let mut items = self
+            .stores
+            .read_global_memory()?
+            .facts
+            .into_iter()
+            .map(|fact| KnowledgeItem {
+                fact_id: fact.id,
+                kind: memory_fact_kind_label(fact.kind).to_owned(),
+                subject: fact.subject,
+                summary: fact.value,
+                stale: fact.invalidated_at.is_some() || fact.invalidated_by.is_some(),
+                updated_at: fact.updated_at,
+                citations: fact.citations,
+            })
+            .collect::<Vec<_>>();
+        items.sort_by(|left, right| {
+            left.stale.cmp(&right.stale).then_with(|| right.updated_at.cmp(&left.updated_at))
+        });
+        if let Some(limit) = request.limit {
+            items.truncate(limit);
+        }
+        Ok(MemorySurfaceKnowledgeListResponse { surface: KnowledgeSurface { items } })
+    }
+
+    /// Corrects one knowledge item.
+    pub fn correct_knowledge_surface(
+        &self,
+        request: MemorySurfaceKnowledgeCorrectRequest,
+    ) -> RuntimeResult<MemorySurfaceKnowledgeCorrectResponse> {
+        let mut snapshot = self.stores.read_global_memory()?;
+        let now = self.ids.now_timestamp();
+        let Some(fact) =
+            snapshot.facts.iter_mut().find(|fact| fact.id == request.correction.fact_id)
+        else {
+            return Err(RuntimeError::not_found(
+                "knowledge_fact_not_found",
+                "knowledge fact does not exist",
+            ));
+        };
+        fact.value = request.correction.corrected_value;
+        fact.updated_at = now;
+        let item = KnowledgeItem {
+            fact_id: fact.id.clone(),
+            kind: memory_fact_kind_label(fact.kind).to_owned(),
+            subject: fact.subject.clone(),
+            summary: fact.value.clone(),
+            stale: fact.invalidated_at.is_some() || fact.invalidated_by.is_some(),
+            updated_at: fact.updated_at.clone(),
+            citations: fact.citations.clone(),
+        };
+        self.stores.write_global_memory(&snapshot)?;
+        Ok(MemorySurfaceKnowledgeCorrectResponse { item })
+    }
+
+    /// Lists registered runtime nodes.
+    pub fn list_nodes(&self, _request: NodeListRequest) -> RuntimeResult<NodeListResponse> {
+        Ok(NodeListResponse { nodes: self.nodes.values().cloned().collect() })
+    }
+
+    /// Reads one runtime node.
+    pub fn read_node(&self, request: NodeReadRequest) -> RuntimeResult<NodeReadResponse> {
+        let node = self
+            .nodes
+            .get(&request.node_id)
+            .cloned()
+            .ok_or_else(|| RuntimeError::not_found("node_not_found", "node does not exist"))?;
+        Ok(NodeReadResponse { node })
+    }
+
+    /// Updates node policy.
+    pub fn update_node_policy(
+        &mut self,
+        request: NodeUpdatePolicyRequest,
+    ) -> RuntimeResult<NodeUpdatePolicyResponse> {
+        let node = self
+            .nodes
+            .get_mut(&request.node_id)
+            .ok_or_else(|| RuntimeError::not_found("node_not_found", "node does not exist"))?;
+        node.policy = request.policy;
+        Ok(NodeUpdatePolicyResponse { node: node.clone() })
+    }
+
+    /// Lists workspace mounts.
+    pub fn list_workspace_mounts(
+        &self,
+        request: WorkspaceMountListRequest,
+    ) -> RuntimeResult<WorkspaceMountListResponse> {
+        let mounts = self
+            .workspace_mounts
+            .values()
+            .filter(|mount| {
+                request.node_id.as_ref().is_none_or(|node_id| &mount.node_id == node_id)
+            })
+            .cloned()
+            .collect();
+        Ok(WorkspaceMountListResponse { mounts })
+    }
+
+    /// Attaches a workspace mount.
+    pub fn attach_workspace_mount(
+        &mut self,
+        request: WorkspaceMountAttachRequest,
+    ) -> RuntimeResult<WorkspaceMountAttachResponse> {
+        if !self.nodes.contains_key(&request.node_id) {
+            return Err(RuntimeError::not_found("node_not_found", "node does not exist"));
+        }
+        let workspace_id =
+            WorkspaceMountId::new(format!("workspace_{}", self.workspace_mounts.len() + 1));
+        let label = request.label.unwrap_or_else(|| request.root_path.clone());
+        let mount = WorkspaceMount {
+            workspace_id: workspace_id.clone(),
+            node_id: request.node_id,
+            root_path: request.root_path,
+            label,
+            permissions: request.permissions,
+        };
+        self.workspace_mounts.insert(workspace_id, mount.clone());
+        Ok(WorkspaceMountAttachResponse { mount })
+    }
+
+    /// Detaches a workspace mount.
+    pub fn detach_workspace_mount(
+        &mut self,
+        request: WorkspaceMountDetachRequest,
+    ) -> RuntimeResult<WorkspaceMountDetachResponse> {
+        if self.workspace_mounts.remove(&request.workspace_id).is_none() {
+            return Err(RuntimeError::not_found(
+                "workspace_mount_not_found",
+                "workspace mount does not exist",
+            ));
+        }
+        Ok(WorkspaceMountDetachResponse { workspace_id: request.workspace_id })
+    }
+
     /// Forks a thread into a new line of work.
     pub fn fork_thread(&mut self, request: ThreadForkRequest) -> RuntimeResult<ThreadForkResponse> {
         let thread = self.thread_manager.fork_thread(&self.stores, &mut self.ids, request)?;
@@ -669,6 +886,8 @@ impl RuntimeCoordinator {
                 thread_id: thread_id.clone(),
                 turn_id: execution_turn_id.clone(),
                 kind,
+                node_id: Some(liz_protocol::NodeId::new("local")),
+                workspace_mount_id: None,
                 summary: artifact_summary,
                 locator,
                 created_at: created_at.clone(),
@@ -706,13 +925,31 @@ impl RuntimeCoordinator {
         input: &str,
         participant: Option<&ParticipantRef>,
     ) -> RuntimeResult<AssembledContext> {
+        self.assemble_context_for_interaction(thread_id, input, participant, None)
+    }
+
+    /// Assembles context for a resolved interaction context.
+    pub fn assemble_context_for_interaction(
+        &self,
+        thread_id: &ThreadId,
+        input: &str,
+        participant: Option<&ParticipantRef>,
+        interaction_context: Option<&InteractionContext>,
+    ) -> RuntimeResult<AssembledContext> {
         let thread = self
             .stores
             .get_thread(thread_id)?
             .ok_or_else(|| RuntimeError::not_found("thread_not_found", "thread does not exist"))?;
         let snapshot = self.stores.read_global_memory()?;
         let recent_entries = self.stores.read_turn_log(thread_id)?;
-        Ok(self.context_assembler.assemble(&snapshot, &thread, &recent_entries, input, participant))
+        Ok(self.context_assembler.assemble(
+            &snapshot,
+            &thread,
+            &recent_entries,
+            input,
+            participant,
+            interaction_context,
+        ))
     }
 
     /// Runs the same foreground compilation helper used by runtime lifecycle boundaries.
@@ -780,11 +1017,13 @@ impl RuntimeCoordinator {
             risk_level: decision.risk_level,
             reason: decision.reason.clone(),
             sandbox_context: Some(format!(
-                "mode={} writable_roots={} network={}",
+                "node=local mode={} writable_roots={} network={}",
                 decision.sandbox_context.filesystem_mode.as_str(),
                 decision.sandbox_context.writable_roots.join(","),
                 decision.sandbox_context.network_access.as_str()
             )),
+            node_id: Some(liz_protocol::NodeId::new("local")),
+            workspace_mount_id: None,
             status: ApprovalStatus::Pending,
         };
 
@@ -852,6 +1091,105 @@ impl RuntimeCoordinator {
     fn next_tool_sequence(&self, thread_id: &ThreadId) -> RuntimeResult<u64> {
         Ok(self.stores.read_turn_log(thread_id)?.len() as u64 + 1)
     }
+}
+
+trait AboutYouUpdateExt {
+    fn into_surface(self) -> AboutYouSurface;
+}
+
+impl AboutYouUpdateExt for liz_protocol::AboutYouUpdate {
+    fn into_surface(self) -> AboutYouSurface {
+        AboutYouSurface { identity_summary: self.identity_summary, items: self.items }
+    }
+}
+
+impl RuntimeCoordinator {
+    fn build_about_you_surface(&self) -> RuntimeResult<AboutYouSurface> {
+        let snapshot = self.stores.read_global_memory()?;
+        let mut items = Vec::new();
+        if let Some(summary) = snapshot.identity_summary.as_ref() {
+            items.push(AboutYouItem {
+                key: "identity_summary".to_owned(),
+                label: "How liz understands you".to_owned(),
+                value: summary.clone(),
+                confirmed: false,
+                source_fact_id: None,
+            });
+        }
+        items.extend(
+            snapshot
+                .facts
+                .iter()
+                .filter(|fact| {
+                    fact.kind == MemoryFactKind::Identity
+                        && fact.invalidated_at.is_none()
+                        && fact.invalidated_by.is_none()
+                })
+                .map(|fact| AboutYouItem {
+                    key: fact.subject.clone(),
+                    label: humanize_key(&fact.subject),
+                    value: fact.value.clone(),
+                    confirmed: false,
+                    source_fact_id: Some(fact.id.clone()),
+                }),
+        );
+        Ok(AboutYouSurface { identity_summary: snapshot.identity_summary, items })
+    }
+}
+
+fn local_node_record() -> NodeRecord {
+    NodeRecord {
+        identity: NodeIdentity {
+            node_id: NodeId::new("local"),
+            display_name: "Local machine".to_owned(),
+            kind: NodeKind::Desktop,
+            owner_device: true,
+        },
+        status: NodeStatus {
+            online: true,
+            last_seen_at: None,
+            app_version: Some(env!("CARGO_PKG_VERSION").to_owned()),
+            os: Some(std::env::consts::OS.to_owned()),
+            hostname: std::env::var("COMPUTERNAME").ok().or_else(|| std::env::var("HOSTNAME").ok()),
+        },
+        capabilities: NodeCapabilities {
+            workspace_tools: true,
+            shell_tools: true,
+            browser_tools: false,
+            web_ui_host: true,
+            notifications: false,
+            max_concurrent_tasks: 1,
+            supported_sandbox_modes: vec![
+                SandboxMode::ReadOnly,
+                SandboxMode::WorkspaceWrite,
+                SandboxMode::DangerFullAccess,
+                SandboxMode::ExternalSandbox,
+            ],
+        },
+        policy: NodePolicy {
+            allowed_roots: Vec::new(),
+            protected_paths: Vec::new(),
+            default_sandbox: SandboxMode::WorkspaceWrite,
+            network_policy: "inherit-runtime".to_owned(),
+            approval_policy: liz_protocol::ApprovalPolicy::OnRequest,
+        },
+    }
+}
+
+fn memory_fact_kind_label(kind: MemoryFactKind) -> &'static str {
+    match kind {
+        MemoryFactKind::Identity => "identity",
+        MemoryFactKind::ActiveState => "active_state",
+        MemoryFactKind::Commitment => "commitment",
+        MemoryFactKind::Decision => "decision",
+        MemoryFactKind::Topic => "topic",
+        MemoryFactKind::ProcedureCandidate => "procedure",
+        MemoryFactKind::Keyword => "keyword",
+    }
+}
+
+fn humanize_key(key: &str) -> String {
+    key.split([':', '_', '-']).filter(|part| !part.is_empty()).collect::<Vec<_>>().join(" ")
 }
 
 impl Default for RuntimeCoordinator {

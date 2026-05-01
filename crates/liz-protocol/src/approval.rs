@@ -1,6 +1,6 @@
 //! Approval resources and approval-related enums.
 
-use crate::ids::{ApprovalId, ThreadId, TurnId};
+use crate::ids::{ApprovalId, NodeId, ThreadId, TurnId, WorkspaceMountId};
 use crate::primitives::RiskLevel;
 use serde::{Deserialize, Serialize};
 
@@ -67,6 +67,12 @@ pub struct ApprovalRequest {
     pub reason: String,
     /// Optional sandbox context shown to the user.
     pub sandbox_context: Option<String>,
+    /// The node where the action will run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<NodeId>,
+    /// The workspace mount affected by the action.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_mount_id: Option<WorkspaceMountId>,
     /// The current lifecycle state of the approval request.
     pub status: ApprovalStatus,
 }
