@@ -60,7 +60,6 @@ impl ThreadManager {
             .ok_or_else(|| RuntimeError::not_found("thread_not_found", "thread does not exist"))?;
 
         thread.status = ThreadStatus::Active;
-        thread.updated_at = IdGenerator::default().now_timestamp();
         stores.put_thread(&thread)?;
         self.sync_active_thread_ids(stores, &thread.id, true)?;
         Ok(thread)

@@ -77,6 +77,7 @@ fn thread_can_start_turn_interrupt_and_resume() {
 
     assert_eq!(resumed.thread.status, ThreadStatus::Active);
     assert_eq!(resumed.thread.workspace_ref, None);
+    assert_eq!(resumed.thread.updated_at, interrupted_thread.updated_at);
     assert_eq!(
         resumed.resume_summary.expect("resume summary should exist").pending_commitments,
         vec!["Resume interrupted work: Implement thread and turn managers".to_owned()]
