@@ -54,7 +54,7 @@ pub use memory::{
 };
 pub use memory_surface::{
     AboutYouItem, AboutYouSurface, AboutYouUpdate, CarryingItem, CarryingSurface,
-    KnowledgeCorrection, KnowledgeItem, KnowledgeSurface,
+    KnowledgeCorrection, KnowledgeItem, KnowledgeSurface, PeopleSurface, PersonBoundary,
 };
 pub use node::{
     NodeCapabilities, NodeIdentity, NodeKind, NodePolicy, NodeRecord, NodeStatus, WorkspaceMount,
@@ -70,7 +70,8 @@ pub use requests::{
     MemorySurfaceCarryingReadRequest, MemorySurfaceKnowledgeCorrectRequest,
     MemorySurfaceKnowledgeListRequest, ModelStatusRequest, NodeHeartbeatRequest, NodeListRequest,
     NodeReadRequest, NodeUpdatePolicyRequest, OpenAiCodexOAuthCompleteRequest,
-    OpenAiCodexOAuthStartRequest, ProviderAuthDeleteRequest, ProviderAuthListRequest,
+    OpenAiCodexOAuthStartRequest, PeopleSurfaceDeleteRequest, PeopleSurfaceReadRequest,
+    PeopleSurfaceUpsertRequest, ProviderAuthDeleteRequest, ProviderAuthListRequest,
     ProviderAuthUpsertRequest, RuntimeConfigGetRequest, RuntimeConfigUpdateRequest,
     ThreadForkRequest, ThreadListRequest, ThreadResumeRequest, ThreadRollbackRequest,
     ThreadStartRequest, TurnCancelRequest, TurnInputKind, TurnStartRequest,
@@ -85,7 +86,8 @@ pub use responses::{
     MemorySurfaceCarryingReadResponse, MemorySurfaceKnowledgeCorrectResponse,
     MemorySurfaceKnowledgeListResponse, ModelStatusResponse, NodeHeartbeatResponse,
     NodeListResponse, NodeReadResponse, NodeUpdatePolicyResponse, OpenAiCodexOAuthCompleteResponse,
-    OpenAiCodexOAuthStartResponse, ProviderAuthDeleteResponse, ProviderAuthListResponse,
+    OpenAiCodexOAuthStartResponse, PeopleSurfaceDeleteResponse, PeopleSurfaceReadResponse,
+    PeopleSurfaceUpsertResponse, ProviderAuthDeleteResponse, ProviderAuthListResponse,
     ProviderAuthUpsertResponse, ResponseError, ResponsePayload, RuntimeConfigResponse,
     ServerResponseEnvelope, SuccessResponseEnvelope, ThreadForkResponse, ThreadListResponse,
     ThreadResumeResponse, ThreadRollbackResponse, ThreadStartResponse, TurnCancelResponse,

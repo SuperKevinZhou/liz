@@ -13,6 +13,7 @@ use crate::memory_surface::{AboutYouUpdate, KnowledgeCorrection};
 use crate::node::{NodePolicy, NodeStatus, WorkspaceMountPermissions};
 use crate::sandbox::ShellSandboxRequest;
 use crate::tool::ToolCallRequest;
+use crate::PersonBoundary;
 use serde::{Deserialize, Serialize};
 
 /// Describes what kind of user input started a turn.
@@ -146,6 +147,15 @@ pub enum ClientRequest {
     /// Corrects a knowledge item.
     #[serde(rename = "memory_surface/knowledge/correct")]
     MemorySurfaceKnowledgeCorrect(MemorySurfaceKnowledgeCorrectRequest),
+    /// Reads known people and disclosure boundaries.
+    #[serde(rename = "people_surface/read")]
+    PeopleSurfaceRead(PeopleSurfaceReadRequest),
+    /// Creates or replaces a relationship boundary.
+    #[serde(rename = "people_surface/upsert")]
+    PeopleSurfaceUpsert(PeopleSurfaceUpsertRequest),
+    /// Deletes a relationship boundary.
+    #[serde(rename = "people_surface/delete")]
+    PeopleSurfaceDelete(PeopleSurfaceDeleteRequest),
     /// Lists registered runtime nodes.
     #[serde(rename = "node/list")]
     NodeList(NodeListRequest),
@@ -492,6 +502,24 @@ pub struct MemorySurfaceKnowledgeListRequest {
 pub struct MemorySurfaceKnowledgeCorrectRequest {
     /// Correction payload.
     pub correction: KnowledgeCorrection,
+}
+
+/// Reads known people and disclosure boundaries.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PeopleSurfaceReadRequest {}
+
+/// Creates or replaces one relationship boundary.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PeopleSurfaceUpsertRequest {
+    /// Replacement boundary.
+    pub person: PersonBoundary,
+}
+
+/// Deletes one relationship boundary.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PeopleSurfaceDeleteRequest {
+    /// Stable actor or participant identifier.
+    pub person_id: String,
 }
 
 /// Lists runtime nodes.

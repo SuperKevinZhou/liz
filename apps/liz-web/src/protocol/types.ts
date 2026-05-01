@@ -94,6 +94,9 @@ export type ClientMethod =
   | "memory_surface/carrying/read"
   | "memory_surface/knowledge/list"
   | "memory_surface/knowledge/correct"
+  | "people_surface/read"
+  | "people_surface/upsert"
+  | "people_surface/delete"
   | "node/list"
   | "node/read"
   | "node/update_policy"
@@ -587,6 +590,55 @@ export interface MemorySurfaceKnowledgeListResponse {
 
 export interface MemorySurfaceKnowledgeCorrectResponse {
   item: KnowledgeItem;
+}
+
+export type TrustLevel = "owner" | "trusted" | "acquaintance" | "stranger";
+
+export interface InfoBoundary {
+  shared_topics: string[];
+  forbidden_topics: string[];
+  share_active_state: boolean;
+  share_commitments: boolean;
+}
+
+export interface PersonBoundary {
+  person_id: string;
+  display_name: string;
+  actor_kind: "human" | "external_agent";
+  trust_level: TrustLevel;
+  shared_topics: string[];
+  forbidden_topics: string[];
+  share_active_state: boolean;
+  share_commitments: boolean;
+  interaction_stance: string;
+  notes: string | null;
+  requires_owner_confirmation: boolean;
+}
+
+export interface PeopleSurface {
+  humans: PersonBoundary[];
+  external_agents: PersonBoundary[];
+  default_stranger_boundary: InfoBoundary;
+}
+
+export interface PeopleSurfaceReadResponse {
+  surface: PeopleSurface;
+}
+
+export interface PeopleSurfaceUpsertRequest {
+  person: PersonBoundary;
+}
+
+export interface PeopleSurfaceUpsertResponse {
+  surface: PeopleSurface;
+}
+
+export interface PeopleSurfaceDeleteRequest {
+  person_id: string;
+}
+
+export interface PeopleSurfaceDeleteResponse {
+  surface: PeopleSurface;
 }
 
 export interface NodeRecord {

@@ -21,7 +21,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { useLizRuntime, type LizRuntime } from "./hooks/useLizRuntime";
 import { loadPreferences, savePreferences, type Preferences } from "./preferences";
-import type { KnowledgeItem, Thread } from "./protocol/types";
+import type { KnowledgeItem, PersonBoundary, Thread } from "./protocol/types";
 import type { TranscriptEntry } from "./state/workbench";
 
 type ViewId = "home" | "people" | "channels" | "devices" | "workspaces" | "settings" | "diagnostics";
@@ -265,9 +265,11 @@ function TopBar({
 function PeopleSurface({ runtime }: { runtime: LizRuntime }) {
   const aboutYou = runtime.state.aboutYou;
   const knowledge = runtime.state.knowledge;
+  const people = runtime.state.people;
   const [identitySummaryDraft, setIdentitySummaryDraft] = useState<string | null>(null);
   const [profileDraft, setProfileDraft] = useState<Record<string, string>>({});
   const [correctionDrafts, setCorrectionDrafts] = useState<Record<string, string>>({});
+  const [personDraft, setPersonDraft] = useState<PersonBoundary>(emptyPersonBoundary());
   const identitySummary = identitySummaryDraft ?? aboutYou?.identity_summary ?? "";
 
   const saveAboutYou = () => {
@@ -296,6 +298,26 @@ function PeopleSurface({ runtime }: { runtime: LizRuntime }) {
     setCorrectionDrafts((current) => ({ ...current, [item.fact_id]: "" }));
   };
 
+  const savePersonBoundary = () => {
+    const personId = personDraft.person_id.trim();
+    const displayName = personDraft.display_name.trim();
+    if (!personId || !displayName) {
+      return;
+    }
+    void runtime.upsertPersonBoundary({
+      ...personDraft,
+      person_id: personId,
+      display_name: displayName,
+      interaction_stance:
+        personDraft.interaction_stance.trim() ||
+        (personDraft.actor_kind === "external_agent" ? "agent_task_scoped" : "bounded_contact"),
+      shared_topics: personDraft.shared_topics.map((topic) => topic.trim()).filter(Boolean),
+      forbidden_topics: personDraft.forbidden_topics.map((topic) => topic.trim()).filter(Boolean),
+      notes: personDraft.notes?.trim() || null,
+    });
+    setPersonDraft(emptyPersonBoundary());
+  };
+
   return (
     <section className="settings-surface control-surface">
       <div className="settings-header">
@@ -303,7 +325,14 @@ function PeopleSurface({ runtime }: { runtime: LizRuntime }) {
           <UserRound size={20} />
           <h2>People</h2>
         </div>
-        <button className="secondary-button" type="button" onClick={() => void runtime.loadOwnerSurfaces()}>
+        <button
+          className="secondary-button"
+          type="button"
+          onClick={() => {
+            void runtime.loadOwnerSurfaces();
+            void runtime.loadPeopleSurface();
+          }}
+        >
           Refresh
         </button>
       </div>
@@ -339,20 +368,115 @@ function PeopleSurface({ runtime }: { runtime: LizRuntime }) {
             Save About You
           </button>
         </section>
-        <section className="settings-section">
+        <section className="settings-section provider-section">
           <p className="eyebrow">Boundaries</p>
-          <div className="setting-row">
-            <span>Owner context</span>
-            <strong>private by default</strong>
+          <div className="provider-form people-boundary-form">
+            <select
+              value={personDraft.actor_kind}
+              aria-label="Actor kind"
+              onChange={(event) =>
+                setPersonDraft((current) => ({
+                  ...current,
+                  actor_kind: event.target.value as PersonBoundary["actor_kind"],
+                }))
+              }
+            >
+              <option value="human">Human</option>
+              <option value="external_agent">External agent</option>
+            </select>
+            <input
+              value={personDraft.person_id}
+              onChange={(event) =>
+                setPersonDraft((current) => ({ ...current, person_id: event.target.value }))
+              }
+              placeholder="Actor id"
+              aria-label="Actor id"
+            />
+            <input
+              value={personDraft.display_name}
+              onChange={(event) =>
+                setPersonDraft((current) => ({ ...current, display_name: event.target.value }))
+              }
+              placeholder="Display name"
+              aria-label="Display name"
+            />
+            <select
+              value={personDraft.trust_level}
+              aria-label="Trust level"
+              onChange={(event) =>
+                setPersonDraft((current) => ({
+                  ...current,
+                  trust_level: event.target.value as PersonBoundary["trust_level"],
+                }))
+              }
+            >
+              <option value="trusted">Trusted</option>
+              <option value="acquaintance">Acquaintance</option>
+              <option value="stranger">Stranger</option>
+            </select>
+            <input
+              value={personDraft.shared_topics.join(", ")}
+              onChange={(event) =>
+                setPersonDraft((current) => ({
+                  ...current,
+                  shared_topics: splitTopics(event.target.value),
+                }))
+              }
+              placeholder="Shared topics"
+              aria-label="Shared topics"
+            />
+            <input
+              value={personDraft.forbidden_topics.join(", ")}
+              onChange={(event) =>
+                setPersonDraft((current) => ({
+                  ...current,
+                  forbidden_topics: splitTopics(event.target.value),
+                }))
+              }
+              placeholder="Forbidden topics"
+              aria-label="Forbidden topics"
+            />
+            <label>
+              <input
+                type="checkbox"
+                checked={personDraft.share_active_state}
+                onChange={(event) =>
+                  setPersonDraft((current) => ({
+                    ...current,
+                    share_active_state: event.target.checked,
+                  }))
+                }
+              />
+              <span>Active state</span>
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={personDraft.share_commitments}
+                onChange={(event) =>
+                  setPersonDraft((current) => ({
+                    ...current,
+                    share_commitments: event.target.checked,
+                  }))
+                }
+              />
+              <span>Commitments</span>
+            </label>
+            <button className="primary-button" type="button" onClick={savePersonBoundary}>
+              Save boundary
+            </button>
           </div>
-          <div className="setting-row">
-            <span>External people</span>
-            <strong>minimum disclosure</strong>
-          </div>
-          <div className="setting-row">
-            <span>External agents</span>
-            <strong>task-scoped only</strong>
-          </div>
+          <PeopleBoundaryList
+            title="Known humans"
+            people={people?.humans ?? []}
+            onDelete={runtime.deletePersonBoundary}
+          />
+          <PeopleBoundaryList
+            title="External agents"
+            people={people?.external_agents ?? []}
+            onDelete={runtime.deletePersonBoundary}
+          />
+          {!people ? <div className="empty-panel">No people boundaries loaded.</div> : null}
         </section>
         <section className="settings-section provider-section">
           <p className="eyebrow">Knowledge / Decisions</p>
@@ -406,6 +530,61 @@ function DevicesSurface({ runtime }: { runtime: LizRuntime }) {
         {runtime.state.nodes.length === 0 ? <div className="empty-panel">No nodes loaded.</div> : null}
       </div>
     </section>
+  );
+}
+
+function PeopleBoundaryList({
+  title,
+  people,
+  onDelete,
+}: {
+  title: string;
+  people: PersonBoundary[];
+  onDelete: (personId: string) => Promise<void>;
+}) {
+  return (
+    <div className="channel-list people-boundary-list">
+      <p className="eyebrow">{title}</p>
+      {people.map((person) => (
+        <article className="channel-row" key={person.person_id}>
+          <div>
+            <span>{person.trust_level}</span>
+            <strong>{person.display_name}</strong>
+            <p>
+              {[
+                person.shared_topics.length
+                  ? `shared: ${person.shared_topics.join(", ")}`
+                  : "no shared topics",
+                person.forbidden_topics.length
+                  ? `forbidden: ${person.forbidden_topics.join(", ")}`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+          </div>
+          <small>
+            {[
+              person.share_active_state ? "active state" : null,
+              person.share_commitments ? "commitments" : null,
+              person.requires_owner_confirmation ? "confirm" : null,
+            ]
+              .filter(Boolean)
+              .join(" / ") || "minimal"}
+          </small>
+          <button
+            className="icon-button"
+            type="button"
+            aria-label={`Delete ${person.display_name}`}
+            title="Delete boundary"
+            onClick={() => void onDelete(person.person_id)}
+          >
+            <Trash2 size={16} />
+          </button>
+        </article>
+      ))}
+      {people.length === 0 ? <div className="empty-panel">No entries.</div> : null}
+    </div>
   );
 }
 
@@ -518,6 +697,26 @@ function WorkspacesSurface({ runtime }: { runtime: LizRuntime }) {
       </div>
     </section>
   );
+}
+
+function emptyPersonBoundary(): PersonBoundary {
+  return {
+    person_id: "",
+    display_name: "",
+    actor_kind: "human",
+    trust_level: "trusted",
+    shared_topics: [],
+    forbidden_topics: [],
+    share_active_state: false,
+    share_commitments: false,
+    interaction_stance: "bounded_contact",
+    notes: null,
+    requires_owner_confirmation: true,
+  };
+}
+
+function splitTopics(value: string): string[] {
+  return value.split(",").map((topic) => topic.trim()).filter(Boolean);
 }
 
 function DiagnosticsSurface({ runtime }: { runtime: LizRuntime }) {

@@ -1,7 +1,7 @@
 //! User-facing memory surfaces that productize identity, active work, and decisions.
 
 use crate::ids::{MemoryFactId, ThreadId};
-use crate::memory::MemoryCitationRef;
+use crate::memory::{InfoBoundary, MemoryCitationRef, TrustLevel};
 use crate::primitives::Timestamp;
 use crate::thread::ThreadStatus;
 use serde::{Deserialize, Serialize};
@@ -101,4 +101,42 @@ pub struct KnowledgeCorrection {
     pub fact_id: MemoryFactId,
     /// Replacement user-facing value.
     pub corrected_value: String,
+}
+
+/// User-facing relationship and disclosure policy for one actor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PersonBoundary {
+    /// Stable actor or participant identifier.
+    pub person_id: String,
+    /// Human-readable display name.
+    pub display_name: String,
+    /// Whether the entry describes a human contact or an external agent.
+    pub actor_kind: String,
+    /// Owner-defined trust level.
+    pub trust_level: TrustLevel,
+    /// Topics explicitly allowed for this actor.
+    pub shared_topics: Vec<String>,
+    /// Topics that must not be disclosed.
+    pub forbidden_topics: Vec<String>,
+    /// Whether active work state can be shared.
+    pub share_active_state: bool,
+    /// Whether pending commitments can be shared.
+    pub share_commitments: bool,
+    /// Short stance label used by prompt rendering.
+    pub interaction_stance: String,
+    /// Optional owner-authored notes.
+    pub notes: Option<String>,
+    /// Whether owner confirmation is expected before sharing task status.
+    pub requires_owner_confirmation: bool,
+}
+
+/// The owner-facing people and disclosure surface.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PeopleSurface {
+    /// Known human contacts.
+    pub humans: Vec<PersonBoundary>,
+    /// Known external agents or machine actors.
+    pub external_agents: Vec<PersonBoundary>,
+    /// Default policy for unknown actors.
+    pub default_stranger_boundary: InfoBoundary,
 }

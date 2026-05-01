@@ -11,6 +11,12 @@ import type {
   MemorySurfaceKnowledgeListResponse,
   ConnectionState,
   KnowledgeCorrection,
+  PeopleSurfaceDeleteRequest,
+  PeopleSurfaceDeleteResponse,
+  PeopleSurfaceReadResponse,
+  PeopleSurfaceUpsertRequest,
+  PeopleSurfaceUpsertResponse,
+  PersonBoundary,
   MemoryCompileNowRequest,
   MemoryCompileNowResponse,
   MemoryListTopicsRequest,
@@ -100,8 +106,11 @@ export interface LizRuntime {
   openMemoryEvidence: (request: MemoryOpenEvidenceRequest) => Promise<void>;
   loadRuntimeState: () => Promise<void>;
   loadOwnerSurfaces: () => Promise<void>;
+  loadPeopleSurface: () => Promise<void>;
   updateAboutYou: (update: AboutYouUpdate) => Promise<void>;
   correctKnowledge: (correction: KnowledgeCorrection) => Promise<void>;
+  upsertPersonBoundary: (person: PersonBoundary) => Promise<void>;
+  deletePersonBoundary: (personId: string) => Promise<void>;
   updateRuntimeConfig: (request: RuntimeConfigUpdateRequest) => Promise<void>;
   upsertProviderProfile: (profile: ProviderAuthProfile) => Promise<void>;
   deleteProviderProfile: (profileId: string) => Promise<void>;
@@ -435,6 +444,14 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
     dispatch({ type: "knowledge_set", surface: knowledge.data.surface });
   }, [request]);
 
+  const loadPeopleSurface = useCallback(async () => {
+    const response = await request<PeopleSurfaceReadResponse, Record<string, never>>(
+      "people_surface/read",
+      {},
+    );
+    dispatch({ type: "people_set", surface: response.data.surface });
+  }, [request]);
+
   const updateAboutYou = useCallback(
     async (update: AboutYouUpdate) => {
       const response = await request<MemorySurfaceAboutYouUpdateResponse, { update: AboutYouUpdate }>(
@@ -453,6 +470,28 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
         { correction: KnowledgeCorrection }
       >("memory_surface/knowledge/correct", { correction });
       dispatch({ type: "knowledge_item_upsert", item: response.data.item });
+    },
+    [request],
+  );
+
+  const upsertPersonBoundary = useCallback(
+    async (person: PersonBoundary) => {
+      const response = await request<PeopleSurfaceUpsertResponse, PeopleSurfaceUpsertRequest>(
+        "people_surface/upsert",
+        { person },
+      );
+      dispatch({ type: "people_set", surface: response.data.surface });
+    },
+    [request],
+  );
+
+  const deletePersonBoundary = useCallback(
+    async (personId: string) => {
+      const response = await request<PeopleSurfaceDeleteResponse, PeopleSurfaceDeleteRequest>(
+        "people_surface/delete",
+        { person_id: personId },
+      );
+      dispatch({ type: "people_set", surface: response.data.surface });
     },
     [request],
   );
@@ -556,8 +595,11 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
       openMemoryEvidence,
       loadRuntimeState,
       loadOwnerSurfaces,
+      loadPeopleSurface,
       updateAboutYou,
       correctKnowledge,
+      upsertPersonBoundary,
+      deletePersonBoundary,
       updateRuntimeConfig,
       upsertProviderProfile,
       deleteProviderProfile,
@@ -580,6 +622,7 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
       listMemoryTopics,
       loadRuntimeState,
       loadOwnerSurfaces,
+      loadPeopleSurface,
       memory,
       openMemoryEvidence,
       readMemoryWakeup,
@@ -588,8 +631,10 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
       respondToApproval,
       searchMemory,
       correctKnowledge,
+      deletePersonBoundary,
       updateRuntimeConfig,
       updateAboutYou,
+      upsertPersonBoundary,
       upsertProviderProfile,
       approvals,
       runtime,

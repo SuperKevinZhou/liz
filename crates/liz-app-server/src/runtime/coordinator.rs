@@ -28,7 +28,8 @@ use liz_protocol::requests::{
     MemorySurfaceCarryingReadRequest, MemorySurfaceKnowledgeCorrectRequest,
     MemorySurfaceKnowledgeListRequest, MiniMaxOAuthPollRequest, MiniMaxOAuthStartRequest,
     NodeHeartbeatRequest, NodeListRequest, NodeReadRequest, NodeUpdatePolicyRequest,
-    OpenAiCodexOAuthCompleteRequest, OpenAiCodexOAuthStartRequest, ProviderAuthDeleteRequest,
+    OpenAiCodexOAuthCompleteRequest, OpenAiCodexOAuthStartRequest, PeopleSurfaceDeleteRequest,
+    PeopleSurfaceReadRequest, PeopleSurfaceUpsertRequest, ProviderAuthDeleteRequest,
     ProviderAuthListRequest, ProviderAuthUpsertRequest, ThreadForkRequest, ThreadListRequest,
     ThreadResumeRequest, ThreadStartRequest, TurnCancelRequest, TurnStartRequest,
     WorkspaceMountAttachRequest, WorkspaceMountDetachRequest, WorkspaceMountListRequest,
@@ -42,7 +43,8 @@ use liz_protocol::responses::{
     MemorySurfaceCarryingReadResponse, MemorySurfaceKnowledgeCorrectResponse,
     MemorySurfaceKnowledgeListResponse, MiniMaxOAuthPollResponse, MiniMaxOAuthStartResponse,
     NodeHeartbeatResponse, NodeListResponse, NodeReadResponse, NodeUpdatePolicyResponse,
-    OpenAiCodexOAuthCompleteResponse, OpenAiCodexOAuthStartResponse, ProviderAuthDeleteResponse,
+    OpenAiCodexOAuthCompleteResponse, OpenAiCodexOAuthStartResponse, PeopleSurfaceDeleteResponse,
+    PeopleSurfaceReadResponse, PeopleSurfaceUpsertResponse, ProviderAuthDeleteResponse,
     ProviderAuthListResponse, ProviderAuthUpsertResponse, ThreadForkResponse, ThreadListResponse,
     ThreadResumeResponse, ThreadStartResponse, TurnCancelResponse, TurnStartResponse,
     WorkspaceMountAttachResponse, WorkspaceMountDetachResponse, WorkspaceMountListResponse,
@@ -51,14 +53,15 @@ use liz_protocol::InteractionContext;
 use liz_protocol::{
     AboutYouItem, AboutYouSurface, ActorKind, ActorRef, Audience, AudienceVisibility,
     AuthorityScope, CarryingItem, CarryingSurface, DisclosurePolicy, IngressRef, KnowledgeItem,
-    KnowledgeSurface, Provenance,
+    KnowledgeSurface, PeopleSurface, PersonBoundary, Provenance,
 };
 use liz_protocol::{
     ApprovalDecision, ApprovalRequest, ApprovalStatus, ArtifactKind, ArtifactRef, Checkpoint,
     CheckpointScope, GitHubCopilotDeviceCode, GitHubCopilotDevicePollStatus, GitLabOAuthStart,
-    MemoryFactKind, MiniMaxOAuthDeviceCode, MiniMaxOAuthPollStatus, NodeId, OpenAiCodexOAuthStart,
-    ParticipantRef, ProviderAuthProfile, ProviderCredential, Thread, ThreadId, Turn, TurnId,
-    WorkspaceMount, WorkspaceMountId,
+    InfoBoundary, MemoryFactKind, MiniMaxOAuthDeviceCode, MiniMaxOAuthPollStatus, NodeId,
+    OpenAiCodexOAuthStart, ParticipantRef, ProviderAuthProfile, ProviderCredential,
+    RelationshipEntry, Thread, ThreadId, TrustLevel, Turn, TurnId, WorkspaceMount,
+    WorkspaceMountId,
 };
 use std::collections::HashMap;
 
@@ -696,6 +699,55 @@ impl RuntimeCoordinator {
         Ok(MemorySurfaceKnowledgeCorrectResponse { item })
     }
 
+    /// Reads known people and disclosure boundaries.
+    pub fn read_people_surface(
+        &self,
+        _request: PeopleSurfaceReadRequest,
+    ) -> RuntimeResult<PeopleSurfaceReadResponse> {
+        let snapshot = self.stores.read_global_memory()?;
+        Ok(PeopleSurfaceReadResponse { surface: build_people_surface(&snapshot) })
+    }
+
+    /// Creates or replaces one relationship boundary.
+    pub fn upsert_people_surface(
+        &self,
+        request: PeopleSurfaceUpsertRequest,
+    ) -> RuntimeResult<PeopleSurfaceUpsertResponse> {
+        let mut snapshot = self.stores.read_global_memory()?;
+        validate_person_boundary(&request.person)?;
+        let entry = relationship_entry_from_boundary(request.person);
+        if let Some(existing) = snapshot
+            .relationships
+            .iter_mut()
+            .find(|relationship| relationship.person_id == entry.person_id)
+        {
+            *existing = entry;
+        } else {
+            snapshot.relationships.push(entry);
+        }
+        snapshot.relationships.sort_by(|left, right| left.display_name.cmp(&right.display_name));
+        self.stores.write_global_memory(&snapshot)?;
+        Ok(PeopleSurfaceUpsertResponse { surface: build_people_surface(&snapshot) })
+    }
+
+    /// Deletes one relationship boundary.
+    pub fn delete_people_surface(
+        &self,
+        request: PeopleSurfaceDeleteRequest,
+    ) -> RuntimeResult<PeopleSurfaceDeleteResponse> {
+        let mut snapshot = self.stores.read_global_memory()?;
+        let original_len = snapshot.relationships.len();
+        snapshot.relationships.retain(|relationship| relationship.person_id != request.person_id);
+        if snapshot.relationships.len() == original_len {
+            return Err(RuntimeError::not_found(
+                "people_boundary_not_found",
+                "people boundary does not exist",
+            ));
+        }
+        self.stores.write_global_memory(&snapshot)?;
+        Ok(PeopleSurfaceDeleteResponse { surface: build_people_surface(&snapshot) })
+    }
+
     /// Lists registered runtime nodes.
     pub fn list_nodes(&self, _request: NodeListRequest) -> RuntimeResult<NodeListResponse> {
         Ok(NodeListResponse { nodes: self.node_registry.list_nodes() })
@@ -1227,6 +1279,97 @@ fn memory_fact_kind_label(kind: MemoryFactKind) -> &'static str {
 
 fn humanize_key(key: &str) -> String {
     key.split([':', '_', '-']).filter(|part| !part.is_empty()).collect::<Vec<_>>().join(" ")
+}
+
+fn build_people_surface(snapshot: &crate::storage::GlobalMemorySnapshot) -> PeopleSurface {
+    let mut humans = Vec::new();
+    let mut external_agents = Vec::new();
+    for relationship in snapshot.relationships.iter().cloned() {
+        let boundary = person_boundary_from_relationship(relationship);
+        if boundary.actor_kind == "external_agent" {
+            external_agents.push(boundary);
+        } else {
+            humans.push(boundary);
+        }
+    }
+    humans.sort_by(|left, right| left.display_name.cmp(&right.display_name));
+    external_agents.sort_by(|left, right| left.display_name.cmp(&right.display_name));
+    PeopleSurface {
+        humans,
+        external_agents,
+        default_stranger_boundary: snapshot.default_stranger_boundary.clone(),
+    }
+}
+
+fn person_boundary_from_relationship(relationship: RelationshipEntry) -> PersonBoundary {
+    let actor_kind = if relationship.interaction_stance.contains("agent")
+        || relationship.person_id.starts_with("agent:")
+    {
+        "external_agent"
+    } else {
+        "human"
+    }
+    .to_owned();
+    PersonBoundary {
+        person_id: relationship.person_id,
+        display_name: relationship.display_name,
+        actor_kind,
+        trust_level: relationship.trust_level,
+        shared_topics: relationship.info_boundary.shared_topics,
+        forbidden_topics: relationship.info_boundary.forbidden_topics,
+        share_active_state: relationship.info_boundary.share_active_state,
+        share_commitments: relationship.info_boundary.share_commitments,
+        requires_owner_confirmation: !matches!(relationship.trust_level, TrustLevel::Owner),
+        interaction_stance: relationship.interaction_stance,
+        notes: relationship.notes,
+    }
+}
+
+fn relationship_entry_from_boundary(person: PersonBoundary) -> RelationshipEntry {
+    let interaction_stance = if person.interaction_stance.trim().is_empty() {
+        if person.actor_kind == "external_agent" {
+            "agent_task_scoped".to_owned()
+        } else {
+            "bounded_contact".to_owned()
+        }
+    } else {
+        person.interaction_stance
+    };
+    RelationshipEntry {
+        person_id: person.person_id,
+        display_name: person.display_name,
+        trust_level: person.trust_level,
+        info_boundary: InfoBoundary {
+            shared_topics: person.shared_topics,
+            forbidden_topics: person.forbidden_topics,
+            share_active_state: person.share_active_state,
+            share_commitments: person.share_commitments,
+        },
+        interaction_stance,
+        notes: person.notes.filter(|notes| !notes.trim().is_empty()),
+    }
+}
+
+fn validate_person_boundary(person: &PersonBoundary) -> RuntimeResult<()> {
+    if person.person_id.trim().is_empty() {
+        return Err(RuntimeError::invalid_state(
+            "people_boundary_id_required",
+            "people boundary id must not be empty",
+        ));
+    }
+    if person.display_name.trim().is_empty() {
+        return Err(RuntimeError::invalid_state(
+            "people_boundary_display_name_required",
+            "people boundary display name must not be empty",
+        ));
+    }
+    if person.actor_kind != "human" && person.actor_kind != "external_agent" {
+        return Err(RuntimeError::invalid_state(
+            "people_boundary_actor_kind_invalid",
+            "people boundary actor kind must be human or external_agent",
+        ));
+    }
+    Ok(())
 }
 
 impl Default for RuntimeCoordinator {

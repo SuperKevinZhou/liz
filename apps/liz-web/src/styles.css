@@ -894,6 +894,23 @@ button:disabled {
   min-width: 0;
 }
 
+.people-boundary-form {
+  grid-template-columns: 140px repeat(3, minmax(120px, 1fr));
+  align-items: center;
+}
+
+.people-boundary-form label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-1);
+  font-size: 12px;
+}
+
+.people-boundary-list {
+  margin-top: 14px;
+}
+
 .channel-row > div {
   min-width: 0;
 }

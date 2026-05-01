@@ -10,6 +10,7 @@ import type {
   AboutYouSurface,
   CarryingSurface,
   KnowledgeSurface,
+  PeopleSurface,
   NodeRecord,
   WorkspaceMount,
   MemorySessionEntry,
@@ -121,6 +122,7 @@ export interface WorkbenchState {
   aboutYou: AboutYouSurface | null;
   carrying: CarryingSurface | null;
   knowledge: KnowledgeSurface | null;
+  people: PeopleSurface | null;
   nodes: NodeRecord[];
   workspaceMounts: WorkspaceMount[];
   resumeByThread: Record<ThreadId, ResumePanel>;
@@ -168,6 +170,7 @@ export type WorkbenchAction =
   | { type: "carrying_set"; surface: CarryingSurface }
   | { type: "knowledge_set"; surface: KnowledgeSurface }
   | { type: "knowledge_item_upsert"; item: KnowledgeSurface["items"][number] }
+  | { type: "people_set"; surface: PeopleSurface }
   | { type: "nodes_set"; nodes: NodeRecord[] }
   | { type: "workspace_mounts_set"; mounts: WorkspaceMount[] }
   | { type: "runtime_config_set"; config: RuntimeConfigResponse }
@@ -190,6 +193,7 @@ export const initialWorkbenchState: WorkbenchState = {
   aboutYou: null,
   carrying: null,
   knowledge: null,
+  people: null,
   nodes: [],
   workspaceMounts: [],
   resumeByThread: {},
@@ -391,6 +395,9 @@ export const workbenchReducer = (
           ],
         },
       };
+
+    case "people_set":
+      return { ...state, people: action.surface };
 
     case "nodes_set":
       return { ...state, nodes: action.nodes };

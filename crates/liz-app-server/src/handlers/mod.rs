@@ -325,6 +325,15 @@ pub fn handle_request(
         ClientRequest::MemorySurfaceKnowledgeCorrect(request) => runtime
             .correct_knowledge_surface(request)
             .map(|response| (ResponsePayload::MemorySurfaceKnowledgeCorrect(response), Vec::new())),
+        ClientRequest::PeopleSurfaceRead(request) => runtime
+            .read_people_surface(request)
+            .map(|response| (ResponsePayload::PeopleSurfaceRead(response), Vec::new())),
+        ClientRequest::PeopleSurfaceUpsert(request) => runtime
+            .upsert_people_surface(request)
+            .map(|response| (ResponsePayload::PeopleSurfaceUpsert(response), Vec::new())),
+        ClientRequest::PeopleSurfaceDelete(request) => runtime
+            .delete_people_surface(request)
+            .map(|response| (ResponsePayload::PeopleSurfaceDelete(response), Vec::new())),
         ClientRequest::NodeList(request) => runtime
             .list_nodes(request)
             .map(|response| (ResponsePayload::NodeList(response), Vec::new())),

@@ -14,7 +14,9 @@ use crate::memory::{
     MemorySessionView, MemoryTopicSummary, MemoryWakeup, RecentConversationWakeupView,
     ResumeSummary,
 };
-use crate::memory_surface::{AboutYouSurface, CarryingSurface, KnowledgeItem, KnowledgeSurface};
+use crate::memory_surface::{
+    AboutYouSurface, CarryingSurface, KnowledgeItem, KnowledgeSurface, PeopleSurface,
+};
 use crate::node::{NodeRecord, WorkspaceMount};
 use crate::sandbox::ShellSandboxSummary;
 use crate::thread::Thread;
@@ -172,6 +174,15 @@ pub enum ResponsePayload {
     /// Acknowledges `memory_surface/knowledge/correct`.
     #[serde(rename = "memory_surface/knowledge/correct")]
     MemorySurfaceKnowledgeCorrect(MemorySurfaceKnowledgeCorrectResponse),
+    /// Acknowledges `people_surface/read`.
+    #[serde(rename = "people_surface/read")]
+    PeopleSurfaceRead(PeopleSurfaceReadResponse),
+    /// Acknowledges `people_surface/upsert`.
+    #[serde(rename = "people_surface/upsert")]
+    PeopleSurfaceUpsert(PeopleSurfaceUpsertResponse),
+    /// Acknowledges `people_surface/delete`.
+    #[serde(rename = "people_surface/delete")]
+    PeopleSurfaceDelete(PeopleSurfaceDeleteResponse),
     /// Acknowledges `node/list`.
     #[serde(rename = "node/list")]
     NodeList(NodeListResponse),
@@ -464,6 +475,27 @@ pub struct MemorySurfaceKnowledgeListResponse {
 pub struct MemorySurfaceKnowledgeCorrectResponse {
     /// The corrected knowledge item.
     pub item: KnowledgeItem,
+}
+
+/// The response payload for `people_surface/read`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PeopleSurfaceReadResponse {
+    /// The owner-facing people surface.
+    pub surface: PeopleSurface,
+}
+
+/// The response payload for `people_surface/upsert`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PeopleSurfaceUpsertResponse {
+    /// The updated owner-facing people surface.
+    pub surface: PeopleSurface,
+}
+
+/// The response payload for `people_surface/delete`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PeopleSurfaceDeleteResponse {
+    /// The updated owner-facing people surface.
+    pub surface: PeopleSurface,
 }
 
 /// The response payload for `node/list`.
