@@ -23,8 +23,10 @@ import type {
 import {
   activeRuntime,
   activeThread,
+  activeToolCalls,
   activeTranscript,
   initialWorkbenchState,
+  selectedToolCall,
   workbenchReducer,
 } from "../state/workbench";
 import type { Preferences } from "../preferences";
@@ -36,6 +38,9 @@ export interface LizRuntime {
   activeThread: Thread | null;
   activeTranscript: ReturnType<typeof activeTranscript>;
   activeRuntime: ReturnType<typeof activeRuntime>;
+  activeToolCalls: ReturnType<typeof activeToolCalls>;
+  selectedToolCall: ReturnType<typeof selectedToolCall>;
+  selectToolCall: (callId: string | null) => void;
   connect: () => void;
   close: () => void;
   refreshThreads: () => Promise<void>;
@@ -88,6 +93,8 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
   const currentThread = activeThread(state);
   const transcript = activeTranscript(state);
   const runtime = activeRuntime(state);
+  const toolCalls = activeToolCalls(state);
+  const selectedTool = selectedToolCall(state);
 
   const connect = useCallback(() => {
     setError(null);
@@ -232,6 +239,10 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
     [request],
   );
 
+  const selectTool = useCallback((callId: string | null) => {
+    dispatch({ type: "tool_selected", callId });
+  }, []);
+
   return useMemo(
     () => ({
       connectionState,
@@ -240,6 +251,9 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
       activeThread: currentThread,
       activeTranscript: transcript,
       activeRuntime: runtime,
+      activeToolCalls: toolCalls,
+      selectedToolCall: selectedTool,
+      selectToolCall: selectTool,
       connect,
       close,
       refreshThreads,
@@ -261,11 +275,14 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
       refreshThreads,
       respondToApproval,
       runtime,
+      selectedTool,
+      selectTool,
       setActiveThread,
       startThread,
       startTurn,
       state,
       transcript,
+      toolCalls,
     ],
   );
 };

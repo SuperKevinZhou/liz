@@ -407,8 +407,28 @@ button {
 
 .tool-line {
   display: flex;
+  align-items: flex-start;
   gap: 10px;
+  text-align: left;
   color: var(--tool);
+}
+
+.tool-timeline {
+  display: grid;
+  gap: 10px;
+}
+
+.tool-line span {
+  margin-left: auto;
+  color: var(--ink-2);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.tool-line.failed,
+.tool-line.high,
+.tool-line.critical {
+  color: var(--danger);
 }
 
 .composer {
@@ -458,6 +478,32 @@ button {
   min-height: 72px;
   resize: vertical;
   color: var(--ink-0);
+}
+
+.inspector-code {
+  max-height: 220px;
+  overflow: auto;
+  padding: 10px;
+  color: var(--ink-0);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.48);
+}
+
+.artifact-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.artifact-list span {
+  padding: 4px 7px;
+  color: var(--tool);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 11px;
 }
 
 .lined-list {

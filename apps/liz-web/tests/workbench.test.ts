@@ -1,5 +1,6 @@
 import {
   activeTranscript,
+  activeToolCalls,
   initialWorkbenchState,
   workbenchReducer,
 } from "../src/state/workbench";
@@ -75,6 +76,54 @@ describe("workbench reducer", () => {
     });
 
     expect(state.threads.map((item) => item.id)).toEqual(["thread_03", "thread_02"]);
+  });
+
+  it("groups tool lifecycle and executor output by call", () => {
+    let state = workbenchReducer(initialWorkbenchState, {
+      type: "threads_loaded",
+      threads: [thread],
+    });
+    state = workbenchReducer(state, {
+      type: "server_event",
+      event: event("tool_call_started", {
+        call_id: "call_01",
+        tool_name: "shell",
+        summary: "Run tests",
+      }),
+    });
+    state = workbenchReducer(state, {
+      type: "server_event",
+      event: event("tool_call_committed", {
+        call_id: "call_01",
+        tool_name: "shell",
+        arguments_summary: "npm test",
+        risk_hint: "low",
+      }),
+    });
+    state = workbenchReducer(state, {
+      type: "server_event",
+      event: event("executor_output_chunk", {
+        executor_task_id: "exec_01",
+        stream: "stdout",
+        chunk: "passed",
+      }),
+    });
+    state = workbenchReducer(state, {
+      type: "server_event",
+      event: event("tool_completed", {
+        tool_name: "shell",
+        summary: "Tests passed",
+        artifact_ids: ["artifact_01"],
+      }),
+    });
+
+    expect(activeToolCalls(state)[0]).toMatchObject({
+      callId: "call_01",
+      status: "completed",
+      summary: "Tests passed",
+      output: [{ chunk: "passed" }],
+      artifactIds: ["artifact_01"],
+    });
   });
 });
 

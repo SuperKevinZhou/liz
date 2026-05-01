@@ -285,3 +285,40 @@ export interface AssistantChunkEventPayload {
 export interface AssistantCompletedEventPayload {
   message: string;
 }
+
+export interface ToolCallStartedEventPayload {
+  call_id: string;
+  tool_name: string;
+  summary: string;
+}
+
+export interface ToolCallUpdatedEventPayload {
+  call_id: string;
+  tool_name: string;
+  delta_summary: string;
+  preview: string | null;
+}
+
+export interface ToolCallCommittedEventPayload {
+  call_id: string;
+  tool_name: string;
+  arguments_summary: string;
+  risk_hint: "low" | "medium" | "high" | "critical" | null;
+}
+
+export interface ToolCompletedEventPayload {
+  tool_name: string;
+  summary: string;
+  artifact_ids: ArtifactId[];
+}
+
+export interface ToolFailedEventPayload {
+  tool_name: string;
+  summary: string;
+}
+
+export interface ExecutorOutputChunkEventPayload {
+  executor_task_id: string;
+  stream: "stdout" | "stderr";
+  chunk: string;
+}

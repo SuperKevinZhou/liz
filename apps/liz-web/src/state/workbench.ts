@@ -5,10 +5,16 @@ import type {
   Thread,
   ThreadEventPayload,
   ThreadId,
+  ToolCallCommittedEventPayload,
+  ToolCallStartedEventPayload,
+  ToolCallUpdatedEventPayload,
+  ToolCompletedEventPayload,
+  ToolFailedEventPayload,
   Turn,
   TurnEventPayload,
   TurnFailedEventPayload,
   TurnId,
+  ExecutorOutputChunkEventPayload,
 } from "../protocol/types";
 
 export type TranscriptEntry =
@@ -45,11 +51,35 @@ export interface ThreadRuntime {
   lastError: string | null;
 }
 
+export interface ToolOutputChunk {
+  executorTaskId: string;
+  stream: "stdout" | "stderr";
+  chunk: string;
+}
+
+export interface ToolCallProjection {
+  callId: string;
+  threadId: ThreadId;
+  turnId: TurnId | null;
+  toolName: string;
+  summary: string;
+  status: "forming" | "committed" | "completed" | "failed";
+  argumentsSummary: string | null;
+  preview: string | null;
+  riskHint: "low" | "medium" | "high" | "critical" | null;
+  artifactIds: string[];
+  output: ToolOutputChunk[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface WorkbenchState {
   threads: Thread[];
   activeThreadId: ThreadId | null;
   transcriptByThread: Record<ThreadId, TranscriptEntry[]>;
   runtimeByThread: Record<ThreadId, ThreadRuntime>;
+  toolCallsByThread: Record<ThreadId, ToolCallProjection[]>;
+  selectedToolCallId: string | null;
 }
 
 export type WorkbenchAction =
@@ -60,13 +90,16 @@ export type WorkbenchAction =
   | { type: "turn_started"; turn: Turn }
   | { type: "server_event"; event: ServerEvent }
   | { type: "resume_summary_added"; threadId: ThreadId; content: string; createdAt: string }
-  | { type: "thread_error"; threadId: ThreadId; message: string };
+  | { type: "thread_error"; threadId: ThreadId; message: string }
+  | { type: "tool_selected"; callId: string | null };
 
 export const initialWorkbenchState: WorkbenchState = {
   threads: [],
   activeThreadId: null,
   transcriptByThread: {},
   runtimeByThread: {},
+  toolCallsByThread: {},
+  selectedToolCallId: null,
 };
 
 export const workbenchReducer = (
@@ -170,6 +203,12 @@ export const workbenchReducer = (
           tone: "error",
         },
       );
+
+    case "tool_selected":
+      return {
+        ...state,
+        selectedToolCallId: action.callId,
+      };
   }
 };
 
@@ -183,6 +222,14 @@ export const activeRuntime = (state: WorkbenchState) =>
   state.activeThreadId
     ? (state.runtimeByThread[state.activeThreadId] ?? { activeTurnId: null, lastError: null })
     : { activeTurnId: null, lastError: null };
+
+export const activeToolCalls = (state: WorkbenchState) =>
+  state.activeThreadId ? (state.toolCallsByThread[state.activeThreadId] ?? []) : [];
+
+export const selectedToolCall = (state: WorkbenchState) => {
+  const calls = Object.values(state.toolCallsByThread).flat();
+  return calls.find((call) => call.callId === state.selectedToolCallId) ?? null;
+};
 
 const projectServerEvent = (state: WorkbenchState, event: ServerEvent): WorkbenchState => {
   switch (event.event_type) {
@@ -217,6 +264,89 @@ const projectServerEvent = (state: WorkbenchState, event: ServerEvent): Workbenc
 
     case "turn_failed":
       return failTurn(state, event.payload as TurnFailedEventPayload);
+
+    case "tool_call_started":
+      return upsertToolCall(state, event.thread_id, {
+        callId: (event.payload as ToolCallStartedEventPayload).call_id,
+        threadId: event.thread_id,
+        turnId: event.turn_id,
+        toolName: (event.payload as ToolCallStartedEventPayload).tool_name,
+        summary: (event.payload as ToolCallStartedEventPayload).summary,
+        status: "forming",
+        argumentsSummary: null,
+        preview: null,
+        riskHint: null,
+        artifactIds: [],
+        output: [],
+        createdAt: event.created_at,
+        updatedAt: event.created_at,
+      });
+
+    case "tool_call_updated": {
+      const payload = event.payload as ToolCallUpdatedEventPayload;
+      return updateToolCall(state, event.thread_id, payload.call_id, (call) => ({
+        ...call,
+        toolName: payload.tool_name,
+        summary: payload.delta_summary,
+        preview: payload.preview,
+        updatedAt: event.created_at,
+      }));
+    }
+
+    case "tool_call_committed": {
+      const payload = event.payload as ToolCallCommittedEventPayload;
+      return updateToolCall(state, event.thread_id, payload.call_id, (call) => ({
+        ...call,
+        toolName: payload.tool_name,
+        status: "committed",
+        argumentsSummary: payload.arguments_summary,
+        riskHint: payload.risk_hint,
+        updatedAt: event.created_at,
+      }));
+    }
+
+    case "tool_completed": {
+      const payload = event.payload as ToolCompletedEventPayload;
+      const callId = resolveToolCallId(state, event.thread_id, event.turn_id, payload.tool_name);
+      return updateToolCall(state, event.thread_id, callId, (call) => ({
+        ...call,
+        status: "completed",
+        summary: payload.summary,
+        artifactIds: payload.artifact_ids,
+        updatedAt: event.created_at,
+      }));
+    }
+
+    case "tool_failed": {
+      const payload = event.payload as ToolFailedEventPayload;
+      const callId = resolveToolCallId(state, event.thread_id, event.turn_id, payload.tool_name);
+      return updateToolCall(state, event.thread_id, callId, (call) => ({
+        ...call,
+        status: "failed",
+        summary: payload.summary,
+        updatedAt: event.created_at,
+      }));
+    }
+
+    case "executor_output_chunk": {
+      const payload = event.payload as ExecutorOutputChunkEventPayload;
+      const callId = resolveLatestToolCallId(state, event.thread_id, event.turn_id);
+      if (!callId) {
+        return state;
+      }
+      return updateToolCall(state, event.thread_id, callId, (call) => ({
+        ...call,
+        output: [
+          ...call.output,
+          {
+            executorTaskId: payload.executor_task_id,
+            stream: payload.stream,
+            chunk: payload.chunk,
+          },
+        ],
+        updatedAt: event.created_at,
+      }));
+    }
 
     default:
       return state;
@@ -347,3 +477,75 @@ const upsertThread = (threads: Thread[], thread: Thread) =>
 
 const sortThreads = (threads: Thread[]) =>
   [...threads].sort((left, right) => right.updated_at.localeCompare(left.updated_at));
+
+const upsertToolCall = (
+  state: WorkbenchState,
+  threadId: ThreadId,
+  toolCall: ToolCallProjection,
+): WorkbenchState => {
+  const calls = state.toolCallsByThread[threadId] ?? [];
+  return {
+    ...state,
+    selectedToolCallId: state.selectedToolCallId ?? toolCall.callId,
+    toolCallsByThread: {
+      ...state.toolCallsByThread,
+      [threadId]: [
+        ...calls.filter((call) => call.callId !== toolCall.callId),
+        calls.find((call) => call.callId === toolCall.callId)
+          ? { ...calls.find((call) => call.callId === toolCall.callId)!, ...toolCall }
+          : toolCall,
+      ].sort((left, right) => left.createdAt.localeCompare(right.createdAt)),
+    },
+  };
+};
+
+const updateToolCall = (
+  state: WorkbenchState,
+  threadId: ThreadId,
+  callId: string | null,
+  update: (toolCall: ToolCallProjection) => ToolCallProjection,
+): WorkbenchState => {
+  if (!callId) {
+    return state;
+  }
+
+  const calls = state.toolCallsByThread[threadId] ?? [];
+  return {
+    ...state,
+    toolCallsByThread: {
+      ...state.toolCallsByThread,
+      [threadId]: calls.map((call) => (call.callId === callId ? update(call) : call)),
+    },
+  };
+};
+
+const resolveToolCallId = (
+  state: WorkbenchState,
+  threadId: ThreadId,
+  turnId: TurnId | null,
+  toolName: string,
+) => {
+  const calls = state.toolCallsByThread[threadId] ?? [];
+  return [...calls]
+    .reverse()
+    .find(
+      (call) =>
+        call.toolName === toolName &&
+        call.turnId === turnId &&
+        (call.status === "forming" || call.status === "committed"),
+    )?.callId ?? null;
+};
+
+const resolveLatestToolCallId = (
+  state: WorkbenchState,
+  threadId: ThreadId,
+  turnId: TurnId | null,
+) => {
+  const calls = state.toolCallsByThread[threadId] ?? [];
+  return [...calls]
+    .reverse()
+    .find(
+      (call) =>
+        call.turnId === turnId && (call.status === "forming" || call.status === "committed"),
+    )?.callId ?? null;
+};

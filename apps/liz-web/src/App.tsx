@@ -299,6 +299,25 @@ function ChatSurface({ runtime }: { runtime: LizRuntime }) {
         ) : (
           <div className="empty-panel">Connect to the app server and create or select a thread.</div>
         )}
+        {runtime.activeToolCalls.length > 0 ? (
+          <div className="tool-timeline" aria-label="Tool timeline">
+            {runtime.activeToolCalls.map((toolCall) => (
+              <button
+                key={toolCall.callId}
+                className={`tool-line ${toolCall.status} ${toolCall.riskHint ?? ""}`}
+                type="button"
+                onClick={() => runtime.selectToolCall(toolCall.callId)}
+              >
+                <TerminalSquare size={16} />
+                <div>
+                  <strong>{toolCall.toolName}</strong>
+                  <p>{toolCall.summary || toolCall.argumentsSummary || "Tool call"}</p>
+                </div>
+                <span>{toolCall.status}</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
       </div>
       <form className="composer">
         <textarea
@@ -369,6 +388,7 @@ function SettingsSurface({ preferences }: { preferences: Preferences }) {
 
 function Inspector({ runtime }: { runtime: LizRuntime }) {
   const [forkReason, setForkReason] = useState("");
+  const selectedTool = runtime.selectedToolCall;
 
   return (
     <>
@@ -398,12 +418,39 @@ function Inspector({ runtime }: { runtime: LizRuntime }) {
       </header>
       <div className="inspector-body">
         <section>
-          <p className="eyebrow">Thread</p>
-          <h3>{runtime.activeThread?.title ?? "No thread selected"}</h3>
-          <p className="muted">
-            {runtime.activeThread?.active_summary ??
-              "Tool output, approvals, artifacts, diffs, and memory evidence appear here when selected."}
-          </p>
+          {selectedTool ? (
+            <>
+              <p className="eyebrow">Tool detail</p>
+              <h3>{selectedTool.toolName}</h3>
+              <p className="muted">{selectedTool.summary}</p>
+              {selectedTool.argumentsSummary ? (
+                <pre className="inspector-code">{selectedTool.argumentsSummary}</pre>
+              ) : null}
+              {selectedTool.output.length > 0 ? (
+                <pre className="inspector-code">
+                  {selectedTool.output
+                    .map((chunk) => `[${chunk.stream}] ${chunk.chunk}`)
+                    .join("")}
+                </pre>
+              ) : null}
+              {selectedTool.artifactIds.length > 0 ? (
+                <div className="artifact-list">
+                  {selectedTool.artifactIds.map((artifactId) => (
+                    <span key={artifactId}>{artifactId}</span>
+                  ))}
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <p className="eyebrow">Thread</p>
+              <h3>{runtime.activeThread?.title ?? "No thread selected"}</h3>
+              <p className="muted">
+                {runtime.activeThread?.active_summary ??
+                  "Tool output, approvals, artifacts, diffs, and memory evidence appear here when selected."}
+              </p>
+            </>
+          )}
         </section>
         <section>
           <p className="eyebrow">Fork reason</p>
@@ -421,7 +468,7 @@ function Inspector({ runtime }: { runtime: LizRuntime }) {
           </div>
           <div>
             <span>Messages</span>
-            <strong>{runtime.activeTranscript.length}</strong>
+            <strong>{runtime.activeToolCalls.length}</strong>
           </div>
         </section>
       </div>
