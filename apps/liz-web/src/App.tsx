@@ -16,7 +16,6 @@ import {
   Square,
   TerminalSquare,
   UserRound,
-  Wrench,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useLizRuntime, type LizRuntime } from "./hooks/useLizRuntime";
@@ -26,14 +25,13 @@ import type { TranscriptEntry } from "./state/workbench";
 
 type ViewId = "home" | "people" | "channels" | "devices" | "workspaces" | "settings" | "diagnostics";
 
-const views: Array<{ id: ViewId; label: string; icon: React.ComponentType<{ size?: number }> }> = [
+const primaryViews: Array<{ id: Exclude<ViewId, "diagnostics">; label: string; icon: React.ComponentType<{ size?: number }> }> = [
   { id: "home", label: "Home", icon: MessageSquareText },
   { id: "people", label: "People", icon: UserRound },
   { id: "channels", label: "Channels", icon: PlugZap },
   { id: "devices", label: "Devices", icon: HardDrive },
   { id: "workspaces", label: "Workspaces", icon: FolderKanban },
   { id: "settings", label: "Settings", icon: Settings },
-  { id: "diagnostics", label: "Diagnostics", icon: Wrench },
 ];
 
 export function App() {
@@ -57,7 +55,7 @@ export function App() {
           <Sparkles size={18} />
         </div>
         <nav>
-          {views.map((view) => {
+          {primaryViews.map((view) => {
             const Icon = view.icon;
             return (
               <button
@@ -105,23 +103,17 @@ export function App() {
 
 function ContinuityPanel({ runtime }: { runtime: LizRuntime }) {
   const [search, setSearch] = useState("");
-  const [newTitle, setNewTitle] = useState("");
-  const [workspaceRef, setWorkspaceRef] = useState("");
   const filteredThreads = runtime.state.threads.filter((thread) =>
     `${thread.title} ${thread.active_summary ?? ""} ${thread.workspace_ref ?? ""}`
       .toLowerCase()
       .includes(search.toLowerCase()),
   );
-
-  const createThread = () => {
-    void runtime.startThread({
-      title: newTitle.trim() || null,
-      initial_goal: newTitle.trim() || null,
-      workspace_ref: workspaceRef.trim() || null,
-      workspace_mount_id: null,
-    });
-    setNewTitle("");
-  };
+  const activeThreads = filteredThreads.filter((thread) =>
+    ["active", "waiting_approval", "interrupted"].includes(thread.status),
+  );
+  const completedThreads = filteredThreads.filter((thread) =>
+    ["completed", "failed", "archived"].includes(thread.status),
+  );
 
   return (
     <>
@@ -150,42 +142,19 @@ function ContinuityPanel({ runtime }: { runtime: LizRuntime }) {
           />
         </label>
 
-        <form className="new-thread-form" onSubmit={(event) => event.preventDefault()}>
-          <input
-            value={newTitle}
-            onChange={(event) => setNewTitle(event.target.value)}
-            placeholder="Start a new line"
-          />
-          <input
-            value={workspaceRef}
-            onChange={(event) => setWorkspaceRef(event.target.value)}
-            placeholder="Workspace path optional"
-          />
-          <button className="secondary-button" type="button" onClick={createThread}>
-            Start
-          </button>
-        </form>
-
         <div className="thread-list">
-          {filteredThreads.map((thread) => (
-            <button
-              key={thread.id}
-              className={runtime.activeThread?.id === thread.id ? "thread-item active" : "thread-item"}
-              onClick={() => void runtime.setActiveThread(thread.id)}
-            >
-              <span>
-                <strong>{thread.title}</strong>
-                <small>{thread.active_summary ?? thread.active_goal ?? "No summary yet"}</small>
-                <em>
-                  <span className={`thread-status-label ${thread.status}`}>{thread.status}</span>
-                  {workspaceLabel(thread)}
-                </em>
-              </span>
-            </button>
-          ))}
-          {filteredThreads.length === 0 ? (
-            <div className="empty-panel">No threads loaded.</div>
-          ) : null}
+          <ThreadGroup
+            label="Still carrying"
+            threads={activeThreads}
+            runtime={runtime}
+            empty="Nothing active yet. Send a message in Home to start a new line."
+          />
+          <ThreadGroup
+            label="Completed or parked"
+            threads={completedThreads}
+            runtime={runtime}
+            empty="No completed lines loaded."
+          />
         </div>
 
         <section className="side-section">
@@ -203,6 +172,41 @@ function ContinuityPanel({ runtime }: { runtime: LizRuntime }) {
           </div>
         </section>
       </>
+  );
+}
+
+function ThreadGroup({
+  label,
+  threads,
+  runtime,
+  empty,
+}: {
+  label: string;
+  threads: Thread[];
+  runtime: LizRuntime;
+  empty: string;
+}) {
+  return (
+    <section className="continuity-group">
+      <p className="eyebrow">{label}</p>
+      {threads.map((thread) => (
+        <button
+          key={thread.id}
+          className={runtime.activeThread?.id === thread.id ? "thread-item active" : "thread-item"}
+          onClick={() => void runtime.setActiveThread(thread.id)}
+        >
+          <span>
+            <strong>{thread.title}</strong>
+            <small>{thread.active_summary ?? thread.active_goal ?? "No summary yet"}</small>
+            <em>
+              <span className={`thread-status-label ${thread.status}`}>{thread.status}</span>
+              {workspaceLabel(thread)}
+            </em>
+          </span>
+        </button>
+      ))}
+      {threads.length === 0 ? <div className="empty-panel">{empty}</div> : null}
+    </section>
   );
 }
 
@@ -800,6 +804,12 @@ function ChatSurface({ runtime }: { runtime: LizRuntime }) {
 }
 
 function HomeOverview({ runtime, carryingCount }: { runtime: LizRuntime; carryingCount: number }) {
+  const carrying = runtime.state.carrying;
+  const activeItems = carrying?.active.slice(0, 4) ?? [];
+  const completedItems = carrying?.completed.slice(0, 3) ?? [];
+  const commitments = activeItems.flatMap((item) => item.pending_commitments).slice(0, 4);
+  const knowledge = runtime.state.knowledge?.items.slice(0, 3) ?? [];
+
   return (
     <section className="home-overview">
       <p className="eyebrow">Home</p>
@@ -813,6 +823,47 @@ function HomeOverview({ runtime, carryingCount }: { runtime: LizRuntime; carryin
           <span>Pending confirmations</span>
           <strong>{runtime.allApprovals.filter((approval) => approval.status === "pending").length}</strong>
         </div>
+      </div>
+      <div className="home-continuity-grid">
+        <section>
+          <p className="eyebrow">Still carrying</p>
+          {activeItems.map((item) => (
+            <article key={item.thread_id}>
+              <strong>{item.title}</strong>
+              <p>{item.summary ?? item.suggested_next_step ?? "No summary yet"}</p>
+            </article>
+          ))}
+          {activeItems.length === 0 ? <div className="empty-panel">Nothing active is loaded yet.</div> : null}
+        </section>
+        <section>
+          <p className="eyebrow">Commitments</p>
+          {commitments.map((commitment) => (
+            <article key={commitment}>
+              <p>{commitment}</p>
+            </article>
+          ))}
+          {commitments.length === 0 ? <div className="empty-panel">No pending commitments loaded.</div> : null}
+        </section>
+        <section>
+          <p className="eyebrow">Key memory</p>
+          {knowledge.map((item) => (
+            <article key={item.fact_id}>
+              <strong>{item.subject}</strong>
+              <p>{item.summary}</p>
+            </article>
+          ))}
+          {knowledge.length === 0 ? <div className="empty-panel">No decisions are loaded yet.</div> : null}
+        </section>
+        <section>
+          <p className="eyebrow">Recently completed</p>
+          {completedItems.map((item) => (
+            <article key={item.thread_id}>
+              <strong>{item.title}</strong>
+              <p>{item.summary ?? "Completed line"}</p>
+            </article>
+          ))}
+          {completedItems.length === 0 ? <div className="empty-panel">No completed lines loaded.</div> : null}
+        </section>
       </div>
     </section>
   );

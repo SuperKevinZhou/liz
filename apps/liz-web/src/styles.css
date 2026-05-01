@@ -231,6 +231,11 @@ button:disabled {
 
 .thread-list {
   display: grid;
+  gap: 16px;
+}
+
+.continuity-group {
+  display: grid;
   gap: 8px;
 }
 
@@ -886,6 +891,40 @@ button:disabled {
   display: block;
   margin-top: 4px;
   font-size: 24px;
+}
+
+.home-continuity-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  width: min(840px, 100%);
+}
+
+.home-continuity-grid section {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.54);
+}
+
+.home-continuity-grid article {
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.home-continuity-grid strong,
+.home-continuity-grid p {
+  margin: 0;
+}
+
+.home-continuity-grid p {
+  color: var(--ink-1);
+  line-height: 1.45;
 }
 
 @media (max-width: 1120px) {

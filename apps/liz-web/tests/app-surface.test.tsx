@@ -67,9 +67,11 @@ describe("App product surface", () => {
     expect(within(nav).getByLabelText("Devices")).toBeInTheDocument();
     expect(within(nav).getByLabelText("Workspaces")).toBeInTheDocument();
     expect(within(nav).getByLabelText("Settings")).toBeInTheDocument();
+    expect(within(nav).queryByLabelText("Diagnostics")).not.toBeInTheDocument();
 
     expect(screen.getByRole("heading", { name: "Home" })).toBeInTheDocument();
     expect(screen.queryByText("Liz Console")).not.toBeInTheDocument();
+    expect(screen.queryByText("Workspace path optional")).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Memory" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Approvals" })).not.toBeInTheDocument();
     expect(screen.queryByText("Wakeup")).not.toBeInTheDocument();
