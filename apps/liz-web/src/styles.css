@@ -153,7 +153,8 @@ button:disabled {
 
 .panel-header,
 .top-bar,
-.composer div {
+.composer-actions,
+.composer-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -352,6 +353,10 @@ button:disabled {
 
 .primary-button,
 .secondary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
   min-height: 36px;
   padding: 0 14px;
   border-radius: 8px;
@@ -372,6 +377,11 @@ button:disabled {
   color: var(--ink-1);
   border-color: var(--line);
   background: var(--surface-1);
+}
+
+.danger-button {
+  color: var(--danger);
+  border-color: rgba(180, 35, 24, 0.24);
 }
 
 .chat-surface {
@@ -507,6 +517,25 @@ button:disabled {
   padding: 14px 18px;
   border-top: 1px solid var(--line);
   background: rgba(251, 250, 247, 0.82);
+}
+
+.composer-toolbar {
+  align-items: center;
+}
+
+.composer-toolbar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-2);
+}
+
+.composer-toolbar select {
+  min-height: 32px;
+  color: var(--ink-0);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-1);
 }
 
 .composer textarea {
@@ -861,7 +890,8 @@ button:disabled {
 
   .top-bar,
   .top-actions,
-  .composer div {
+  .composer-actions,
+  .composer-toolbar {
     align-items: stretch;
     flex-direction: column;
   }

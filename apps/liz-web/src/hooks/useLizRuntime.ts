@@ -76,7 +76,7 @@ export interface LizRuntime {
   setActiveThread: (threadId: ThreadId) => Promise<void>;
   startThread: (request: ThreadStartRequest) => Promise<void>;
   forkThread: (request: ThreadForkRequest) => Promise<void>;
-  startTurn: (input: string) => Promise<void>;
+  startTurn: (input: string, inputKind?: TurnStartRequest["input_kind"]) => Promise<void>;
   cancelTurn: () => Promise<void>;
   respondToApproval: (request: ApprovalRespondRequest) => Promise<void>;
   readMemoryWakeup: () => Promise<void>;
@@ -209,7 +209,7 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
   );
 
   const startTurn = useCallback(
-    async (input: string) => {
+    async (input: string, inputKind: TurnStartRequest["input_kind"] = "user_message") => {
       const thread = activeThread(state);
       if (!thread || !input.trim()) {
         return;
@@ -225,7 +225,7 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
       const requestPayload: TurnStartRequest = {
         thread_id: thread.id,
         input: input.trim(),
-        input_kind: "user_message",
+        input_kind: inputKind,
         channel: {
           kind: "web",
           external_conversation_id: `web:${preferences.browserInstanceId}:${thread.id}`,

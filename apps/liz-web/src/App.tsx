@@ -3,13 +3,16 @@ import {
   Brain,
   CheckSquare,
   CircleDot,
+  Command,
   GitFork,
   MessageSquareText,
   PlugZap,
   Search,
+  Send,
   Settings,
   ShieldCheck,
   Sparkles,
+  Square,
   TerminalSquare,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -476,10 +479,13 @@ function ApprovalsSurface({ runtime }: { runtime: LizRuntime }) {
 
 function ChatSurface({ runtime }: { runtime: LizRuntime }) {
   const [message, setMessage] = useState("");
+  const [inputKind, setInputKind] =
+    useState<"user_message" | "steering_note" | "resume_command">("user_message");
   const submit = () => {
-    void runtime.startTurn(message);
+    void runtime.startTurn(message, inputKind);
     setMessage("");
   };
+  const activeTurnId = runtime.activeRuntime.activeTurnId;
 
   return (
     <section className="chat-surface">
@@ -519,6 +525,23 @@ function ChatSurface({ runtime }: { runtime: LizRuntime }) {
         ) : null}
       </div>
       <form className="composer">
+        <div className="composer-toolbar">
+          <label>
+            <Command size={14} />
+            <select
+              value={inputKind}
+              onChange={(event) =>
+                setInputKind(event.target.value as "user_message" | "steering_note" | "resume_command")
+              }
+              aria-label="Message mode"
+            >
+              <option value="user_message">Message</option>
+              <option value="steering_note">Steering</option>
+              <option value="resume_command">Resume</option>
+            </select>
+          </label>
+          <span>{runtime.activeThread ? workspaceLabel(runtime.activeThread) : "no thread selected"}</span>
+        </div>
         <textarea
           placeholder="Message Liz"
           rows={3}
@@ -530,22 +553,25 @@ function ChatSurface({ runtime }: { runtime: LizRuntime }) {
             }
           }}
         />
-        <div>
-          <span>{runtime.activeThread ? workspaceLabel(runtime.activeThread) : "no thread selected"}</span>
-          <button
-            className="secondary-button"
-            type="button"
-            disabled={!runtime.activeRuntime.activeTurnId}
-            onClick={() => void runtime.cancelTurn()}
-          >
-            Stop
-          </button>
+        <div className="composer-actions">
+          <span>Ctrl Enter to send</span>
+          {activeTurnId ? (
+            <button
+              className="secondary-button danger-button"
+              type="button"
+              onClick={() => void runtime.cancelTurn()}
+            >
+              <Square size={14} />
+              Stop
+            </button>
+          ) : null}
           <button
             className="primary-button"
             type="button"
             disabled={!runtime.activeThread || !message.trim()}
             onClick={submit}
           >
+            <Send size={14} />
             Send
           </button>
         </div>
