@@ -11,6 +11,7 @@ use crate::runtime::context_assembler::{AssembledContext, ContextAssembler};
 use crate::runtime::error::{RuntimeError, RuntimeResult};
 use crate::runtime::ids::IdGenerator;
 use crate::runtime::memory::{ForegroundMemoryEngine, MemoryCompilationPrompt};
+use crate::runtime::node_registry::NodeRegistry;
 use crate::runtime::policy_engine::{PolicyDecision, PolicyEngine};
 use crate::runtime::stores::RuntimeStores;
 use crate::runtime::thread_manager::ThreadManager;
@@ -52,10 +53,8 @@ use liz_protocol::{
 use liz_protocol::{
     ApprovalDecision, ApprovalRequest, ApprovalStatus, ArtifactKind, ArtifactRef, Checkpoint,
     CheckpointScope, GitHubCopilotDeviceCode, GitHubCopilotDevicePollStatus, GitLabOAuthStart,
-    MemoryFactKind, MiniMaxOAuthDeviceCode, MiniMaxOAuthPollStatus, NodeCapabilities, NodeId,
-    NodeIdentity, NodeKind, NodePolicy, NodeRecord, NodeStatus, OpenAiCodexOAuthStart,
-    ParticipantRef, ProviderAuthProfile, ProviderCredential, SandboxMode, Thread, ThreadId, Turn,
-    TurnId, WorkspaceMount, WorkspaceMountId,
+    MemoryFactKind, MiniMaxOAuthDeviceCode, MiniMaxOAuthPollStatus, OpenAiCodexOAuthStart,
+    ParticipantRef, ProviderAuthProfile, ProviderCredential, Thread, ThreadId, Turn, TurnId,
 };
 use std::collections::HashMap;
 
@@ -70,16 +69,12 @@ pub struct RuntimeCoordinator {
     memory_engine: ForegroundMemoryEngine,
     policy_engine: PolicyEngine,
     approvals: HashMap<liz_protocol::ApprovalId, ApprovalRequest>,
-    nodes: HashMap<NodeId, NodeRecord>,
-    workspace_mounts: HashMap<WorkspaceMountId, WorkspaceMount>,
+    node_registry: NodeRegistry,
 }
 
 impl RuntimeCoordinator {
     /// Creates a runtime coordinator backed by the provided stores.
     pub fn new(stores: RuntimeStores) -> Self {
-        let mut nodes = HashMap::new();
-        let local = local_node_record();
-        nodes.insert(local.identity.node_id.clone(), local);
         Self {
             stores,
             ids: IdGenerator::default(),
@@ -89,8 +84,7 @@ impl RuntimeCoordinator {
             memory_engine: ForegroundMemoryEngine::default(),
             policy_engine: PolicyEngine::default(),
             approvals: HashMap::new(),
-            nodes,
-            workspace_mounts: HashMap::new(),
+            node_registry: NodeRegistry::default(),
         }
     }
 
@@ -693,16 +687,12 @@ impl RuntimeCoordinator {
 
     /// Lists registered runtime nodes.
     pub fn list_nodes(&self, _request: NodeListRequest) -> RuntimeResult<NodeListResponse> {
-        Ok(NodeListResponse { nodes: self.nodes.values().cloned().collect() })
+        Ok(NodeListResponse { nodes: self.node_registry.list_nodes() })
     }
 
     /// Reads one runtime node.
     pub fn read_node(&self, request: NodeReadRequest) -> RuntimeResult<NodeReadResponse> {
-        let node = self
-            .nodes
-            .get(&request.node_id)
-            .cloned()
-            .ok_or_else(|| RuntimeError::not_found("node_not_found", "node does not exist"))?;
+        let node = self.node_registry.read_node(&request.node_id)?;
         Ok(NodeReadResponse { node })
     }
 
@@ -711,12 +701,8 @@ impl RuntimeCoordinator {
         &mut self,
         request: NodeUpdatePolicyRequest,
     ) -> RuntimeResult<NodeUpdatePolicyResponse> {
-        let node = self
-            .nodes
-            .get_mut(&request.node_id)
-            .ok_or_else(|| RuntimeError::not_found("node_not_found", "node does not exist"))?;
-        node.policy = request.policy;
-        Ok(NodeUpdatePolicyResponse { node: node.clone() })
+        let node = self.node_registry.update_node_policy(&request.node_id, request.policy)?;
+        Ok(NodeUpdatePolicyResponse { node })
     }
 
     /// Lists workspace mounts.
@@ -724,14 +710,7 @@ impl RuntimeCoordinator {
         &self,
         request: WorkspaceMountListRequest,
     ) -> RuntimeResult<WorkspaceMountListResponse> {
-        let mounts = self
-            .workspace_mounts
-            .values()
-            .filter(|mount| {
-                request.node_id.as_ref().is_none_or(|node_id| &mount.node_id == node_id)
-            })
-            .cloned()
-            .collect();
+        let mounts = self.node_registry.list_workspace_mounts(&request);
         Ok(WorkspaceMountListResponse { mounts })
     }
 
@@ -740,20 +719,7 @@ impl RuntimeCoordinator {
         &mut self,
         request: WorkspaceMountAttachRequest,
     ) -> RuntimeResult<WorkspaceMountAttachResponse> {
-        if !self.nodes.contains_key(&request.node_id) {
-            return Err(RuntimeError::not_found("node_not_found", "node does not exist"));
-        }
-        let workspace_id =
-            WorkspaceMountId::new(format!("workspace_{}", self.workspace_mounts.len() + 1));
-        let label = request.label.unwrap_or_else(|| request.root_path.clone());
-        let mount = WorkspaceMount {
-            workspace_id: workspace_id.clone(),
-            node_id: request.node_id,
-            root_path: request.root_path,
-            label,
-            permissions: request.permissions,
-        };
-        self.workspace_mounts.insert(workspace_id, mount.clone());
+        let mount = self.node_registry.attach_workspace_mount(request)?;
         Ok(WorkspaceMountAttachResponse { mount })
     }
 
@@ -762,13 +728,8 @@ impl RuntimeCoordinator {
         &mut self,
         request: WorkspaceMountDetachRequest,
     ) -> RuntimeResult<WorkspaceMountDetachResponse> {
-        if self.workspace_mounts.remove(&request.workspace_id).is_none() {
-            return Err(RuntimeError::not_found(
-                "workspace_mount_not_found",
-                "workspace mount does not exist",
-            ));
-        }
-        Ok(WorkspaceMountDetachResponse { workspace_id: request.workspace_id })
+        let workspace_id = self.node_registry.detach_workspace_mount(request)?;
+        Ok(WorkspaceMountDetachResponse { workspace_id })
     }
 
     /// Forks a thread into a new line of work.
@@ -1134,45 +1095,6 @@ impl RuntimeCoordinator {
                 }),
         );
         Ok(AboutYouSurface { identity_summary: snapshot.identity_summary, items })
-    }
-}
-
-fn local_node_record() -> NodeRecord {
-    NodeRecord {
-        identity: NodeIdentity {
-            node_id: NodeId::new("local"),
-            display_name: "Local machine".to_owned(),
-            kind: NodeKind::Desktop,
-            owner_device: true,
-        },
-        status: NodeStatus {
-            online: true,
-            last_seen_at: None,
-            app_version: Some(env!("CARGO_PKG_VERSION").to_owned()),
-            os: Some(std::env::consts::OS.to_owned()),
-            hostname: std::env::var("COMPUTERNAME").ok().or_else(|| std::env::var("HOSTNAME").ok()),
-        },
-        capabilities: NodeCapabilities {
-            workspace_tools: true,
-            shell_tools: true,
-            browser_tools: false,
-            web_ui_host: true,
-            notifications: false,
-            max_concurrent_tasks: 1,
-            supported_sandbox_modes: vec![
-                SandboxMode::ReadOnly,
-                SandboxMode::WorkspaceWrite,
-                SandboxMode::DangerFullAccess,
-                SandboxMode::ExternalSandbox,
-            ],
-        },
-        policy: NodePolicy {
-            allowed_roots: Vec::new(),
-            protected_paths: Vec::new(),
-            default_sandbox: SandboxMode::WorkspaceWrite,
-            network_policy: "inherit-runtime".to_owned(),
-            approval_policy: liz_protocol::ApprovalPolicy::OnRequest,
-        },
     }
 }
 

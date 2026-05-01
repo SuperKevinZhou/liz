@@ -6,6 +6,7 @@ mod error;
 mod ids;
 mod inbound;
 mod memory;
+mod node_registry;
 mod output_policy;
 mod policy_engine;
 mod stores;
@@ -19,6 +20,7 @@ pub use context_assembler::{
 pub use coordinator::RuntimeCoordinator;
 pub use error::{RuntimeError, RuntimeResult};
 pub use inbound::{InboundEvent, InboundEventAction, InboundEventRouter};
+pub use node_registry::NodeRegistry;
 pub use output_policy::{OutputPolicy, OutputPolicyDecision};
 pub use policy_engine::{PolicyDecision, PolicyEngine, SandboxContextRecord};
 pub(crate) use stores::RuntimeStores;

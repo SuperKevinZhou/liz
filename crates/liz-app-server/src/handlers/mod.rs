@@ -1,7 +1,7 @@
 //! Request handling for app-server protocol messages.
 
 use crate::events::PendingEvent;
-use crate::executor::ExecutorGateway;
+use crate::executor::NodeExecutorRouter;
 use crate::runtime::{RuntimeCoordinator, RuntimeError};
 use liz_protocol::events::{
     ApprovalResolvedEvent, ArtifactCreatedEvent, DiffAvailableEvent, ExecutorOutputChunkEvent,
@@ -28,7 +28,7 @@ pub struct HandledRequest {
 /// Dispatches a typed request to the runtime coordinator.
 pub fn handle_request(
     runtime: &mut RuntimeCoordinator,
-    executor: &ExecutorGateway,
+    executor: &NodeExecutorRouter,
     envelope: ClientRequestEnvelope,
 ) -> HandledRequest {
     let ClientRequestEnvelope { request_id, request } = envelope;
@@ -174,85 +174,84 @@ pub fn handle_request(
                 )
             })
         }
-        ClientRequest::ToolCall(request) => executor.execute_tool(&request).and_then(|executed| {
-            let executor_task_id = executor_task_id_for_tool(&request.thread_id, &executed.result);
-            let output_chunks = executed.output_chunks.clone();
-            let artifacts = executed
-                .artifacts
-                .into_iter()
-                .map(|artifact| (artifact.kind, artifact.summary, artifact.body))
-                .collect::<Vec<_>>();
-            let (execution_turn_id, artifact_refs) = runtime.record_tool_execution(
-                &request.thread_id,
-                request.turn_id.as_ref(),
-                executed.tool_name.as_str(),
-                &executed.summary,
-                artifacts,
-            )?;
-            let mut events = artifact_refs
-                .iter()
-                .cloned()
-                .flat_map(|artifact| {
-                    let mut pending = vec![PendingEvent::new(
-                        artifact.thread_id.clone(),
-                        Some(artifact.turn_id.clone()),
-                        ServerEventPayload::ArtifactCreated(ArtifactCreatedEvent {
-                            artifact: artifact.clone(),
-                        }),
-                    )];
-                    if matches!(artifact.kind, liz_protocol::ArtifactKind::Diff) {
-                        pending.push(PendingEvent::new(
+        ClientRequest::ToolCall(request) => {
+            executor.execute_tool(&request).and_then(|node_execution| {
+                let node_id = node_execution.node_id.clone();
+                let executed = node_execution.executed;
+                let executor_task_id =
+                    executor_task_id_for_tool(&request.thread_id, &executed.result);
+                let output_chunks = executed.output_chunks.clone();
+                let artifacts = executed
+                    .artifacts
+                    .into_iter()
+                    .map(|artifact| (artifact.kind, artifact.summary, artifact.body))
+                    .collect::<Vec<_>>();
+                let (execution_turn_id, artifact_refs) = runtime.record_tool_execution(
+                    &request.thread_id,
+                    request.turn_id.as_ref(),
+                    executed.tool_name.as_str(),
+                    &executed.summary,
+                    artifacts,
+                )?;
+                let mut events = artifact_refs
+                    .iter()
+                    .cloned()
+                    .flat_map(|artifact| {
+                        let mut pending = vec![PendingEvent::new(
                             artifact.thread_id.clone(),
                             Some(artifact.turn_id.clone()),
-                            ServerEventPayload::DiffAvailable(DiffAvailableEvent { artifact }),
-                        ));
-                    }
-                    pending
-                })
-                .collect::<Vec<_>>();
-            events.extend(output_chunks.into_iter().map(|chunk| {
-                PendingEvent::new(
+                            ServerEventPayload::ArtifactCreated(ArtifactCreatedEvent {
+                                artifact: artifact.clone(),
+                            }),
+                        )];
+                        if matches!(artifact.kind, liz_protocol::ArtifactKind::Diff) {
+                            pending.push(PendingEvent::new(
+                                artifact.thread_id.clone(),
+                                Some(artifact.turn_id.clone()),
+                                ServerEventPayload::DiffAvailable(DiffAvailableEvent { artifact }),
+                            ));
+                        }
+                        pending
+                    })
+                    .collect::<Vec<_>>();
+                events.extend(output_chunks.into_iter().map(|chunk| {
+                    PendingEvent::new(
+                        request.thread_id.clone(),
+                        Some(execution_turn_id.clone()),
+                        ServerEventPayload::ExecutorOutputChunk(ExecutorOutputChunkEvent {
+                            executor_task_id: executor_task_id.clone(),
+                            stream: chunk.stream,
+                            chunk: chunk.chunk,
+                            node_id: Some(node_id.clone()),
+                            workspace_mount_id: request.workspace_mount_id.clone(),
+                        }),
+                    )
+                }));
+                events.push(PendingEvent::new(
                     request.thread_id.clone(),
                     Some(execution_turn_id.clone()),
-                    ServerEventPayload::ExecutorOutputChunk(ExecutorOutputChunkEvent {
-                        executor_task_id: executor_task_id.clone(),
-                        stream: chunk.stream,
-                        chunk: chunk.chunk,
-                        node_id: request
-                            .node_id
-                            .clone()
-                            .or_else(|| Some(liz_protocol::NodeId::new("local"))),
+                    ServerEventPayload::ToolCompleted(ToolCompletedEvent {
+                        tool_name: executed.tool_name.as_str().to_owned(),
+                        summary: executed.summary.clone(),
+                        artifact_ids: artifact_refs
+                            .iter()
+                            .map(|artifact| artifact.id.clone())
+                            .collect(),
+                        node_id: Some(node_id),
                         workspace_mount_id: request.workspace_mount_id.clone(),
                     }),
-                )
-            }));
-            events.push(PendingEvent::new(
-                request.thread_id.clone(),
-                Some(execution_turn_id.clone()),
-                ServerEventPayload::ToolCompleted(ToolCompletedEvent {
-                    tool_name: executed.tool_name.as_str().to_owned(),
-                    summary: executed.summary.clone(),
-                    artifact_ids: artifact_refs
-                        .iter()
-                        .map(|artifact| artifact.id.clone())
-                        .collect(),
-                    node_id: request
-                        .node_id
-                        .clone()
-                        .or_else(|| Some(liz_protocol::NodeId::new("local"))),
-                    workspace_mount_id: request.workspace_mount_id.clone(),
-                }),
-            ));
-            Ok((
-                ResponsePayload::ToolCall(liz_protocol::ToolCallResponse {
-                    execution_turn_id,
-                    summary: executed.summary,
-                    result: executed.result,
-                    artifact_refs,
-                }),
-                events,
-            ))
-        }),
+                ));
+                Ok((
+                    ResponsePayload::ToolCall(liz_protocol::ToolCallResponse {
+                        execution_turn_id,
+                        summary: executed.summary,
+                        result: executed.result,
+                        artifact_refs,
+                    }),
+                    events,
+                ))
+            })
+        }
         ClientRequest::ThreadRollback(_) => Err(RuntimeError::unsupported(
             "rollback_not_ready",
             "rollback handling is implemented in a later phase",

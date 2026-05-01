@@ -4,7 +4,7 @@ mod websocket;
 
 use crate::config::LizConfigFile;
 use crate::events::EventBus;
-use crate::executor::ExecutorGateway;
+use crate::executor::NodeExecutorRouter;
 use crate::handlers;
 use crate::model::{
     ModelGateway, ModelTurnRequest, NormalizedTurnEvent, ProviderOverride, ProviderToolCall,
@@ -45,7 +45,7 @@ impl Default for ServerConfig {
 #[derive(Debug)]
 pub struct AppServer {
     runtime: RuntimeCoordinator,
-    executor: ExecutorGateway,
+    executor: NodeExecutorRouter,
     event_bus: EventBus,
     model_gateway: ModelGateway,
     approval_policy: ApprovalPolicy,
@@ -62,7 +62,7 @@ impl AppServer {
     pub fn new_with_model_gateway(paths: StoragePaths, model_gateway: ModelGateway) -> Self {
         Self {
             runtime: RuntimeCoordinator::new(crate::runtime::RuntimeStores::new(paths)),
-            executor: ExecutorGateway::default(),
+            executor: NodeExecutorRouter::default(),
             event_bus: EventBus::new(),
             model_gateway,
             approval_policy: ApprovalPolicy::OnRequest,
@@ -508,8 +508,8 @@ impl AppServer {
             workspace_mount_id: None,
             invocation,
         };
-        let executed = match self.executor.execute_tool(&request) {
-            Ok(executed) => executed,
+        let node_execution = match self.executor.execute_tool(&request) {
+            Ok(node_execution) => node_execution,
             Err(error) => {
                 let summary = error.to_string();
                 self.event_bus.publish(crate::events::PendingEvent::new(
@@ -532,6 +532,8 @@ impl AppServer {
                 };
             }
         };
+        let node_id = node_execution.node_id.clone();
+        let executed = node_execution.executed;
         let executor_task_id = executor_task_id_for_result(thread_id, &executed.result);
         let output_chunks = executed.output_chunks.clone();
         let artifacts = executed
@@ -555,7 +557,7 @@ impl AppServer {
                     ServerEventPayload::ToolFailed(liz_protocol::ToolFailedEvent {
                         tool_name: executed.tool_name.as_str().to_owned(),
                         summary: summary.clone(),
-                        node_id: Some(liz_protocol::NodeId::new("local")),
+                        node_id: Some(node_id.clone()),
                         workspace_mount_id: None,
                     }),
                 ));
@@ -595,7 +597,7 @@ impl AppServer {
                     executor_task_id: executor_task_id.clone(),
                     stream: chunk.stream,
                     chunk: chunk.chunk,
-                    node_id: Some(liz_protocol::NodeId::new("local")),
+                    node_id: Some(node_id.clone()),
                     workspace_mount_id: None,
                 }),
             ));
@@ -608,7 +610,7 @@ impl AppServer {
                 tool_name: executed.tool_name.as_str().to_owned(),
                 summary: executed.summary,
                 artifact_ids: artifact_refs.iter().map(|artifact| artifact.id.clone()).collect(),
-                node_id: Some(liz_protocol::NodeId::new("local")),
+                node_id: Some(node_id),
                 workspace_mount_id: None,
             }),
         ));

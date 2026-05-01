@@ -6,8 +6,8 @@ mod workspace;
 
 use crate::runtime::RuntimeResult;
 use liz_protocol::{
-    ArtifactKind, ExecutorStream, ShellSandboxRequest, ShellSandboxSummary, ToolCallRequest,
-    ToolInvocation, ToolName, ToolResult,
+    ArtifactKind, ExecutorStream, NodeId, ShellSandboxRequest, ShellSandboxSummary,
+    ToolCallRequest, ToolInvocation, ToolName, ToolResult,
 };
 pub use sandbox::{
     EffectiveSandboxRequest, LinuxSandboxVariant, PlatformSandboxBackend, SandboxConfig,
@@ -51,13 +51,13 @@ pub struct ExecutorOutput {
     pub chunk: String,
 }
 
-/// Dispatches typed tool invocations to the local runtime implementation.
+/// Executes tool invocations on the local node.
 #[derive(Debug, Clone, Default)]
-pub struct ExecutorGateway {
+pub struct LocalNodeExecutor {
     shell: std::sync::Arc<LocalShellExecutor>,
 }
 
-impl ExecutorGateway {
+impl LocalNodeExecutor {
     /// Returns the current default shell sandbox.
     pub fn default_shell_sandbox(&self) -> ShellSandboxSummary {
         self.shell.default_sandbox_summary()
@@ -252,6 +252,46 @@ impl ExecutorGateway {
             }
         }
     }
+}
+
+/// Routes node-scoped tool invocations to the executor for the selected node.
+#[derive(Debug, Clone, Default)]
+pub struct NodeExecutorRouter {
+    local: LocalNodeExecutor,
+}
+
+impl NodeExecutorRouter {
+    /// Returns the current default shell sandbox for the local node.
+    pub fn default_shell_sandbox(&self) -> ShellSandboxSummary {
+        self.local.default_shell_sandbox()
+    }
+
+    /// Updates the default shell sandbox for the local node.
+    pub fn set_default_shell_sandbox(&self, request: ShellSandboxRequest) -> ShellSandboxSummary {
+        self.local.set_default_shell_sandbox(request)
+    }
+
+    /// Executes a tool request through a node dispatch boundary.
+    pub fn execute_tool(&self, request: &ToolCallRequest) -> RuntimeResult<NodeExecutedTool> {
+        let node_id = request.node_id.clone().unwrap_or_else(|| NodeId::new("local"));
+        if node_id.as_str() != "local" {
+            return Err(crate::runtime::RuntimeError::unsupported(
+                "remote_node_not_ready",
+                "remote node execution is not available yet",
+            ));
+        }
+        let executed = self.local.execute_tool(request)?;
+        Ok(NodeExecutedTool { node_id, executed })
+    }
+}
+
+/// The outcome of executing a tool on a node.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeExecutedTool {
+    /// The node that executed the tool.
+    pub node_id: NodeId,
+    /// The normalized local execution result.
+    pub executed: ExecutedTool,
 }
 
 fn executed_tool(
