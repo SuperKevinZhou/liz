@@ -10,7 +10,7 @@ use crate::model::{
     ModelGateway, ModelTurnRequest, NormalizedTurnEvent, ProviderOverride, ProviderToolCall,
     ToolResultInjection, ToolSurfaceMode,
 };
-use crate::runtime::RuntimeCoordinator;
+use crate::runtime::{OutputPolicy, OutputPolicyDecision, RuntimeCoordinator};
 use crate::storage::StoragePaths;
 use liz_protocol::{
     ApprovalDecision, ApprovalPolicy, ApprovalRequestedEvent, ArtifactCreatedEvent,
@@ -245,6 +245,7 @@ impl AppServer {
             context.system_prompt,
             context.developer_prompt,
             context.user_prompt,
+            interaction_context,
         );
     }
 
@@ -285,6 +286,7 @@ impl AppServer {
                     context.system_prompt,
                     context.developer_prompt,
                     context.user_prompt,
+                    None,
                 );
             }
             ApprovalDecision::Deny => {
@@ -322,6 +324,7 @@ impl AppServer {
         system_prompt: String,
         developer_prompt: String,
         user_prompt: String,
+        output_interaction_context: Option<liz_protocol::InteractionContext>,
     ) {
         let thread_id = thread.id.clone();
         let turn_id = turn.id.clone();
@@ -345,8 +348,14 @@ impl AppServer {
         loop {
             let request =
                 base_request.clone().with_tool_result_injections(continuation_results.clone());
-            let run_result = model_gateway
-                .run_turn(request, |event| self.handle_model_event(&thread_id, &turn_id, event));
+            let run_result = model_gateway.run_turn(request, |event| {
+                self.handle_model_event(
+                    &thread_id,
+                    &turn_id,
+                    event,
+                    output_interaction_context.as_ref(),
+                )
+            });
             let summary = match run_result {
                 Ok(summary) => summary,
                 Err(error) => {
@@ -368,8 +377,10 @@ impl AppServer {
             };
 
             if summary.tool_calls.is_empty() {
-                let final_message =
-                    summary.assistant_message.unwrap_or_else(|| "Completed turn".to_owned());
+                let final_message = apply_output_policy(
+                    output_interaction_context.as_ref(),
+                    summary.assistant_message.unwrap_or_else(|| "Completed turn".to_owned()),
+                );
                 if let Ok(turn) = self.runtime.complete_turn(&thread_id, &turn_id, final_message) {
                     self.event_bus.publish(crate::events::PendingEvent::new(
                         thread_id.clone(),
@@ -411,6 +422,7 @@ impl AppServer {
         thread_id: &ThreadId,
         turn_id: &TurnId,
         event: NormalizedTurnEvent,
+        output_interaction_context: Option<&liz_protocol::InteractionContext>,
     ) {
         match event {
             NormalizedTurnEvent::AssistantDelta { chunk } => {
@@ -425,6 +437,7 @@ impl AppServer {
                 ));
             }
             NormalizedTurnEvent::AssistantMessage { message } => {
+                let message = apply_output_policy(output_interaction_context, message);
                 self.event_bus.publish(crate::events::PendingEvent::new(
                     thread_id.clone(),
                     Some(turn_id.clone()),
@@ -910,6 +923,25 @@ fn provider_override_from_auth_profile(profile: &ProviderAuthProfile) -> Provide
         }
     }
     override_config
+}
+
+fn apply_output_policy(
+    context: Option<&liz_protocol::InteractionContext>,
+    message: String,
+) -> String {
+    let Some(context) = context else {
+        return message;
+    };
+    match OutputPolicy::default().check(context, &message) {
+        OutputPolicyDecision::Allowed => message,
+        OutputPolicyDecision::Redacted(redacted) => redacted,
+        OutputPolicyDecision::NeedsOwnerConfirmation(reason) => {
+            format!("I need owner confirmation before sharing this response. {reason}")
+        }
+        OutputPolicyDecision::Denied(reason) => {
+            format!("I cannot share that response in this interaction. {reason}")
+        }
+    }
 }
 
 #[cfg(test)]
