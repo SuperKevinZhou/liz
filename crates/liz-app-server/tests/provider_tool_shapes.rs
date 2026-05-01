@@ -50,7 +50,10 @@ fn anthropic_request_includes_native_tools() {
     let _ = gateway.run_turn(demo_request(), |_| {}).expect("request should succeed");
 
     let request = capture.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
-    assert!(request.contains(r#""tools":[{"description":"List files and directories in a workspace root.","input_schema""#));
+    assert!(request.contains(
+        r#""tools":[{"description":"List files and directories under an attached workspace path."#
+    ));
+    assert!(request.contains("Use this after listing or searching identifies relevant files."));
     assert!(request.contains(r#""name":"workspace_read""#));
 }
 
@@ -74,7 +77,8 @@ fn google_request_includes_function_declarations() {
     let _ = gateway.run_turn(demo_request(), |_| {}).expect("request should succeed");
 
     let request = capture.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
-    assert!(request.contains(r#""functionDeclarations":[{"description":"List files and directories in a workspace root.""#));
+    assert!(request.contains(r#""functionDeclarations":[{"description":"List files and directories under an attached workspace path."#));
+    assert!(request.contains("Use this after listing or searching identifies relevant files."));
     assert!(request.contains(r#""name":"workspace_read""#));
 }
 
@@ -98,7 +102,8 @@ fn bedrock_request_includes_tool_config() {
     let _ = gateway.run_turn(demo_request(), |_| {}).expect("request should succeed");
 
     let request = capture.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
-    assert!(request.contains(r#""toolConfig":{"tools":[{"toolSpec":{"description":"List files and directories in a workspace root.""#));
+    assert!(request.contains(r#""toolConfig":{"tools":[{"toolSpec":{"description":"List files and directories under an attached workspace path."#));
+    assert!(request.contains("Use this after listing or searching identifies relevant files."));
     assert!(request.contains(r#""name":"workspace_read""#));
 }
 

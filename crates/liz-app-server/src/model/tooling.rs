@@ -171,7 +171,11 @@ fn tool_schemas() -> Vec<StaticToolSchema> {
     vec![
         StaticToolSchema {
             canonical_name: "workspace.list",
-            description: "List files and directories in a workspace root.",
+            description: concat!(
+                "List files and directories under an attached workspace path. Use this for structure discovery when you need to know what exists before searching or reading. ",
+                "Prefer a narrow root over the workspace root when a likely directory is known. Use recursive=false for a quick top-level map, and recursive=true only when the subtree is small or max_entries is set. ",
+                "Do not use this as a substitute for content search; use workspace.search when you need symbols, strings, or references. Output is structured entries with paths and directory/file metadata."
+            ),
             input_json_schema: json!({
                 "type":"object",
                 "additionalProperties": false,
@@ -186,7 +190,11 @@ fn tool_schemas() -> Vec<StaticToolSchema> {
         },
         StaticToolSchema {
             canonical_name: "workspace.search",
-            description: "Search plain text across workspace files.",
+            description: concat!(
+                "Search text across attached workspace files. Use this before guessing file locations, symbols, configuration keys, tests, or call sites. ",
+                "Start with the most specific stable term you know, then refine if results are noisy. Keep include_hidden=false unless hidden files are the real target. ",
+                "Do not use broad generic terms that will flood the context; narrow by root or pattern instead. After finding likely matches, use workspace.read with line ranges before editing."
+            ),
             input_json_schema: json!({
                 "type":"object",
                 "additionalProperties": false,
@@ -202,7 +210,11 @@ fn tool_schemas() -> Vec<StaticToolSchema> {
         },
         StaticToolSchema {
             canonical_name: "workspace.read",
-            description: "Read a file or file line range from the workspace.",
+            description: concat!(
+                "Read a file, optionally limited to a line range. Use this after listing or searching identifies relevant files. ",
+                "For large files, always request the smallest useful start_line/end_line range and widen only if needed. Read before writing; do not patch files you have not inspected. ",
+                "Use repeated focused reads instead of loading unrelated files into the main context. Output includes file content and line metadata suitable for citations and follow-up edits."
+            ),
             input_json_schema: json!({
                 "type":"object",
                 "additionalProperties": false,
@@ -216,7 +228,11 @@ fn tool_schemas() -> Vec<StaticToolSchema> {
         },
         StaticToolSchema {
             canonical_name: "workspace.write_text",
-            description: "Replace an entire file with provided content.",
+            description: concat!(
+                "Replace an entire file with provided text. Use this for new files or intentional complete rewrites only. ",
+                "Do not use it for surgical edits to existing files; use workspace.apply_patch so unrelated content is preserved. ",
+                "Before replacing an existing file, read it first and be certain the full new content is correct. After writing, read back or run a focused verification."
+            ),
             input_json_schema: json!({
                 "type":"object",
                 "additionalProperties": false,
@@ -229,7 +245,11 @@ fn tool_schemas() -> Vec<StaticToolSchema> {
         },
         StaticToolSchema {
             canonical_name: "workspace.apply_patch",
-            description: "Apply exact search/replace patch on a file.",
+            description: concat!(
+                "Apply an exact search/replace patch to one workspace file. Use this for minimal, surgical edits after reading the target region. ",
+                "The search text must match the existing file exactly. Keep the replacement scoped to the requested behavior and avoid opportunistic refactors. ",
+                "Use replace_all only for deliberate repeated mechanical changes. If a patch fails, read the current file section again before trying a different patch."
+            ),
             input_json_schema: json!({
                 "type":"object",
                 "additionalProperties": false,
@@ -244,7 +264,11 @@ fn tool_schemas() -> Vec<StaticToolSchema> {
         },
         StaticToolSchema {
             canonical_name: "shell.exec",
-            description: "Run one foreground shell command and return its output.",
+            description: concat!(
+                "Run one short foreground shell command and return exit code, stdout, and stderr. Use this for fast checks such as cargo test on a focused target, formatting verification, git status, or simple diagnostics. ",
+                "Do not use it for long-running servers, watchers, or commands that need later output; use shell.spawn for those. ",
+                "Prefer non-destructive commands. Check the exit code and reason from the captured output before claiming success."
+            ),
             input_json_schema: json!({
                 "type":"object",
                 "additionalProperties": false,
@@ -266,7 +290,11 @@ fn tool_schemas() -> Vec<StaticToolSchema> {
         },
         StaticToolSchema {
             canonical_name: "shell.spawn",
-            description: "Spawn a background shell command.",
+            description: concat!(
+                "Start a long-running shell process and return a task id. Use this for dev servers, watch mode tests, log tails, and commands that should keep running while liz continues the thread. ",
+                "Do not use it for quick commands that should complete immediately; use shell.exec. ",
+                "After spawning, use shell.read_output or shell.wait to observe progress, and shell.terminate when the process is no longer needed."
+            ),
             input_json_schema: json!({
                 "type":"object",
                 "additionalProperties": false,
@@ -288,7 +316,11 @@ fn tool_schemas() -> Vec<StaticToolSchema> {
         },
         StaticToolSchema {
             canonical_name: "shell.wait",
-            description: "Wait for a background shell task.",
+            description: concat!(
+                "Wait for a background shell task to finish and return its final status and buffered output. Use this when a spawned command is expected to complete soon. ",
+                "Do not wait indefinitely on servers or watchers; use shell.read_output for snapshots and shell.terminate when appropriate. ",
+                "Always inspect the final exit status before reporting verification success."
+            ),
             input_json_schema: json!({
                 "type":"object",
                 "additionalProperties": false,
@@ -298,7 +330,11 @@ fn tool_schemas() -> Vec<StaticToolSchema> {
         },
         StaticToolSchema {
             canonical_name: "shell.read_output",
-            description: "Read incremental output from a background shell task.",
+            description: concat!(
+                "Read incremental stdout/stderr from a background shell task without necessarily stopping it. Use this to observe dev servers, watchers, and long-running diagnostics. ",
+                "Use it after shell.spawn before deciding whether a process is healthy, blocked, or ready. ",
+                "Do not infer success from silence; combine output, task state, and relevant follow-up checks."
+            ),
             input_json_schema: json!({
                 "type":"object",
                 "additionalProperties": false,
@@ -308,7 +344,11 @@ fn tool_schemas() -> Vec<StaticToolSchema> {
         },
         StaticToolSchema {
             canonical_name: "shell.terminate",
-            description: "Terminate a background shell task.",
+            description: concat!(
+                "Terminate a background shell task by task id. Use this when a dev server, watcher, or long-running command is no longer needed or is blocking progress. ",
+                "Do not terminate unrelated tasks. Prefer reading recent output first so the final transcript explains why the process was stopped. ",
+                "After termination, treat the result as a side effect and report any relevant output or cleanup needs."
+            ),
             input_json_schema: json!({
                 "type":"object",
                 "additionalProperties": false,
