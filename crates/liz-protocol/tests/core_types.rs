@@ -1,9 +1,10 @@
 //! Serialization coverage for core liz protocol resources.
 
 use liz_protocol::{
-    ApprovalId, ApprovalRequest, ApprovalStatus, ArtifactId, ArtifactKind, ArtifactRef, Checkpoint,
-    CheckpointId, CheckpointScope, RiskLevel, Thread, ThreadId, ThreadStatus, Timestamp, Turn,
-    TurnId, TurnKind, TurnStatus,
+    ApprovalId, ApprovalRequest, ApprovalStatus, ArtifactId, ArtifactKind, ArtifactRef,
+    ChannelKind, ChannelRef, Checkpoint, CheckpointId, CheckpointScope, InfoBoundary,
+    ParticipantRef, RelationshipEntry, RiskLevel, Thread, ThreadId, ThreadStatus, Timestamp,
+    TrustLevel, Turn, TurnId, TurnKind, TurnStatus,
 };
 
 /// Ensures thread resources serialize and deserialize without losing state.
@@ -18,6 +19,7 @@ fn thread_resource_round_trips_through_json() {
         active_goal: Some("Implement protocol v0".to_owned()),
         active_summary: Some("Waiting for request envelope work".to_owned()),
         last_interruption: Some("Stopped after core type definitions".to_owned()),
+        workspace_ref: Some("D:/zzh/Code/liz/liz".to_owned()),
         pending_commitments: vec!["Add request types".to_owned()],
         latest_turn_id: Some(TurnId::new("turn_01")),
         latest_checkpoint_id: Some(CheckpointId::new("checkpoint_01")),
@@ -28,6 +30,49 @@ fn thread_resource_round_trips_through_json() {
     let round_trip: Thread = serde_json::from_str(&json).expect("thread should deserialize");
 
     assert_eq!(round_trip, thread);
+}
+
+/// Ensures channel and relationship resources keep their serialized shape.
+#[test]
+fn channel_and_relationship_resources_round_trip_through_json() {
+    let channel = ChannelRef {
+        kind: ChannelKind::Telegram,
+        external_conversation_id: "telegram_chat_42".to_owned(),
+    };
+    let participant = ParticipantRef {
+        external_participant_id: "telegram_user_7".to_owned(),
+        display_name: Some("Alice".to_owned()),
+    };
+    let relationship = RelationshipEntry {
+        person_id: "telegram_user_7".to_owned(),
+        display_name: "Alice".to_owned(),
+        trust_level: TrustLevel::Trusted,
+        info_boundary: InfoBoundary {
+            shared_topics: vec!["project status".to_owned()],
+            forbidden_topics: vec!["personal plans".to_owned()],
+            share_active_state: true,
+            share_commitments: false,
+        },
+        interaction_stance: "friendly_bounded".to_owned(),
+        notes: Some("Can coordinate project updates".to_owned()),
+    };
+
+    let channel_json = serde_json::to_string(&channel).expect("channel should serialize");
+    let participant_json =
+        serde_json::to_string(&participant).expect("participant should serialize");
+    let relationship_json =
+        serde_json::to_string(&relationship).expect("relationship should serialize");
+
+    let channel_round_trip: ChannelRef =
+        serde_json::from_str(&channel_json).expect("channel should deserialize");
+    let participant_round_trip: ParticipantRef =
+        serde_json::from_str(&participant_json).expect("participant should deserialize");
+    let relationship_round_trip: RelationshipEntry =
+        serde_json::from_str(&relationship_json).expect("relationship should deserialize");
+
+    assert_eq!(channel_round_trip, channel);
+    assert_eq!(participant_round_trip, participant);
+    assert_eq!(relationship_round_trip, relationship);
 }
 
 /// Ensures turn resources serialize and deserialize without losing state.

@@ -39,10 +39,10 @@ pub use ids::{
     ThreadId, TurnId,
 };
 pub use memory::{
-    MemoryCitationRef, MemoryCompilationSummary, MemoryEvidenceView, MemoryFactKind,
-    MemorySearchHit, MemorySearchHitKind, MemorySearchMode, MemorySessionEntry, MemorySessionView,
-    MemoryTopicStatus, MemoryTopicSummary, MemoryWakeup, RecentConversationWakeupView,
-    ResumeSummary,
+    ChannelKind, ChannelRef, InfoBoundary, MemoryCitationRef, MemoryCompilationSummary,
+    MemoryEvidenceView, MemoryFactKind, MemorySearchHit, MemorySearchHitKind, MemorySearchMode,
+    MemorySessionEntry, MemorySessionView, MemoryTopicStatus, MemoryTopicSummary, MemoryWakeup,
+    ParticipantRef, RecentConversationWakeupView, RelationshipEntry, ResumeSummary, TrustLevel,
 };
 pub use primitives::{ProtocolVersion, RiskLevel, Timestamp};
 pub use requests::{

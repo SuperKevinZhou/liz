@@ -4,7 +4,7 @@ use crate::approval::{ApprovalDecision, ApprovalPolicy};
 use crate::auth::ProviderAuthProfile;
 use crate::checkpoint::CheckpointScope;
 use crate::ids::{ApprovalId, ArtifactId, CheckpointId, MemoryFactId, RequestId, ThreadId, TurnId};
-use crate::memory::{MemorySearchMode, MemoryTopicStatus};
+use crate::memory::{ChannelRef, MemorySearchMode, MemoryTopicStatus, ParticipantRef};
 use crate::sandbox::ShellSandboxRequest;
 use crate::tool::ToolCallRequest;
 use serde::{Deserialize, Serialize};
@@ -323,6 +323,12 @@ pub struct TurnStartRequest {
     pub input: String,
     /// The kind of input that triggered the turn.
     pub input_kind: TurnInputKind,
+    /// The channel that produced this turn, if the client knows it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel: Option<ChannelRef>,
+    /// The participant currently talking to liz, if the client knows it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub participant: Option<ParticipantRef>,
 }
 
 /// Cancels an existing turn.

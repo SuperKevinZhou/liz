@@ -41,6 +41,9 @@ pub struct Thread {
     pub active_summary: Option<String>,
     /// The most recent interruption marker for the thread.
     pub last_interruption: Option<String>,
+    /// The optional workspace attached to this thread.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_ref: Option<String>,
     /// Commitments that are still pending on the thread.
     pub pending_commitments: Vec<String>,
     /// The latest turn known for the thread.

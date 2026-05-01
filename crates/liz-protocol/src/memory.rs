@@ -39,6 +39,112 @@ pub enum MemoryFactKind {
     Keyword,
 }
 
+/// A communication channel that can carry turns into the runtime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChannelKind {
+    /// The Rust CLI reference client.
+    Cli,
+    /// Telegram Bot API.
+    Telegram,
+    /// Discord or a Discord-compatible gateway.
+    Discord,
+    /// Email-based interaction.
+    Email,
+    /// A channel that is not yet classified.
+    Unknown,
+}
+
+/// Stable metadata for the conversation surface that produced a turn.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChannelRef {
+    /// The channel family.
+    pub kind: ChannelKind,
+    /// The channel-owned conversation identifier.
+    pub external_conversation_id: String,
+}
+
+/// Stable metadata for the participant currently talking to liz.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ParticipantRef {
+    /// The participant identifier as known by the channel.
+    pub external_participant_id: String,
+    /// The display name shown by the channel, if available.
+    pub display_name: Option<String>,
+}
+
+/// The owner-defined trust level for a participant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrustLevel {
+    /// The owner of this liz instance.
+    Owner,
+    /// A trusted contact with topic-limited sharing.
+    Trusted,
+    /// A known contact with only public sharing.
+    Acquaintance,
+    /// An unknown or untrusted participant.
+    Stranger,
+}
+
+/// Topic and state-sharing boundaries for a relationship.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InfoBoundary {
+    /// Topics explicitly allowed for this relationship.
+    pub shared_topics: Vec<String>,
+    /// Topics that must never be disclosed to this relationship.
+    pub forbidden_topics: Vec<String>,
+    /// Whether active work state can be shared.
+    pub share_active_state: bool,
+    /// Whether pending commitments can be shared.
+    pub share_commitments: bool,
+}
+
+impl InfoBoundary {
+    /// Returns the conservative default used for unknown participants.
+    pub fn stranger_default() -> Self {
+        Self {
+            shared_topics: Vec::new(),
+            forbidden_topics: Vec::new(),
+            share_active_state: false,
+            share_commitments: false,
+        }
+    }
+
+    /// Returns the owner boundary, which allows the full local context.
+    pub fn owner_default() -> Self {
+        Self {
+            shared_topics: Vec::new(),
+            forbidden_topics: Vec::new(),
+            share_active_state: true,
+            share_commitments: true,
+        }
+    }
+}
+
+impl Default for InfoBoundary {
+    fn default() -> Self {
+        Self::stranger_default()
+    }
+}
+
+/// A relationship record owned by the L0 identity layer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RelationshipEntry {
+    /// Stable person identifier, such as a channel user id.
+    pub person_id: String,
+    /// Human-readable display name.
+    pub display_name: String,
+    /// Owner-defined trust level.
+    pub trust_level: TrustLevel,
+    /// Information boundary for this relationship.
+    pub info_boundary: InfoBoundary,
+    /// Short stance label used by prompt assembly.
+    pub interaction_stance: String,
+    /// Optional owner-authored notes about this relationship.
+    pub notes: Option<String>,
+}
+
 /// A minimal evidence or citation pointer attached to memory output.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct MemoryCitationRef {
