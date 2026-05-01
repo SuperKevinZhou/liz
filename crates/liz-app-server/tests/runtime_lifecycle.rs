@@ -34,6 +34,8 @@ fn thread_can_start_turn_interrupt_and_resume() {
             thread_id: thread.id.clone(),
             input: "Implement thread and turn managers".to_owned(),
             input_kind: TurnInputKind::UserMessage,
+            channel: None,
+            participant: None,
         })
         .expect("turn start should succeed")
         .turn;
@@ -137,6 +139,8 @@ fn turn_log_sequence_continues_after_runtime_restart() {
                 thread_id: thread.id.clone(),
                 input: "Prepare the first lifecycle step".to_owned(),
                 input_kind: TurnInputKind::UserMessage,
+                channel: None,
+                participant: None,
             })
             .expect("turn start should succeed")
             .turn;
@@ -152,6 +156,8 @@ fn turn_log_sequence_continues_after_runtime_restart() {
             thread_id: thread_id.clone(),
             input: "Resume after restart".to_owned(),
             input_kind: TurnInputKind::ResumeCommand,
+            channel: None,
+            participant: None,
         })
         .expect("turn should restart cleanly")
         .turn;

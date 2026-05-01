@@ -967,6 +967,8 @@ mod tests {
                 thread_id: thread.id,
                 input: "delete .env".to_owned(),
                 input_kind: TurnInputKind::UserMessage,
+                channel: None,
+                participant: None,
             }),
         ));
 

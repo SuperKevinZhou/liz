@@ -4,8 +4,8 @@ use crate::storage::error::StorageResult;
 use crate::storage::fs::{ensure_layout, read_json, write_json};
 use crate::storage::paths::StoragePaths;
 use liz_protocol::{
-    ArtifactId, MemoryCitationRef, MemoryFactId, MemoryFactKind, MemoryTopicStatus, ThreadId,
-    Timestamp,
+    ArtifactId, InfoBoundary, MemoryCitationRef, MemoryFactId, MemoryFactKind, MemoryTopicStatus,
+    RelationshipEntry, ThreadId, Timestamp,
 };
 use serde::{Deserialize, Serialize};
 
@@ -76,6 +76,12 @@ pub struct GlobalMemorySnapshot {
     pub facts: Vec<StoredMemoryFact>,
     /// The minimal topic index used by foreground recall.
     pub topic_index: Vec<StoredTopicRecord>,
+    /// Owner-defined relationship entries used for context boundaries.
+    #[serde(default)]
+    pub relationships: Vec<RelationshipEntry>,
+    /// The default boundary applied to unknown participants.
+    #[serde(default)]
+    pub default_stranger_boundary: InfoBoundary,
 }
 
 impl GlobalMemorySnapshot {
@@ -89,6 +95,8 @@ impl GlobalMemorySnapshot {
             recent_keywords: Vec::new(),
             facts: Vec::new(),
             topic_index: Vec::new(),
+            relationships: Vec::new(),
+            default_stranger_boundary: InfoBoundary::stranger_default(),
         }
     }
 }

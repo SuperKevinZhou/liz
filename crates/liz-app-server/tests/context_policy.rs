@@ -64,6 +64,8 @@ fn context_assembly_surfaces_recent_conversation_wakeup_and_executor_boundary() 
             thread_id: thread.id.clone(),
             input: "Patch the websocket transport retry logic".to_owned(),
             input_kind: TurnInputKind::UserMessage,
+            channel: None,
+            participant: None,
         })
         .expect("turn start should succeed")
         .turn;
@@ -125,6 +127,8 @@ fn risky_turn_stops_for_checkpoint_and_approval_then_resumes_after_approval() {
                 thread_id: thread.id.clone(),
                 input: "Delete .env and reset Cargo.lock".to_owned(),
                 input_kind: TurnInputKind::UserMessage,
+                channel: None,
+                participant: None,
             }),
         ))
         .expect("turn request should be sent");

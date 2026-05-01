@@ -44,6 +44,8 @@ fn turn_start_streams_assistant_and_tool_events_before_completion() {
                 thread_id: thread.id,
                 input: "Plan a patch tool command for this task".to_owned(),
                 input_kind: TurnInputKind::UserMessage,
+                channel: None,
+                participant: None,
             }),
         ))
         .expect("turn request should be sent");
@@ -124,6 +126,8 @@ fn turn_start_executes_committed_shell_tool_calls() {
                 thread_id: thread.id,
                 input: "run command: echo from-turn".to_owned(),
                 input_kind: TurnInputKind::UserMessage,
+                channel: None,
+                participant: None,
             }),
         ))
         .expect("turn request should be sent");

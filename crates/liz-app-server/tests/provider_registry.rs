@@ -627,6 +627,7 @@ fn demo_request() -> ModelTurnRequest {
             active_goal: Some("Exercise provider runtime".to_owned()),
             active_summary: Some("Running provider demo".to_owned()),
             last_interruption: None,
+            workspace_ref: Some("D:/zzh/Code/liz/liz".to_owned()),
             pending_commitments: Vec::new(),
             latest_turn_id: None,
             latest_checkpoint_id: None,

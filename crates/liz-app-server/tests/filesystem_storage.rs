@@ -80,6 +80,7 @@ fn thread_store_round_trips_thread_records() {
         active_goal: Some("Persist thread state".to_owned()),
         active_summary: Some("Storage interface committed".to_owned()),
         last_interruption: None,
+        workspace_ref: Some("D:/zzh/Code/liz/liz".to_owned()),
         pending_commitments: vec!["Add filesystem tests".to_owned()],
         latest_turn_id: Some(TurnId::new("turn_01")),
         latest_checkpoint_id: Some(CheckpointId::new("checkpoint_01")),

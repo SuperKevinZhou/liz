@@ -363,6 +363,8 @@ impl CliApp {
             thread_id,
             input,
             input_kind: TurnInputKind::UserMessage,
+            channel: Some(cli_channel_ref()),
+            participant: Some(owner_participant_ref()),
         }))?;
         self.view_model.status_line = "Message sent".to_owned();
         Ok(())
@@ -559,6 +561,8 @@ impl CliApp {
                             thread_id: response.thread.id.clone(),
                             input,
                             input_kind: TurnInputKind::UserMessage,
+                            channel: Some(cli_channel_ref()),
+                            participant: Some(owner_participant_ref()),
                         }))?;
                     }
                 }
@@ -869,6 +873,20 @@ fn parse_approval_policy(value: &str) -> Option<ApprovalPolicy> {
 
 fn is_permission_policy_alias(value: &str) -> bool {
     parse_approval_policy(value).is_some()
+}
+
+fn cli_channel_ref() -> liz_protocol::ChannelRef {
+    liz_protocol::ChannelRef {
+        kind: liz_protocol::ChannelKind::Cli,
+        external_conversation_id: "cli".to_owned(),
+    }
+}
+
+fn owner_participant_ref() -> liz_protocol::ParticipantRef {
+    liz_protocol::ParticipantRef {
+        external_participant_id: "owner".to_owned(),
+        display_name: Some("owner".to_owned()),
+    }
 }
 
 struct TerminalGuard {
@@ -1271,6 +1289,7 @@ mod tests {
             active_goal: Some(title.to_owned()),
             active_summary: None,
             last_interruption: None,
+            workspace_ref: None,
             pending_commitments: Vec::new(),
             latest_turn_id: None,
             latest_checkpoint_id: None,

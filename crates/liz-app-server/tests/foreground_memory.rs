@@ -30,6 +30,8 @@ fn foreground_memory_compile_and_recall_flows_round_trip() {
             thread_id: thread.id.clone(),
             input: "Implement websocket memory wakeup search".to_owned(),
             input_kind: TurnInputKind::UserMessage,
+            channel: None,
+            participant: None,
         })
         .expect("turn start should succeed")
         .turn;
@@ -174,6 +176,8 @@ fn foreground_memory_marks_superseded_commitments_as_invalidated() {
             thread_id: thread.id.clone(),
             input: "Refine invalidation marker".to_owned(),
             input_kind: TurnInputKind::UserMessage,
+            channel: None,
+            participant: None,
         })
         .expect("turn start should succeed")
         .turn;
@@ -200,6 +204,8 @@ fn foreground_memory_marks_superseded_commitments_as_invalidated() {
             thread_id: thread.id.clone(),
             input: "Refine invalidation marker".to_owned(),
             input_kind: TurnInputKind::ResumeCommand,
+            channel: None,
+            participant: None,
         })
         .expect("resumed turn should start")
         .turn;
@@ -237,6 +243,8 @@ fn foreground_memory_can_emit_a_reflection_summary() {
             thread_id: thread.id.clone(),
             input: "Read files then search text then apply patch".to_owned(),
             input_kind: TurnInputKind::UserMessage,
+            channel: None,
+            participant: None,
         })
         .expect("turn start should succeed")
         .turn;

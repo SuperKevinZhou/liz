@@ -37,6 +37,7 @@ impl ThreadManager {
                 .as_ref()
                 .map(|goal| format!("New thread initialized for: {goal}")),
             last_interruption: None,
+            workspace_ref: request.workspace_ref.clone(),
             pending_commitments: Vec::new(),
             latest_turn_id: None,
             latest_checkpoint_id: None,
@@ -98,6 +99,7 @@ impl ThreadManager {
                 None => format!("Forked from {}", parent.title),
             }),
             last_interruption: parent.last_interruption.clone(),
+            workspace_ref: parent.workspace_ref.clone(),
             pending_commitments: commitments,
             latest_turn_id: None,
             latest_checkpoint_id: parent.latest_checkpoint_id.clone(),

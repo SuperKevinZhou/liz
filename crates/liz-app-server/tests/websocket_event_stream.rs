@@ -55,6 +55,8 @@ fn websocket_server_streams_lifecycle_events_without_polling() {
                 thread_id: thread.id.clone(),
                 input: "Start the long-running work".to_owned(),
                 input_kind: TurnInputKind::UserMessage,
+                channel: None,
+                participant: None,
             }),
         ))
         .expect("turn request should succeed");

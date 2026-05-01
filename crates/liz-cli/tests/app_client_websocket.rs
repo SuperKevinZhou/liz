@@ -47,6 +47,8 @@ fn websocket_app_client_exchanges_requests_and_events_with_real_server() {
                 thread_id: thread.id,
                 input: "Plan a patch tool command for this task".to_owned(),
                 input_kind: TurnInputKind::UserMessage,
+                channel: None,
+                participant: None,
             }),
         ))
         .expect("turn request should be sent");
