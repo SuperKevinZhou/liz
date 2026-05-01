@@ -7,7 +7,7 @@ use liz_protocol::requests::{
     MemoryOpenSessionRequest, MemoryReadWakeupRequest, MemorySearchRequest, ThreadResumeRequest,
     ThreadStartRequest, TurnCancelRequest, TurnInputKind, TurnStartRequest,
 };
-use liz_protocol::{ArtifactKind, MemorySearchMode, ThreadStatus, TurnStatus};
+use liz_protocol::{ArtifactKind, MemoryFactKind, MemorySearchMode, ThreadStatus, TurnStatus};
 use tempfile::TempDir;
 
 #[test]
@@ -221,6 +221,82 @@ fn foreground_memory_marks_superseded_commitments_as_invalidated() {
         !second_compile.invalidated_fact_ids.is_empty(),
         "resolved commitments should invalidate the stale commitment fact"
     );
+}
+
+#[test]
+fn foreground_memory_updates_identity_summary_from_cited_turns() {
+    let temp_dir = TempDir::new().expect("temp dir should be created");
+    let mut runtime =
+        RuntimeCoordinator::from_storage_paths(StoragePaths::new(temp_dir.path().join(".liz")));
+
+    let thread = runtime
+        .start_thread(ThreadStartRequest {
+            title: Some("Identity memory".to_owned()),
+            initial_goal: Some("Remember stable owner preferences".to_owned()),
+            workspace_ref: None,
+        })
+        .expect("thread start should succeed")
+        .thread;
+
+    let turn = runtime
+        .start_turn(TurnStartRequest {
+            thread_id: thread.id.clone(),
+            input: "My name is ZZH and I prefer concise implementation notes.".to_owned(),
+            input_kind: TurnInputKind::UserMessage,
+            channel: None,
+            participant: None,
+        })
+        .expect("turn start should succeed")
+        .turn;
+    runtime
+        .complete_turn(
+            &thread.id,
+            &turn.id,
+            "Owner says my name is ZZH and I prefer concise implementation notes.".to_owned(),
+        )
+        .expect("turn completion should succeed");
+
+    runtime
+        .compile_memory_now(MemoryCompileNowRequest { thread_id: thread.id.clone() })
+        .expect("memory compile should succeed");
+    let wakeup = runtime
+        .read_memory_wakeup(MemoryReadWakeupRequest { thread_id: thread.id.clone() })
+        .expect("read_wakeup should succeed")
+        .wakeup;
+    assert!(wakeup.identity_summary.as_deref().is_some_and(|summary| summary.contains("ZZH")));
+
+    let identity_fact_id = wakeup
+        .citation_fact_ids
+        .iter()
+        .find_map(|fact_id| {
+            runtime
+                .open_memory_evidence(MemoryOpenEvidenceRequest {
+                    thread_id: thread.id.clone(),
+                    turn_id: None,
+                    artifact_id: None,
+                    fact_id: Some(fact_id.clone()),
+                })
+                .expect("fact evidence should open")
+                .evidence
+                .fact_kind
+                .filter(|kind| *kind == MemoryFactKind::Identity)
+                .map(|_| fact_id.clone())
+        })
+        .expect("identity fact should be cited by wakeup");
+    let identity_evidence = runtime
+        .open_memory_evidence(MemoryOpenEvidenceRequest {
+            thread_id: thread.id.clone(),
+            turn_id: None,
+            artifact_id: None,
+            fact_id: Some(identity_fact_id),
+        })
+        .expect("identity evidence should open")
+        .evidence;
+    assert!(identity_evidence.citation.turn_id.is_some());
+    assert!(identity_evidence
+        .fact_value
+        .as_deref()
+        .is_some_and(|value| value.contains("concise implementation notes")));
 }
 
 #[test]

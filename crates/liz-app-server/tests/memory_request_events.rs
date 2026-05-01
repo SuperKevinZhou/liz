@@ -57,14 +57,12 @@ fn memory_requests_emit_wakeup_and_compilation_events() {
         ClientRequest::MemoryCompileNow(MemoryCompileNowRequest { thread_id: thread.id.clone() }),
     ));
     match compile_response {
-        ServerResponseEnvelope::Success(success) => {
-            match success.response {
-                ResponsePayload::MemoryCompileNow(response) => {
-                    assert!(response.compilation.delta_summary.contains("Heuristic fallback"));
-                }
-                other => panic!("unexpected compile response: {other:?}"),
+        ServerResponseEnvelope::Success(success) => match success.response {
+            ResponsePayload::MemoryCompileNow(response) => {
+                assert!(response.compilation.delta_summary.contains("Heuristic fallback"));
             }
-        }
+            other => panic!("unexpected compile response: {other:?}"),
+        },
         other => panic!("unexpected compile response: {other:?}"),
     }
 
