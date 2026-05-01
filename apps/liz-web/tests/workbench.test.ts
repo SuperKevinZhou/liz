@@ -2,6 +2,7 @@ import {
   activeTranscript,
   activeToolCalls,
   initialWorkbenchState,
+  sanitizeProviderProfiles,
   workbenchReducer,
 } from "../src/state/workbench";
 import type { ServerEvent, Thread, Turn } from "../src/protocol/types";
@@ -208,6 +209,20 @@ describe("workbench reducer", () => {
     expect(state.memoryByThread.thread_01.compilation?.delta_summary).toBe(
       "Updated active UI topic.",
     );
+  });
+
+  it("sanitizes provider credentials before storing them", () => {
+    const profiles = sanitizeProviderProfiles([
+      {
+        profile_id: "profile_01",
+        provider_id: "telegram",
+        display_name: "Telegram",
+        credential: { kind: "api_key", api_key: "secret-token" },
+      },
+    ]);
+
+    expect(JSON.stringify(profiles)).not.toContain("secret-token");
+    expect(profiles[0].credential).toMatchObject({ kind: "api_key", api_key: "configured" });
   });
 });
 

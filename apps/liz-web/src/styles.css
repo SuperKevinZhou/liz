@@ -280,6 +280,7 @@ button {
 .section-row,
 .setting-row {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 14px;
   padding: 10px 0;
@@ -292,6 +293,16 @@ button {
   overflow-wrap: anywhere;
   text-align: right;
   font-size: 12px;
+}
+
+.setting-row select,
+.provider-form input {
+  min-height: 36px;
+  min-width: 180px;
+  color: var(--ink-0);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-1);
 }
 
 .workspace {
@@ -616,6 +627,60 @@ button {
 .memory-results {
   display: grid;
   gap: 8px;
+}
+
+.settings-header,
+.settings-header div,
+.channel-row,
+.provider-list article {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-header h2 {
+  margin: 0;
+}
+
+.channel-list,
+.provider-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.channel-row,
+.provider-list article,
+.provider-form {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(251, 250, 247, 0.72);
+}
+
+.channel-row.disabled {
+  opacity: 0.72;
+}
+
+.channel-row span,
+.channel-row small,
+.provider-list small {
+  display: block;
+  color: var(--ink-2);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.channel-row p {
+  margin: 5px 0 0;
+  color: var(--ink-2);
+}
+
+.provider-form {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
 }
 
 .empty-panel {

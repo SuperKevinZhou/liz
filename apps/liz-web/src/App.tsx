@@ -80,7 +80,12 @@ export function App() {
           runtime={runtime}
           setPreferences={setPreferences}
         />
-        <WorkspaceView activeView={activeView} preferences={preferences} runtime={runtime} />
+        <WorkspaceView
+          activeView={activeView}
+          preferences={preferences}
+          runtime={runtime}
+          setPreferences={setPreferences}
+        />
       </main>
 
       <aside className="inspector">
@@ -231,17 +236,25 @@ function WorkspaceView({
   activeView,
   preferences,
   runtime,
+  setPreferences,
 }: {
   activeView: ViewId;
   preferences: Preferences;
   runtime: LizRuntime;
+  setPreferences: React.Dispatch<React.SetStateAction<Preferences>>;
 }) {
   if (activeView === "chat") {
     return <ChatSurface runtime={runtime} />;
   }
 
   if (activeView === "settings") {
-    return <SettingsSurface preferences={preferences} />;
+    return (
+      <SettingsSurface
+        preferences={preferences}
+        runtime={runtime}
+        setPreferences={setPreferences}
+      />
+    );
   }
 
   if (activeView === "approvals") {
@@ -252,28 +265,14 @@ function WorkspaceView({
     return <MemorySurface runtime={runtime} />;
   }
 
-  const panels = {
-    channels: {
-      icon: PlugZap,
-      title: "Channels",
-      rows: ["Telegram", "Discord", "Email", "Unknown"],
-    },
-  } as const;
-  const panel = panels[activeView as keyof typeof panels];
-  const Icon = panel.icon;
+  if (activeView === "channels") {
+    return <ChannelsSurface runtime={runtime} />;
+  }
 
   return (
     <section className="placeholder-surface">
-      <Icon size={22} />
-      <h2>{panel.title}</h2>
-      <div className="lined-list">
-        {panel.rows.map((row) => (
-          <button key={row}>
-            <span>{row}</span>
-            <small>Not loaded</small>
-          </button>
-        ))}
-      </div>
+      <Bot size={22} />
+      <h2>Not loaded</h2>
     </section>
   );
 }
@@ -549,24 +548,151 @@ function TranscriptRow({ entry }: { entry: TranscriptEntry }) {
   );
 }
 
-function SettingsSurface({ preferences }: { preferences: Preferences }) {
+function ChannelsSurface({ runtime }: { runtime: LizRuntime }) {
+  const telegramProfiles = runtime.state.providerProfiles.filter((profile) =>
+    profile.provider_id.toLowerCase().includes("telegram"),
+  );
+
   return (
     <section className="settings-surface">
+      <div className="settings-header">
+        <div>
+          <PlugZap size={20} />
+          <h2>Channels</h2>
+        </div>
+        <button className="secondary-button" type="button" onClick={() => void runtime.loadRuntimeState()}>
+          Refresh
+        </button>
+      </div>
+      <div className="channel-list">
+        <article className="channel-row">
+          <div>
+            <span>Telegram</span>
+            <strong>{telegramProfiles.length > 0 ? "configured" : "not configured"}</strong>
+            <p>Adapter status, last error, and activity timestamps are not exposed by the server yet.</p>
+          </div>
+          <small>Token hidden</small>
+        </article>
+        {["Discord", "Email", "Unknown"].map((channel) => (
+          <article key={channel} className="channel-row disabled">
+            <div>
+              <span>{channel}</span>
+              <strong>not exposed by server yet</strong>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function SettingsSurface({
+  preferences,
+  runtime,
+  setPreferences,
+}: {
+  preferences: Preferences;
+  runtime: LizRuntime;
+  setPreferences: React.Dispatch<React.SetStateAction<Preferences>>;
+}) {
+  const [providerId, setProviderId] = useState("");
+  const [profileId, setProfileId] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [secret, setSecret] = useState("");
+
+  const saveProvider = () => {
+    if (!providerId.trim() || !profileId.trim() || !secret.trim()) {
+      return;
+    }
+    void runtime.upsertProviderProfile({
+      provider_id: providerId.trim(),
+      profile_id: profileId.trim(),
+      display_name: displayName.trim() || null,
+      credential: { kind: "api_key", api_key: secret },
+    });
+    setSecret("");
+  };
+
+  return (
+    <section className="settings-surface">
+      <div className="settings-header">
+        <div>
+          <Settings size={20} />
+          <h2>Settings</h2>
+        </div>
+        <button className="secondary-button" type="button" onClick={() => void runtime.loadRuntimeState()}>
+          Load runtime
+        </button>
+      </div>
       <div className="setting-row">
         <span>Server URL</span>
         <strong>{preferences.serverUrl}</strong>
       </div>
       <div className="setting-row">
         <span>Density</span>
-        <strong>{preferences.density}</strong>
+        <select
+          value={preferences.density}
+          onChange={(event) =>
+            setPreferences((current) => ({ ...current, density: event.target.value as Preferences["density"] }))
+          }
+        >
+          <option value="comfortable">Comfortable</option>
+          <option value="compact">Compact</option>
+        </select>
       </div>
       <div className="setting-row">
         <span>Markdown</span>
-        <strong>{preferences.markdown}</strong>
+        <select
+          value={preferences.markdown}
+          onChange={(event) =>
+            setPreferences((current) => ({ ...current, markdown: event.target.value as Preferences["markdown"] }))
+          }
+        >
+          <option value="rendered">Rendered</option>
+          <option value="plain">Plain</option>
+        </select>
       </div>
       <div className="setting-row">
-        <span>Tool cards</span>
-        <strong>{preferences.toolVerbosity}</strong>
+        <span>Approval policy</span>
+        <select
+          value={runtime.state.runtimeConfig?.approval_policy ?? "on-request"}
+          onChange={(event) =>
+            void runtime.updateRuntimeConfig({
+              sandbox: null,
+              approval_policy: event.target.value as "on-request" | "danger-full-access",
+            })
+          }
+        >
+          <option value="on-request">On request</option>
+          <option value="danger-full-access">Danger full access</option>
+        </select>
+      </div>
+      <section className="provider-form">
+        <p className="eyebrow">Provider auth</p>
+        <input value={providerId} onChange={(event) => setProviderId(event.target.value)} placeholder="Provider id" />
+        <input value={profileId} onChange={(event) => setProfileId(event.target.value)} placeholder="Profile id" />
+        <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Display name" />
+        <input value={secret} onChange={(event) => setSecret(event.target.value)} placeholder="API key or token" type="password" />
+        <button className="primary-button" type="button" onClick={saveProvider}>
+          Save profile
+        </button>
+      </section>
+      <div className="provider-list">
+        {runtime.state.providerProfiles.map((profile) => (
+          <article key={profile.profile_id}>
+            <div>
+              <strong>{profile.display_name ?? profile.profile_id}</strong>
+              <small>{profile.provider_id}</small>
+            </div>
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => void runtime.deleteProviderProfile(profile.profile_id)}
+            >
+              Delete
+            </button>
+          </article>
+        ))}
       </div>
     </section>
   );

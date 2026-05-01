@@ -249,6 +249,42 @@ export interface RuntimeConfigUpdateRequest {
   approval_policy: "on-request" | "danger-full-access" | null;
 }
 
+export interface ProviderAuthListRequest {
+  provider_id: string | null;
+}
+
+export interface ProviderAuthProfile {
+  profile_id: string;
+  provider_id: string;
+  display_name: string | null;
+  credential: ProviderCredential;
+}
+
+export type ProviderCredential =
+  | { kind: "api_key"; api_key: string }
+  | {
+      kind: "oauth";
+      access_token: string;
+      refresh_token: string | null;
+      expires_at_ms: number | null;
+      account_id: string | null;
+      email: string | null;
+    }
+  | {
+      kind: "token";
+      token: string;
+      expires_at_ms: number | null;
+      metadata: Record<string, string>;
+    };
+
+export interface ProviderAuthUpsertRequest {
+  profile: ProviderAuthProfile;
+}
+
+export interface ProviderAuthDeleteRequest {
+  profile_id: string;
+}
+
 export interface ThreadStartResponse {
   thread: Thread;
 }
@@ -379,6 +415,38 @@ export interface MemorySearchResponse {
 
 export interface MemoryOpenEvidenceResponse {
   evidence: MemoryEvidenceView;
+}
+
+export interface RuntimeConfigResponse {
+  sandbox: {
+    mode: string;
+    network: string;
+    working_directory: string | null;
+  };
+  approval_policy: "on-request" | "danger-full-access";
+}
+
+export interface ProviderAuthListResponse {
+  profiles: ProviderAuthProfile[];
+}
+
+export interface ProviderAuthUpsertResponse {
+  profile: ProviderAuthProfile;
+}
+
+export interface ProviderAuthDeleteResponse {
+  profile_id: string;
+}
+
+export interface ModelStatusResponse {
+  provider_id: string;
+  display_name: string | null;
+  model_id: string | null;
+  auth_kind: string | null;
+  ready: boolean;
+  credential_configured: boolean;
+  credential_hints: string[];
+  notes: string[];
 }
 
 export interface ResumeSummary {

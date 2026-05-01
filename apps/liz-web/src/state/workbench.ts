@@ -10,6 +10,9 @@ import type {
   MemorySearchHit,
   MemoryTopicSummary,
   MemoryWakeup,
+  ModelStatusResponse,
+  ProviderAuthProfile,
+  RuntimeConfigResponse,
   RecentConversationWakeupView,
   ServerEvent,
   Thread,
@@ -100,6 +103,9 @@ export interface WorkbenchState {
   memoryTopics: MemoryTopicSummary[];
   memorySearch: { query: string; mode: "keyword" | "semantic"; hits: MemorySearchHit[] } | null;
   selectedEvidence: MemoryEvidenceView | null;
+  runtimeConfig: RuntimeConfigResponse | null;
+  providerProfiles: ProviderAuthProfile[];
+  modelStatus: ModelStatusResponse | null;
   selectedToolCallId: string | null;
 }
 
@@ -128,7 +134,12 @@ export type WorkbenchAction =
       mode: "keyword" | "semantic";
       hits: MemorySearchHit[];
     }
-  | { type: "memory_evidence_set"; evidence: MemoryEvidenceView | null };
+  | { type: "memory_evidence_set"; evidence: MemoryEvidenceView | null }
+  | { type: "runtime_config_set"; config: RuntimeConfigResponse }
+  | { type: "provider_profiles_set"; profiles: ProviderAuthProfile[] }
+  | { type: "provider_profile_upsert"; profile: ProviderAuthProfile }
+  | { type: "provider_profile_deleted"; profileId: string }
+  | { type: "model_status_set"; status: ModelStatusResponse };
 
 export const initialWorkbenchState: WorkbenchState = {
   threads: [],
@@ -141,6 +152,9 @@ export const initialWorkbenchState: WorkbenchState = {
   memoryTopics: [],
   memorySearch: null,
   selectedEvidence: null,
+  runtimeConfig: null,
+  providerProfiles: [],
+  modelStatus: null,
   selectedToolCallId: null,
 };
 
@@ -299,6 +313,32 @@ export const workbenchReducer = (
 
     case "memory_evidence_set":
       return { ...state, selectedEvidence: action.evidence };
+
+    case "runtime_config_set":
+      return { ...state, runtimeConfig: action.config };
+
+    case "provider_profiles_set":
+      return { ...state, providerProfiles: sanitizeProviderProfiles(action.profiles) };
+
+    case "provider_profile_upsert":
+      return {
+        ...state,
+        providerProfiles: sanitizeProviderProfiles([
+          action.profile,
+          ...state.providerProfiles.filter((profile) => profile.profile_id !== action.profile.profile_id),
+        ]),
+      };
+
+    case "provider_profile_deleted":
+      return {
+        ...state,
+        providerProfiles: state.providerProfiles.filter(
+          (profile) => profile.profile_id !== action.profileId,
+        ),
+      };
+
+    case "model_status_set":
+      return { ...state, modelStatus: action.status };
   }
 };
 
@@ -629,6 +669,27 @@ const upsertThread = (threads: Thread[], thread: Thread) =>
 
 const sortThreads = (threads: Thread[]) =>
   [...threads].sort((left, right) => right.updated_at.localeCompare(left.updated_at));
+
+export const sanitizeProviderProfiles = (profiles: ProviderAuthProfile[]) =>
+  profiles.map((profile) => ({
+    ...profile,
+    credential: sanitizeCredential(profile.credential),
+  }));
+
+const sanitizeCredential = (credential: ProviderAuthProfile["credential"]) => {
+  switch (credential.kind) {
+    case "api_key":
+      return { kind: "api_key" as const, api_key: "configured" };
+    case "oauth":
+      return {
+        ...credential,
+        access_token: "configured",
+        refresh_token: credential.refresh_token ? "configured" : null,
+      };
+    case "token":
+      return { ...credential, token: "configured" };
+  }
+};
 
 const upsertApproval = (
   state: WorkbenchState,

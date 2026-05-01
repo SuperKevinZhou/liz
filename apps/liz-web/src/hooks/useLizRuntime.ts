@@ -14,7 +14,17 @@ import type {
   MemoryReadWakeupResponse,
   MemorySearchRequest,
   MemorySearchResponse,
+  ModelStatusResponse,
+  ProviderAuthDeleteRequest,
+  ProviderAuthDeleteResponse,
+  ProviderAuthListRequest,
+  ProviderAuthListResponse,
+  ProviderAuthProfile,
+  ProviderAuthUpsertRequest,
+  ProviderAuthUpsertResponse,
   ResponseError,
+  RuntimeConfigResponse,
+  RuntimeConfigUpdateRequest,
   ServerResponseEnvelope,
   Thread,
   ThreadForkRequest,
@@ -72,6 +82,10 @@ export interface LizRuntime {
   listMemoryTopics: () => Promise<void>;
   searchMemory: (query: string, mode: "keyword" | "semantic") => Promise<void>;
   openMemoryEvidence: (request: MemoryOpenEvidenceRequest) => Promise<void>;
+  loadRuntimeState: () => Promise<void>;
+  updateRuntimeConfig: (request: RuntimeConfigUpdateRequest) => Promise<void>;
+  upsertProviderProfile: (profile: ProviderAuthProfile) => Promise<void>;
+  deleteProviderProfile: (profileId: string) => Promise<void>;
 }
 
 export const useLizRuntime = (preferences: Preferences): LizRuntime => {
@@ -344,6 +358,52 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
     [request],
   );
 
+  const loadRuntimeState = useCallback(async () => {
+    const [runtimeConfig, providers, model] = await Promise.all([
+      request<RuntimeConfigResponse, Record<string, never>>("runtime/config_get", {}),
+      request<ProviderAuthListResponse, ProviderAuthListRequest>("provider_auth/list", {
+        provider_id: null,
+      }),
+      request<ModelStatusResponse, Record<string, never>>("model/status", {}),
+    ]);
+    dispatch({ type: "runtime_config_set", config: runtimeConfig.data });
+    dispatch({ type: "provider_profiles_set", profiles: providers.data.profiles });
+    dispatch({ type: "model_status_set", status: model.data });
+  }, [request]);
+
+  const updateRuntimeConfig = useCallback(
+    async (configRequest: RuntimeConfigUpdateRequest) => {
+      const response = await request<RuntimeConfigResponse, RuntimeConfigUpdateRequest>(
+        "runtime/config_update",
+        configRequest,
+      );
+      dispatch({ type: "runtime_config_set", config: response.data });
+    },
+    [request],
+  );
+
+  const upsertProviderProfile = useCallback(
+    async (profile: ProviderAuthProfile) => {
+      const response = await request<ProviderAuthUpsertResponse, ProviderAuthUpsertRequest>(
+        "provider_auth/upsert",
+        { profile },
+      );
+      dispatch({ type: "provider_profile_upsert", profile: response.data.profile });
+    },
+    [request],
+  );
+
+  const deleteProviderProfile = useCallback(
+    async (profileId: string) => {
+      const response = await request<ProviderAuthDeleteResponse, ProviderAuthDeleteRequest>(
+        "provider_auth/delete",
+        { profile_id: profileId },
+      );
+      dispatch({ type: "provider_profile_deleted", profileId: response.data.profile_id });
+    },
+    [request],
+  );
+
   return useMemo(
     () => ({
       connectionState,
@@ -372,6 +432,10 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
       listMemoryTopics,
       searchMemory,
       openMemoryEvidence,
+      loadRuntimeState,
+      updateRuntimeConfig,
+      upsertProviderProfile,
+      deleteProviderProfile,
     }),
     [
       cancelTurn,
@@ -383,13 +447,17 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
       error,
       everyApproval,
       forkThread,
+      deleteProviderProfile,
       listMemoryTopics,
+      loadRuntimeState,
       memory,
       openMemoryEvidence,
       readMemoryWakeup,
       refreshThreads,
       respondToApproval,
       searchMemory,
+      updateRuntimeConfig,
+      upsertProviderProfile,
       approvals,
       runtime,
       selectedTool,
