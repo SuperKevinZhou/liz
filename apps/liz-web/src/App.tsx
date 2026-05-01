@@ -401,12 +401,9 @@ function WorkspacesSurface({ runtime }: { runtime: LizRuntime }) {
   const [rootPath, setRootPath] = useState("");
   const [label, setLabel] = useState("");
   const [permissions, setPermissions] = useState({ read: true, write: true, shell: true });
-
-  useEffect(() => {
-    if (!runtime.state.nodes.some((node) => node.identity.node_id === nodeId)) {
-      setNodeId(firstNode);
-    }
-  }, [firstNode, nodeId, runtime.state.nodes]);
+  const selectedNodeId = runtime.state.nodes.some((node) => node.identity.node_id === nodeId)
+    ? nodeId
+    : firstNode;
 
   const attachWorkspace = () => {
     const root = rootPath.trim();
@@ -414,7 +411,7 @@ function WorkspacesSurface({ runtime }: { runtime: LizRuntime }) {
       return;
     }
     void runtime.attachWorkspaceMount({
-      node_id: nodeId,
+      node_id: selectedNodeId,
       root_path: root,
       label: label.trim() || null,
       permissions,
@@ -435,7 +432,7 @@ function WorkspacesSurface({ runtime }: { runtime: LizRuntime }) {
         </button>
       </div>
       <div className="provider-form workspace-mount-form">
-        <select value={nodeId} onChange={(event) => setNodeId(event.target.value)} aria-label="Workspace node">
+        <select value={selectedNodeId} onChange={(event) => setNodeId(event.target.value)} aria-label="Workspace node">
           {runtime.state.nodes.length === 0 ? <option value="local">Local device</option> : null}
           {runtime.state.nodes.map((node) => (
             <option key={node.identity.node_id} value={node.identity.node_id}>
