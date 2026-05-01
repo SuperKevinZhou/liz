@@ -10,6 +10,8 @@ import type {
   MemoryListTopicsResponse,
   MemoryOpenEvidenceRequest,
   MemoryOpenEvidenceResponse,
+  MemoryOpenSessionRequest,
+  MemoryOpenSessionResponse,
   MemoryReadWakeupRequest,
   MemoryReadWakeupResponse,
   MemorySearchRequest,
@@ -42,6 +44,7 @@ import type {
 import {
   activeApprovals,
   activeMemory,
+  activeResumePanel,
   activeRuntime,
   activeThread,
   activeToolCalls,
@@ -64,6 +67,7 @@ export interface LizRuntime {
   activeApprovals: ReturnType<typeof activeApprovals>;
   allApprovals: ReturnType<typeof allApprovals>;
   activeMemory: ReturnType<typeof activeMemory>;
+  activeResumePanel: ReturnType<typeof activeResumePanel>;
   selectedToolCall: ReturnType<typeof selectedToolCall>;
   selectToolCall: (callId: string | null) => void;
   connect: () => void;
@@ -132,6 +136,7 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
   const approvals = activeApprovals(state);
   const everyApproval = allApprovals(state);
   const memory = activeMemory(state);
+  const resumePanel = activeResumePanel(state);
 
   const connect = useCallback(() => {
     setError(null);
@@ -157,12 +162,15 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
         const summary = response.data.resume_summary;
         if (summary) {
           dispatch({
-            type: "resume_summary_added",
+            type: "resume_summary_set",
             threadId,
-            content: [summary.headline, summary.active_summary].filter(Boolean).join("\n"),
-            createdAt: new Date().toISOString(),
+            headline: summary.headline,
+            activeSummary: summary.active_summary,
+            pendingCommitments: summary.pending_commitments,
+            lastInterruption: summary.last_interruption,
           });
         }
+        void loadThreadSession(threadId, request, dispatch, setError);
       } catch (caught) {
         setError(messageFromError(caught));
       }
@@ -414,6 +422,7 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
       activeApprovals: approvals,
       allApprovals: everyApproval,
       activeMemory: memory,
+      activeResumePanel: resumePanel,
       selectedToolCall: selectedTool,
       selectToolCall: selectTool,
       connect,
@@ -451,6 +460,7 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
       memory,
       openMemoryEvidence,
       readMemoryWakeup,
+      resumePanel,
       refreshThreads,
       respondToApproval,
       searchMemory,
@@ -485,6 +495,28 @@ const requestThreadList = async (
     } else {
       setError(response.error.message);
     }
+  } catch (caught) {
+    setError(messageFromError(caught));
+  }
+};
+
+type RuntimeRequest = <Data, Params>(
+  method: Parameters<LizProtocolClient["request"]>[0],
+  params: Params,
+) => Promise<{ data: Data }>;
+
+const loadThreadSession = async (
+  threadId: ThreadId,
+  request: RuntimeRequest,
+  dispatch: React.Dispatch<any>,
+  setError: (error: string | null) => void,
+) => {
+  try {
+    const response = await request<MemoryOpenSessionResponse, MemoryOpenSessionRequest>(
+      "memory/open_session",
+      { thread_id: threadId },
+    );
+    dispatch({ type: "session_loaded", session: response.data.session });
   } catch (caught) {
     setError(messageFromError(caught));
   }

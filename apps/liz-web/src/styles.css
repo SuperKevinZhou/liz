@@ -390,12 +390,50 @@ button:disabled {
 }
 
 .message,
-.tool-line {
+.tool-line,
+.resume-banner {
   width: min(760px, 100%);
   padding: 13px 14px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: rgba(251, 250, 247, 0.72);
+}
+
+.resume-banner {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px 14px;
+  border-left: 3px solid var(--memory);
+  background: rgba(255, 255, 255, 0.54);
+}
+
+.resume-banner > span {
+  color: var(--memory);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.resume-banner strong,
+.resume-banner p,
+.resume-banner small {
+  display: block;
+}
+
+.resume-banner p,
+.resume-banner small {
+  margin: 4px 0 0;
+  color: var(--ink-2);
+  line-height: 1.45;
+}
+
+.resume-banner ul {
+  grid-column: 2;
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--ink-1);
 }
 
 .message.user {

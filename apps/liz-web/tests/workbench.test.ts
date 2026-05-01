@@ -1,4 +1,5 @@
 import {
+  activeResumePanel,
   activeTranscript,
   activeToolCalls,
   initialWorkbenchState,
@@ -223,6 +224,96 @@ describe("workbench reducer", () => {
 
     expect(JSON.stringify(profiles)).not.toContain("secret-token");
     expect(profiles[0].credential).toMatchObject({ kind: "api_key", api_key: "configured" });
+  });
+
+  it("stores resume summaries outside the transcript", () => {
+    let state = workbenchReducer(initialWorkbenchState, {
+      type: "threads_loaded",
+      threads: [thread],
+    });
+    state = workbenchReducer(state, {
+      type: "resume_summary_set",
+      threadId: "thread_01",
+      headline: "Continue console work",
+      activeSummary: "Review the last turn before sending a new message.",
+      pendingCommitments: ["Keep commits small"],
+      lastInterruption: null,
+    });
+
+    expect(activeTranscript(state)).toHaveLength(0);
+    expect(activeResumePanel(state)).toMatchObject({
+      headline: "Continue console work",
+      activeSummary: "Review the last turn before sending a new message.",
+    });
+  });
+
+  it("projects loaded sessions into chat history", () => {
+    let state = workbenchReducer(initialWorkbenchState, {
+      type: "threads_loaded",
+      threads: [thread],
+    });
+    state = workbenchReducer(state, {
+      type: "session_loaded",
+      session: {
+        thread_id: "thread_01",
+        title: "Console thread",
+        status: "active",
+        active_summary: null,
+        pending_commitments: [],
+        artifacts: [],
+        recent_entries: [
+          {
+            recorded_at: "2026-05-01T00:00:01Z",
+            event: "turn_started",
+            summary: "Started turn for: hi",
+            turn_id: "turn_01",
+            artifact_ids: [],
+          },
+          {
+            recorded_at: "2026-05-01T00:00:02Z",
+            event: "turn_completed",
+            summary: "Hello, ready when you are.",
+            turn_id: "turn_01",
+            artifact_ids: [],
+          },
+        ],
+      },
+    });
+
+    expect(activeTranscript(state)).toMatchObject([
+      { kind: "user", content: "hi", status: "sent" },
+      { kind: "assistant", content: "Hello, ready when you are.", status: "completed" },
+    ]);
+  });
+
+  it("does not duplicate loaded session transcript entries", () => {
+    let state = workbenchReducer(initialWorkbenchState, {
+      type: "threads_loaded",
+      threads: [thread],
+    });
+    const session = {
+      thread_id: "thread_01",
+      title: "Console thread",
+      status: "active" as const,
+      active_summary: null,
+      pending_commitments: [],
+      artifacts: [],
+      recent_entries: [
+        {
+          recorded_at: "2026-05-01T00:00:01Z",
+          event: "turn_started",
+          summary: "Started turn for: hi",
+          turn_id: "turn_01",
+          artifact_ids: [],
+        },
+      ],
+    };
+
+    state = workbenchReducer(state, { type: "session_loaded", session });
+    state = workbenchReducer(state, { type: "session_loaded", session });
+
+    expect(activeTranscript(state)).toHaveLength(1);
+    expect(activeTranscript(state)[0]).toMatchObject({ kind: "user", content: "hi" });
   });
 });
 

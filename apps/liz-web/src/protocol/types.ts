@@ -244,6 +244,10 @@ export interface MemoryOpenEvidenceRequest {
   fact_id: MemoryFactId | null;
 }
 
+export interface MemoryOpenSessionRequest {
+  thread_id: ThreadId;
+}
+
 export interface RuntimeConfigUpdateRequest {
   sandbox: unknown | null;
   approval_policy: "on-request" | "danger-full-access" | null;
@@ -392,6 +396,24 @@ export interface MemoryEvidenceView {
   artifact_body: string | null;
 }
 
+export interface MemorySessionEntry {
+  recorded_at: string;
+  event: string;
+  summary: string;
+  turn_id: TurnId | null;
+  artifact_ids: ArtifactId[];
+}
+
+export interface MemorySessionView {
+  thread_id: ThreadId;
+  title: string;
+  status: ThreadStatus;
+  active_summary: string | null;
+  pending_commitments: string[];
+  recent_entries: MemorySessionEntry[];
+  artifacts: ArtifactRef[];
+}
+
 export interface MemoryReadWakeupResponse {
   thread_id: ThreadId;
   wakeup: MemoryWakeup;
@@ -415,6 +437,10 @@ export interface MemorySearchResponse {
 
 export interface MemoryOpenEvidenceResponse {
   evidence: MemoryEvidenceView;
+}
+
+export interface MemoryOpenSessionResponse {
+  session: MemorySessionView;
 }
 
 export interface RuntimeConfigResponse {

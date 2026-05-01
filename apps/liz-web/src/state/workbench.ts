@@ -7,6 +7,8 @@ import type {
   ExecutorOutputChunkEventPayload,
   MemoryCompilationSummary,
   MemoryEvidenceView,
+  MemorySessionEntry,
+  MemorySessionView,
   MemorySearchHit,
   MemoryTopicSummary,
   MemoryWakeup,
@@ -58,6 +60,14 @@ export type TranscriptEntry =
       tone: "info" | "error";
     };
 
+export interface ResumePanel {
+  threadId: ThreadId;
+  headline: string;
+  activeSummary: string | null;
+  pendingCommitments: string[];
+  lastInterruption: string | null;
+}
+
 export interface ThreadRuntime {
   activeTurnId: TurnId | null;
   lastError: string | null;
@@ -103,6 +113,7 @@ export interface WorkbenchState {
   memoryTopics: MemoryTopicSummary[];
   memorySearch: { query: string; mode: "keyword" | "semantic"; hits: MemorySearchHit[] } | null;
   selectedEvidence: MemoryEvidenceView | null;
+  resumeByThread: Record<ThreadId, ResumePanel>;
   runtimeConfig: RuntimeConfigResponse | null;
   providerProfiles: ProviderAuthProfile[];
   modelStatus: ModelStatusResponse | null;
@@ -116,7 +127,15 @@ export type WorkbenchAction =
   | { type: "user_message_added"; threadId: ThreadId; content: string; createdAt: string }
   | { type: "turn_started"; turn: Turn }
   | { type: "server_event"; event: ServerEvent }
-  | { type: "resume_summary_added"; threadId: ThreadId; content: string; createdAt: string }
+  | {
+      type: "resume_summary_set";
+      threadId: ThreadId;
+      headline: string;
+      activeSummary: string | null;
+      pendingCommitments: string[];
+      lastInterruption: string | null;
+    }
+  | { type: "session_loaded"; session: MemorySessionView }
   | { type: "thread_error"; threadId: ThreadId; message: string }
   | { type: "tool_selected"; callId: string | null }
   | { type: "approval_upsert"; approval: ApprovalRequest }
@@ -152,6 +171,7 @@ export const initialWorkbenchState: WorkbenchState = {
   memoryTopics: [],
   memorySearch: null,
   selectedEvidence: null,
+  resumeByThread: {},
   runtimeConfig: null,
   providerProfiles: [],
   modelStatus: null,
@@ -225,16 +245,33 @@ export const workbenchReducer = (
     case "server_event":
       return projectServerEvent(state, action.event);
 
-    case "resume_summary_added":
-      return appendEntry(state, action.threadId, {
-        id: `resume:${action.createdAt}`,
-        kind: "system",
-        threadId: action.threadId,
-        turnId: null,
-        content: action.content,
-        createdAt: action.createdAt,
-        tone: "info",
-      });
+    case "resume_summary_set":
+      return {
+        ...state,
+        resumeByThread: {
+          ...state.resumeByThread,
+          [action.threadId]: {
+            threadId: action.threadId,
+            headline: action.headline,
+            activeSummary: action.activeSummary,
+            pendingCommitments: action.pendingCommitments,
+            lastInterruption: action.lastInterruption,
+          },
+        },
+      };
+
+    case "session_loaded":
+      return {
+        ...state,
+        transcriptByThread: {
+          ...state.transcriptByThread,
+          [action.session.thread_id]: mergeSessionTranscript(
+            state.transcriptByThread[action.session.thread_id] ?? [],
+            action.session.recent_entries,
+            action.session.thread_id,
+          ),
+        },
+      };
 
     case "thread_error":
       return appendEntry(
@@ -374,6 +411,9 @@ export const activeMemory = (state: WorkbenchState) =>
         compilation: null,
       })
     : { wakeup: null, recentConversation: null, compilation: null };
+
+export const activeResumePanel = (state: WorkbenchState) =>
+  state.activeThreadId ? (state.resumeByThread[state.activeThreadId] ?? null) : null;
 
 const projectServerEvent = (state: WorkbenchState, event: ServerEvent): WorkbenchState => {
   switch (event.event_type) {
@@ -663,6 +703,50 @@ const appendEntry = (
     [threadId]: [...(state.transcriptByThread[threadId] ?? []), entry],
   },
 });
+
+const mergeSessionTranscript = (
+  existing: TranscriptEntry[],
+  entries: MemorySessionEntry[],
+  threadId: ThreadId,
+) => {
+  const existingIds = new Set(existing.map((entry) => entry.id));
+  const projected = entries.map((entry) => projectSessionEntry(entry, threadId));
+  return [...existing, ...projected.filter((entry) => !existingIds.has(entry.id))];
+};
+
+const projectSessionEntry = (entry: MemorySessionEntry, threadId: ThreadId): TranscriptEntry => {
+  const base = {
+    id: `session:${entry.event}:${entry.turn_id ?? entry.recorded_at}:${entry.recorded_at}`,
+    threadId,
+    turnId: entry.turn_id,
+    content: normalizeSessionSummary(entry.summary),
+    createdAt: entry.recorded_at,
+  };
+
+  if (entry.event === "turn_started") {
+    return { ...base, kind: "user", status: "sent" };
+  }
+
+  if (entry.event === "turn_completed") {
+    return { ...base, kind: "assistant", status: "completed" };
+  }
+
+  if (entry.event === "turn_cancelled") {
+    return { ...base, kind: "assistant", status: "cancelled" };
+  }
+
+  if (entry.event === "turn_failed") {
+    return { ...base, kind: "assistant", status: "failed" };
+  }
+
+  return { ...base, kind: "system", tone: "info" };
+};
+
+const normalizeSessionSummary = (summary: string) =>
+  summary
+    .replace(/^Started turn for:\s*/i, "")
+    .replace(/^Currently working on:\s*/i, "")
+    .trim();
 
 const upsertThread = (threads: Thread[], thread: Thread) =>
   sortThreads([thread, ...threads.filter((current) => current.id !== thread.id)]);

@@ -485,11 +485,16 @@ function ChatSurface({ runtime }: { runtime: LizRuntime }) {
     <section className="chat-surface">
       <div className="transcript">
         {runtime.activeThread ? (
-          runtime.activeTranscript.length > 0 ? (
-            runtime.activeTranscript.map((entry) => <TranscriptRow key={entry.id} entry={entry} />)
-          ) : (
-            <div className="empty-panel">Start a turn to build this transcript.</div>
-          )
+          <>
+            {runtime.activeResumePanel ? (
+              <ResumeBanner panel={runtime.activeResumePanel} />
+            ) : null}
+            {runtime.activeTranscript.length > 0 ? (
+              runtime.activeTranscript.map((entry) => <TranscriptRow key={entry.id} entry={entry} />)
+            ) : (
+              <div className="empty-panel">Start a turn to build this transcript.</div>
+            )}
+          </>
         ) : (
           <div className="empty-panel">Connect to the app server and create or select a thread.</div>
         )}
@@ -545,6 +550,30 @@ function ChatSurface({ runtime }: { runtime: LizRuntime }) {
           </button>
         </div>
       </form>
+    </section>
+  );
+}
+
+function ResumeBanner({
+  panel,
+}: {
+  panel: NonNullable<LizRuntime["activeResumePanel"]>;
+}) {
+  return (
+    <section className="resume-banner">
+      <span>Resume</span>
+      <div>
+        <strong>{panel.headline}</strong>
+        {panel.activeSummary ? <p>{panel.activeSummary}</p> : null}
+        {panel.lastInterruption ? <small>{panel.lastInterruption}</small> : null}
+      </div>
+      {panel.pendingCommitments.length > 0 ? (
+        <ul>
+          {panel.pendingCommitments.slice(0, 3).map((commitment) => (
+            <li key={commitment}>{commitment}</li>
+          ))}
+        </ul>
+      ) : null}
     </section>
   );
 }
