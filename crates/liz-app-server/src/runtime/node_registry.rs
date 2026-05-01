@@ -5,6 +5,7 @@ use liz_protocol::{
     ApprovalPolicy, NodeCapabilities, NodeId, NodeIdentity, NodeKind, NodePolicy, NodeRecord,
     NodeStatus, SandboxMode, WorkspaceMount, WorkspaceMountAttachRequest,
     WorkspaceMountDetachRequest, WorkspaceMountId, WorkspaceMountListRequest,
+    WorkspaceMountPermissions,
 };
 use std::collections::HashMap;
 
@@ -36,6 +37,16 @@ impl NodeRegistry {
             .get(node_id)
             .cloned()
             .ok_or_else(|| RuntimeError::not_found("node_not_found", "node does not exist"))
+    }
+
+    /// Reads one workspace mount record.
+    pub fn read_workspace_mount(
+        &self,
+        workspace_id: &WorkspaceMountId,
+    ) -> RuntimeResult<WorkspaceMount> {
+        self.workspace_mounts.get(workspace_id).cloned().ok_or_else(|| {
+            RuntimeError::not_found("workspace_mount_not_found", "workspace mount does not exist")
+        })
     }
 
     /// Updates the policy for one registered node.
@@ -86,6 +97,28 @@ impl NodeRegistry {
         };
         self.workspace_mounts.insert(workspace_id, mount.clone());
         Ok(mount)
+    }
+
+    /// Resolves a local path to a stable workspace mount, attaching it when needed.
+    pub fn resolve_or_attach_local_workspace(
+        &mut self,
+        root_path: impl Into<String>,
+    ) -> RuntimeResult<WorkspaceMount> {
+        let root_path = root_path.into();
+        if let Some(existing) = self
+            .workspace_mounts
+            .values()
+            .find(|mount| mount.node_id.as_str() == "local" && mount.root_path == root_path)
+        {
+            return Ok(existing.clone());
+        }
+
+        self.attach_workspace_mount(WorkspaceMountAttachRequest {
+            node_id: NodeId::new("local"),
+            root_path,
+            label: None,
+            permissions: WorkspaceMountPermissions { read: true, write: true, shell: true },
+        })
     }
 
     /// Detaches a workspace mount.

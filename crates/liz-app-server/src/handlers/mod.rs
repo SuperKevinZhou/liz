@@ -2,7 +2,7 @@
 
 use crate::events::PendingEvent;
 use crate::executor::NodeExecutorRouter;
-use crate::runtime::{RuntimeCoordinator, RuntimeError};
+use crate::runtime::{RuntimeCoordinator, RuntimeError, RuntimeResult};
 use liz_protocol::events::{
     ApprovalResolvedEvent, ArtifactCreatedEvent, DiffAvailableEvent, ExecutorOutputChunkEvent,
     MemoryCompilationAppliedEvent, MemoryInvalidationAppliedEvent, MemoryWakeupLoadedEvent,
@@ -14,7 +14,9 @@ use liz_protocol::responses::{
     ErrorResponseEnvelope, ResponseError, ResponsePayload, ServerResponseEnvelope,
     SuccessResponseEnvelope,
 };
-use liz_protocol::{ClientRequestEnvelope, ExecutorTaskId, RequestId, ServerEventPayload};
+use liz_protocol::{
+    ClientRequestEnvelope, ExecutorTaskId, RequestId, ServerEventPayload, ToolCallRequest,
+};
 
 /// The fully handled result of a request, including any events that should be published.
 #[derive(Debug)]
@@ -174,8 +176,9 @@ pub fn handle_request(
                 )
             })
         }
-        ClientRequest::ToolCall(request) => {
-            executor.execute_tool(&request).and_then(|node_execution| {
+        ClientRequest::ToolCall(mut request) => normalize_tool_call_node(runtime, &mut request)
+            .and_then(|()| executor.execute_tool(&request))
+            .and_then(|node_execution| {
                 let node_id = node_execution.node_id.clone();
                 let executed = node_execution.executed;
                 let executor_task_id =
@@ -189,6 +192,8 @@ pub fn handle_request(
                 let (execution_turn_id, artifact_refs) = runtime.record_tool_execution(
                     &request.thread_id,
                     request.turn_id.as_ref(),
+                    Some(node_id.clone()),
+                    request.workspace_mount_id.clone(),
                     executed.tool_name.as_str(),
                     &executed.summary,
                     artifacts,
@@ -250,8 +255,7 @@ pub fn handle_request(
                     }),
                     events,
                 ))
-            })
-        }
+            }),
         ClientRequest::ThreadRollback(_) => Err(RuntimeError::unsupported(
             "rollback_not_ready",
             "rollback handling is implemented in a later phase",
@@ -367,6 +371,20 @@ fn error_envelope(request_id: RequestId, error: RuntimeError) -> ErrorResponseEn
             retryable: error.retryable(),
         },
     }
+}
+
+fn normalize_tool_call_node(
+    runtime: &RuntimeCoordinator,
+    request: &mut ToolCallRequest,
+) -> RuntimeResult<()> {
+    if request.node_id.is_none() {
+        request.node_id = if let Some(workspace_mount_id) = request.workspace_mount_id.as_ref() {
+            Some(runtime.read_workspace_mount(workspace_mount_id)?.node_id)
+        } else {
+            Some(liz_protocol::NodeId::new("local"))
+        };
+    }
+    Ok(())
 }
 
 fn executor_task_id_for_tool(

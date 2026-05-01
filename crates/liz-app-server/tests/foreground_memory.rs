@@ -43,6 +43,8 @@ fn foreground_memory_compile_and_recall_flows_round_trip() {
         .record_tool_execution(
             &thread.id,
             Some(&turn.id),
+            None,
+            None,
             "workspace.read",
             "Read memory context",
             vec![(
@@ -338,6 +340,8 @@ fn foreground_memory_can_emit_a_reflection_summary() {
         .record_tool_execution(
             &thread.id,
             Some(&turn.id),
+            None,
+            None,
             "workspace.read",
             "Read protocol notes",
             Vec::new(),
@@ -347,6 +351,8 @@ fn foreground_memory_can_emit_a_reflection_summary() {
         .record_tool_execution(
             &thread.id,
             Some(&turn.id),
+            None,
+            None,
             "workspace.search",
             "Search roadmap notes",
             Vec::new(),

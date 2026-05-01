@@ -116,13 +116,46 @@ fn forked_thread_inherits_parent_state_without_reusing_latest_turn() {
         .expect("thread fork should succeed")
         .thread;
 
-    assert_eq!(child.parent_thread_id, Some(parent.id));
+    assert_eq!(child.parent_thread_id, Some(parent.id.clone()));
     assert_eq!(child.workspace_ref.as_deref(), Some("D:/workspace/main"));
+    assert_eq!(child.workspace_mount_id, parent.workspace_mount_id);
     assert_eq!(child.active_goal.as_deref(), Some("Ship Phase 3"));
     assert!(child.latest_turn_id.is_none());
     assert!(child
         .pending_commitments
         .contains(&"Fork created for: Try a different lifecycle projection".to_owned()));
+}
+
+#[test]
+fn thread_start_resolves_workspace_ref_to_local_mount() {
+    let temp_dir = TempDir::new().expect("temp dir should be created");
+    let workspace_root = temp_dir.path().join("workspace");
+    std::fs::create_dir_all(&workspace_root).expect("workspace root should be created");
+    let mut runtime =
+        RuntimeCoordinator::from_storage_paths(StoragePaths::new(temp_dir.path().join(".liz")));
+
+    let thread = runtime
+        .start_thread(ThreadStartRequest {
+            title: Some("Mounted workspace".to_owned()),
+            initial_goal: Some("Use a node-scoped workspace mount".to_owned()),
+            workspace_ref: Some(workspace_root.display().to_string()),
+            workspace_mount_id: None,
+        })
+        .expect("thread start should resolve workspace mount")
+        .thread;
+
+    let workspace_mount_id =
+        thread.workspace_mount_id.clone().expect("thread should reference a workspace mount");
+    let mount = runtime
+        .read_workspace_mount(&workspace_mount_id)
+        .expect("workspace mount should be readable");
+    let (node_id, scoped_mount_id) =
+        runtime.thread_execution_scope(&thread.id).expect("thread execution scope should resolve");
+
+    assert_eq!(mount.node_id.as_str(), "local");
+    assert_eq!(mount.root_path, workspace_root.display().to_string());
+    assert_eq!(node_id.as_str(), "local");
+    assert_eq!(scoped_mount_id, Some(workspace_mount_id));
 }
 
 #[test]

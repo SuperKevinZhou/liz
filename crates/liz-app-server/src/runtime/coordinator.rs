@@ -53,8 +53,9 @@ use liz_protocol::{
 use liz_protocol::{
     ApprovalDecision, ApprovalRequest, ApprovalStatus, ArtifactKind, ArtifactRef, Checkpoint,
     CheckpointScope, GitHubCopilotDeviceCode, GitHubCopilotDevicePollStatus, GitLabOAuthStart,
-    MemoryFactKind, MiniMaxOAuthDeviceCode, MiniMaxOAuthPollStatus, OpenAiCodexOAuthStart,
+    MemoryFactKind, MiniMaxOAuthDeviceCode, MiniMaxOAuthPollStatus, NodeId, OpenAiCodexOAuthStart,
     ParticipantRef, ProviderAuthProfile, ProviderCredential, Thread, ThreadId, Turn, TurnId,
+    WorkspaceMount, WorkspaceMountId,
 };
 use std::collections::HashMap;
 
@@ -101,8 +102,9 @@ impl RuntimeCoordinator {
     /// Starts a new thread and persists the initial thread projection.
     pub fn start_thread(
         &mut self,
-        request: ThreadStartRequest,
+        mut request: ThreadStartRequest,
     ) -> RuntimeResult<ThreadStartResponse> {
+        self.resolve_thread_workspace_mount(&mut request)?;
         let thread = self.thread_manager.start_thread(&self.stores, &mut self.ids, request)?;
         Ok(ThreadStartResponse { thread })
     }
@@ -732,6 +734,29 @@ impl RuntimeCoordinator {
         Ok(WorkspaceMountDetachResponse { workspace_id })
     }
 
+    /// Reads one workspace mount by identifier.
+    pub fn read_workspace_mount(
+        &self,
+        workspace_id: &WorkspaceMountId,
+    ) -> RuntimeResult<WorkspaceMount> {
+        self.node_registry.read_workspace_mount(workspace_id)
+    }
+
+    /// Returns the node and workspace mount that should scope thread execution.
+    pub fn thread_execution_scope(
+        &self,
+        thread_id: &ThreadId,
+    ) -> RuntimeResult<(NodeId, Option<WorkspaceMountId>)> {
+        let Some(thread) = self.read_thread(thread_id)? else {
+            return Err(RuntimeError::not_found("thread_not_found", "thread does not exist"));
+        };
+        if let Some(workspace_mount_id) = thread.workspace_mount_id.clone() {
+            let mount = self.node_registry.read_workspace_mount(&workspace_mount_id)?;
+            return Ok((mount.node_id, Some(workspace_mount_id)));
+        }
+        Ok((NodeId::new("local"), None))
+    }
+
     /// Forks a thread into a new line of work.
     pub fn fork_thread(&mut self, request: ThreadForkRequest) -> RuntimeResult<ThreadForkResponse> {
         let thread = self.thread_manager.fork_thread(&self.stores, &mut self.ids, request)?;
@@ -826,6 +851,8 @@ impl RuntimeCoordinator {
         &mut self,
         thread_id: &ThreadId,
         turn_id: Option<&TurnId>,
+        node_id: Option<NodeId>,
+        workspace_mount_id: Option<WorkspaceMountId>,
         tool_name: &str,
         summary: &str,
         artifacts: Vec<(ArtifactKind, String, String)>,
@@ -847,8 +874,8 @@ impl RuntimeCoordinator {
                 thread_id: thread_id.clone(),
                 turn_id: execution_turn_id.clone(),
                 kind,
-                node_id: Some(liz_protocol::NodeId::new("local")),
-                workspace_mount_id: None,
+                node_id: node_id.clone(),
+                workspace_mount_id: workspace_mount_id.clone(),
                 summary: artifact_summary,
                 locator,
                 created_at: created_at.clone(),
@@ -868,6 +895,24 @@ impl RuntimeCoordinator {
         })?;
 
         Ok((execution_turn_id, references))
+    }
+
+    fn resolve_thread_workspace_mount(
+        &mut self,
+        request: &mut ThreadStartRequest,
+    ) -> RuntimeResult<()> {
+        match (request.workspace_mount_id.clone(), request.workspace_ref.clone()) {
+            (Some(workspace_mount_id), None) => {
+                let mount = self.node_registry.read_workspace_mount(&workspace_mount_id)?;
+                request.workspace_ref = Some(mount.root_path);
+            }
+            (None, Some(workspace_ref)) if !workspace_ref.trim().is_empty() => {
+                let mount = self.node_registry.resolve_or_attach_local_workspace(workspace_ref)?;
+                request.workspace_mount_id = Some(mount.workspace_id);
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     /// Assembles the current context envelope for a thread and input.

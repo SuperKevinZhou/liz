@@ -336,11 +336,13 @@ impl AppServer {
             developer_prompt,
             user_prompt,
         )
-        .with_tool_surface_mode(if thread.workspace_ref.is_some() {
-            ToolSurfaceMode::Standard
-        } else {
-            ToolSurfaceMode::ConversationOnly
-        });
+        .with_tool_surface_mode(
+            if thread.workspace_mount_id.is_some() || thread.workspace_ref.is_some() {
+                ToolSurfaceMode::Standard
+            } else {
+                ToolSurfaceMode::ConversationOnly
+            },
+        );
         let mut continuation_results = Vec::<ToolResultInjection>::new();
         let mut last_tool_fingerprint = String::new();
         let mut repeated_tool_rounds = 0_u32;
@@ -417,6 +419,15 @@ impl AppServer {
         }
     }
 
+    fn local_thread_execution_scope(
+        &self,
+        thread_id: &ThreadId,
+    ) -> (liz_protocol::NodeId, Option<liz_protocol::WorkspaceMountId>) {
+        self.runtime
+            .thread_execution_scope(thread_id)
+            .unwrap_or_else(|_| (liz_protocol::NodeId::new("local"), None))
+    }
+
     fn handle_model_event(
         &mut self,
         thread_id: &ThreadId,
@@ -468,6 +479,7 @@ impl AppServer {
                 ));
             }
             NormalizedTurnEvent::ToolCallCommitted { call_id, tool_name, arguments } => {
+                let (node_id, workspace_mount_id) = self.local_thread_execution_scope(thread_id);
                 self.event_bus.publish(crate::events::PendingEvent::new(
                     thread_id.clone(),
                     Some(turn_id.clone()),
@@ -476,8 +488,8 @@ impl AppServer {
                         tool_name: tool_name.clone(),
                         arguments_summary: arguments.clone(),
                         risk_hint: None,
-                        node_id: Some(liz_protocol::NodeId::new("local")),
-                        workspace_mount_id: None,
+                        node_id: Some(node_id),
+                        workspace_mount_id,
                     }),
                 ));
             }
@@ -491,6 +503,7 @@ impl AppServer {
         turn_id: &TurnId,
         tool_call: &ProviderToolCall,
     ) -> ToolResultInjection {
+        let (node_id, workspace_mount_id) = self.local_thread_execution_scope(thread_id);
         let invocation = match parse_tool_invocation(&tool_call.tool_name, &tool_call.arguments) {
             Ok(invocation) => invocation,
             Err(message) => {
@@ -500,8 +513,8 @@ impl AppServer {
                     ServerEventPayload::ToolFailed(liz_protocol::ToolFailedEvent {
                         tool_name: tool_call.tool_name.clone(),
                         summary: message.clone(),
-                        node_id: Some(liz_protocol::NodeId::new("local")),
-                        workspace_mount_id: None,
+                        node_id: Some(node_id.clone()),
+                        workspace_mount_id: workspace_mount_id.clone(),
                     }),
                 ));
                 return ToolResultInjection {
@@ -517,8 +530,8 @@ impl AppServer {
         let request = ToolCallRequest {
             thread_id: thread_id.clone(),
             turn_id: Some(turn_id.clone()),
-            node_id: Some(liz_protocol::NodeId::new("local")),
-            workspace_mount_id: None,
+            node_id: Some(node_id.clone()),
+            workspace_mount_id: workspace_mount_id.clone(),
             invocation,
         };
         let node_execution = match self.executor.execute_tool(&request) {
@@ -531,8 +544,8 @@ impl AppServer {
                     ServerEventPayload::ToolFailed(liz_protocol::ToolFailedEvent {
                         tool_name: tool_call.tool_name.clone(),
                         summary: summary.clone(),
-                        node_id: Some(liz_protocol::NodeId::new("local")),
-                        workspace_mount_id: None,
+                        node_id: Some(node_id.clone()),
+                        workspace_mount_id: workspace_mount_id.clone(),
                     }),
                 ));
                 return ToolResultInjection {
@@ -557,6 +570,8 @@ impl AppServer {
         let (execution_turn_id, artifact_refs) = match self.runtime.record_tool_execution(
             thread_id,
             Some(turn_id),
+            Some(node_id.clone()),
+            workspace_mount_id.clone(),
             executed.tool_name.as_str(),
             &executed.summary,
             artifacts,
@@ -571,7 +586,7 @@ impl AppServer {
                         tool_name: executed.tool_name.as_str().to_owned(),
                         summary: summary.clone(),
                         node_id: Some(node_id.clone()),
-                        workspace_mount_id: None,
+                        workspace_mount_id: workspace_mount_id.clone(),
                     }),
                 ));
                 return ToolResultInjection {
@@ -611,7 +626,7 @@ impl AppServer {
                     stream: chunk.stream,
                     chunk: chunk.chunk,
                     node_id: Some(node_id.clone()),
-                    workspace_mount_id: None,
+                    workspace_mount_id: workspace_mount_id.clone(),
                 }),
             ));
         }
@@ -624,7 +639,7 @@ impl AppServer {
                 summary: executed.summary,
                 artifact_ids: artifact_refs.iter().map(|artifact| artifact.id.clone()).collect(),
                 node_id: Some(node_id),
-                workspace_mount_id: None,
+                workspace_mount_id,
             }),
         ));
 
