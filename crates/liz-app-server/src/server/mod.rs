@@ -114,6 +114,27 @@ impl AppServer {
                 },
             ));
         }
+        if let liz_protocol::ClientRequest::MemoryCompileNow(request) = &envelope.request {
+            if let Some(compilation) = self.compile_memory_for_thread_summary(&request.thread_id) {
+                self.publish_memory_compilation_events(
+                    &request.thread_id,
+                    None,
+                    compilation.clone(),
+                );
+                return ServerResponseEnvelope::Success(Box::new(
+                    liz_protocol::SuccessResponseEnvelope {
+                        ok: true,
+                        request_id: envelope.request_id,
+                        response: liz_protocol::ResponsePayload::MemoryCompileNow(
+                            liz_protocol::MemoryCompileNowResponse {
+                                thread_id: request.thread_id.clone(),
+                                compilation,
+                            },
+                        ),
+                    },
+                ));
+            }
+        }
 
         let request = envelope.request.clone();
         let handled = handlers::handle_request(&mut self.runtime, &self.executor, envelope);
@@ -600,10 +621,20 @@ impl AppServer {
     }
 
     fn compile_memory_for_thread(&mut self, thread_id: &ThreadId, turn_id: Option<&TurnId>) {
-        let Ok(compilation) = self.runtime.compile_thread_memory(thread_id) else {
+        let compilation = self.compile_memory_for_thread_summary(thread_id);
+        let Some(compilation) = compilation else {
             return;
         };
 
+        self.publish_memory_compilation_events(thread_id, turn_id, compilation);
+    }
+
+    fn publish_memory_compilation_events(
+        &mut self,
+        thread_id: &ThreadId,
+        turn_id: Option<&TurnId>,
+        compilation: liz_protocol::MemoryCompilationSummary,
+    ) {
         self.event_bus.publish(crate::events::PendingEvent::new(
             thread_id.clone(),
             turn_id.cloned(),
@@ -629,6 +660,26 @@ impl AppServer {
                 }),
             ));
         }
+    }
+
+    fn compile_memory_for_thread_summary(
+        &self,
+        thread_id: &ThreadId,
+    ) -> Option<liz_protocol::MemoryCompilationSummary> {
+        self.compile_memory_for_thread_with_model(thread_id)
+            .or_else(|| self.runtime.compile_thread_memory(thread_id).ok())
+    }
+
+    fn compile_memory_for_thread_with_model(
+        &self,
+        thread_id: &ThreadId,
+    ) -> Option<liz_protocol::MemoryCompilationSummary> {
+        let prompt = self.runtime.build_memory_compilation_prompt(thread_id).ok()?;
+        let gateway = self.gateway_with_provider_auth_profiles();
+        let raw_json = gateway
+            .complete_text(prompt.system_prompt, prompt.developer_prompt, prompt.user_prompt)
+            .ok()?;
+        self.runtime.compile_thread_memory_from_llm_output(thread_id, &raw_json).ok()
     }
 
     fn gateway_with_provider_auth_profiles(&self) -> ModelGateway {

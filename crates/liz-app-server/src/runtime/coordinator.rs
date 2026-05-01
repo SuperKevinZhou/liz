@@ -10,7 +10,7 @@ use crate::model::{
 use crate::runtime::context_assembler::{AssembledContext, ContextAssembler};
 use crate::runtime::error::{RuntimeError, RuntimeResult};
 use crate::runtime::ids::IdGenerator;
-use crate::runtime::memory::ForegroundMemoryEngine;
+use crate::runtime::memory::{ForegroundMemoryEngine, MemoryCompilationPrompt};
 use crate::runtime::policy_engine::{PolicyDecision, PolicyEngine};
 use crate::runtime::stores::RuntimeStores;
 use crate::runtime::thread_manager::ThreadManager;
@@ -721,6 +721,28 @@ impl RuntimeCoordinator {
         thread_id: &ThreadId,
     ) -> RuntimeResult<liz_protocol::MemoryCompilationSummary> {
         self.memory_engine.compile_thread(&self.stores, &self.ids, thread_id)
+    }
+
+    /// Builds the no-tool prompt for model-backed memory compilation.
+    pub(crate) fn build_memory_compilation_prompt(
+        &self,
+        thread_id: &ThreadId,
+    ) -> RuntimeResult<MemoryCompilationPrompt> {
+        self.memory_engine.build_compilation_prompt(&self.stores, thread_id)
+    }
+
+    /// Applies a model-backed memory compilation result.
+    pub(crate) fn compile_thread_memory_from_llm_output(
+        &self,
+        thread_id: &ThreadId,
+        raw_json: &str,
+    ) -> RuntimeResult<liz_protocol::MemoryCompilationSummary> {
+        self.memory_engine.compile_thread_from_llm_output(
+            &self.stores,
+            &self.ids,
+            thread_id,
+            raw_json,
+        )
     }
 
     /// Produces a lightweight reflection summary from the currently compiled memory state.

@@ -15,7 +15,7 @@ use tempfile::TempDir;
 #[test]
 fn memory_requests_emit_wakeup_and_compilation_events() {
     let temp_dir = TempDir::new().expect("temp dir should be created");
-    let mut server = AppServer::new(StoragePaths::new(temp_dir.path().join(".liz")));
+    let mut server = AppServer::new_simulated(StoragePaths::new(temp_dir.path().join(".liz")));
     let events = server.subscribe_events();
 
     let thread = match server.handle_request(envelope(
@@ -58,7 +58,12 @@ fn memory_requests_emit_wakeup_and_compilation_events() {
     ));
     match compile_response {
         ServerResponseEnvelope::Success(success) => {
-            assert!(matches!(success.response, ResponsePayload::MemoryCompileNow(_)));
+            match success.response {
+                ResponsePayload::MemoryCompileNow(response) => {
+                    assert!(response.compilation.delta_summary.contains("Heuristic fallback"));
+                }
+                other => panic!("unexpected compile response: {other:?}"),
+            }
         }
         other => panic!("unexpected compile response: {other:?}"),
     }

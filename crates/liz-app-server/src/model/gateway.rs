@@ -11,7 +11,7 @@ use crate::model::registry::ProviderRegistry;
 use crate::model::{
     ProviderToolCall, ProviderToolProtocol, ToolResultInjection, ToolSurfaceMode, ToolSurfaceSpec,
 };
-use liz_protocol::{Thread, Turn};
+use liz_protocol::{Thread, ThreadId, ThreadStatus, Timestamp, Turn, TurnId, TurnKind, TurnStatus};
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
@@ -281,6 +281,59 @@ impl ModelGateway {
                 &mut sink,
             ),
         }
+    }
+
+    /// Completes a no-tool text request and returns the final assistant message.
+    pub fn complete_text(
+        &self,
+        system_prompt: String,
+        developer_prompt: String,
+        user_prompt: String,
+    ) -> Result<String, ModelError> {
+        let timestamp = Timestamp::new("model:ephemeral");
+        let thread_id = ThreadId::new("thread_model_text");
+        let turn = Turn {
+            id: TurnId::new("turn_model_text"),
+            thread_id: thread_id.clone(),
+            kind: TurnKind::Compilation,
+            status: TurnStatus::Running,
+            started_at: timestamp.clone(),
+            ended_at: None,
+            goal: Some("Complete no-tool model request".to_owned()),
+            summary: None,
+            checkpoint_before: None,
+            checkpoint_after: None,
+        };
+        let thread = Thread {
+            id: thread_id,
+            title: "No-tool model request".to_owned(),
+            status: ThreadStatus::Active,
+            created_at: timestamp.clone(),
+            updated_at: timestamp,
+            active_goal: None,
+            active_summary: None,
+            last_interruption: None,
+            workspace_ref: None,
+            pending_commitments: Vec::new(),
+            latest_turn_id: Some(turn.id.clone()),
+            latest_checkpoint_id: None,
+            parent_thread_id: None,
+        };
+        let request = ModelTurnRequest::from_prompt_parts(
+            thread,
+            turn,
+            system_prompt,
+            developer_prompt,
+            user_prompt,
+        )
+        .with_tool_surface_mode(ToolSurfaceMode::ConversationOnly);
+        let summary = self.run_turn(request, |_| {})?;
+        if !summary.tool_calls.is_empty() {
+            return Err(ModelError::ProviderFailure(
+                "no-tool model request returned tool calls".to_owned(),
+            ));
+        }
+        Ok(summary.assistant_message.unwrap_or_default())
     }
 
     /// Returns a short summary of the configured provider registry for diagnostics.

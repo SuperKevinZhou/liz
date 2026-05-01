@@ -58,6 +58,13 @@ pub(crate) trait MemoryCompiler {
     fn compile(&self, input: &MemoryCompilationInput) -> RuntimeResult<MemoryCompilationDelta>;
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct MemoryCompilationPrompt {
+    pub(crate) system_prompt: String,
+    pub(crate) developer_prompt: String,
+    pub(crate) user_prompt: String,
+}
+
 impl MemoryCompiler for HeuristicMemoryCompiler {
     fn compile(&self, input: &MemoryCompilationInput) -> RuntimeResult<MemoryCompilationDelta> {
         let recent_summaries = input
@@ -170,6 +177,94 @@ pub(crate) fn parse_llm_memory_delta(
     })
 }
 
+fn render_memory_compilation_prompt(input: &MemoryCompilationInput) -> MemoryCompilationPrompt {
+    let facts = input
+        .existing_facts
+        .iter()
+        .filter(|fact| fact.invalidated_at.is_none())
+        .take(12)
+        .map(|fact| {
+            serde_json::json!({
+                "kind": fact.kind,
+                "subject": fact.subject,
+                "value": fact.value,
+                "keywords": fact.keywords,
+            })
+        })
+        .collect::<Vec<_>>();
+    let recent_entries = input
+        .recent_entries
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| {
+            serde_json::json!({
+                "citation_index": index,
+                "event": entry.event,
+                "summary": entry.summary,
+                "turn_id": entry.turn_id,
+                "artifact_ids": entry.artifact_ids,
+            })
+        })
+        .collect::<Vec<_>>();
+    let citations = input
+        .citations
+        .iter()
+        .enumerate()
+        .map(|(index, citation)| {
+            serde_json::json!({
+                "citation_index": index,
+                "thread_id": citation.thread_id,
+                "turn_id": citation.turn_id,
+                "artifact_id": citation.artifact_id,
+                "note": citation.note,
+            })
+        })
+        .collect::<Vec<_>>();
+    let payload = serde_json::json!({
+        "thread": {
+            "id": input.thread.id,
+            "title": input.thread.title,
+            "status": input.thread.status,
+            "active_goal": input.thread.active_goal,
+            "active_summary": input.thread.active_summary,
+            "pending_commitments": input.thread.pending_commitments,
+        },
+        "recent_entries": recent_entries,
+        "existing_facts": facts,
+        "citations": citations,
+        "output_schema": {
+            "identity_summary_update": "string|null",
+            "active_state_summary": "string|null",
+            "recent_topics": ["string"],
+            "recent_keywords": ["string"],
+            "commitments": ["string"],
+            "candidate_procedures": ["string"],
+            "durable_facts": [
+                {
+                    "kind": "identity|active_state|commitment|decision|topic|procedure_candidate|keyword|null",
+                    "subject": "stable fact subject",
+                    "value": "fact value",
+                    "keywords": ["string"]
+                }
+            ],
+            "invalidation_candidates": ["existing fact subject"]
+        }
+    });
+
+    MemoryCompilationPrompt {
+        system_prompt: "You are liz's private memory compiler. Return only strict JSON.".to_owned(),
+        developer_prompt: concat!(
+            "Compile durable memory from cited conversation evidence. ",
+            "Do not invent identity facts. Only include identity_summary_update when the ",
+            "recent entries explicitly support it. Prefer concise facts, current commitments, ",
+            "topic labels, keyword recall hints, reusable procedure candidates, and existing ",
+            "fact subjects that should be invalidated."
+        )
+        .to_owned(),
+        user_prompt: payload.to_string(),
+    }
+}
+
 impl ForegroundMemoryEngine {
     /// Reads the current wake-up slice and recent-conversation view for a thread.
     pub fn read_wakeup(
@@ -194,20 +289,66 @@ impl ForegroundMemoryEngine {
         ids: &IdGenerator,
         thread_id: &ThreadId,
     ) -> RuntimeResult<MemoryCompilationSummary> {
+        let input = self.build_compilation_input(stores, thread_id)?;
+        let delta = HeuristicMemoryCompiler::default().compile(&input)?;
+        self.apply_compilation_delta(stores, ids, input, delta)
+    }
+
+    /// Builds the no-tool prompt used by model-backed memory compilation.
+    pub(crate) fn build_compilation_prompt(
+        &self,
+        stores: &RuntimeStores,
+        thread_id: &ThreadId,
+    ) -> RuntimeResult<MemoryCompilationPrompt> {
+        let input = self.build_compilation_input(stores, thread_id)?;
+        Ok(render_memory_compilation_prompt(&input))
+    }
+
+    /// Applies a JSON memory compiler response, validating it against thread evidence first.
+    pub(crate) fn compile_thread_from_llm_output(
+        &self,
+        stores: &RuntimeStores,
+        ids: &IdGenerator,
+        thread_id: &ThreadId,
+        raw_json: &str,
+    ) -> RuntimeResult<MemoryCompilationSummary> {
+        let input = self.build_compilation_input(stores, thread_id)?;
+        let delta = parse_llm_memory_delta(raw_json, &input)?;
+        self.apply_compilation_delta(stores, ids, input, delta)
+    }
+
+    fn build_compilation_input(
+        &self,
+        stores: &RuntimeStores,
+        thread_id: &ThreadId,
+    ) -> RuntimeResult<MemoryCompilationInput> {
         let thread = stores
             .get_thread(thread_id)?
             .ok_or_else(|| RuntimeError::not_found("thread_not_found", "thread does not exist"))?;
         let entries = stores.read_turn_log(thread_id)?;
         let recent_entries = recent_entries(&entries);
         let citations = citations_from_entries(thread_id, &recent_entries);
-        let mut snapshot = stores.read_global_memory()?;
+        let snapshot = stores.read_global_memory()?;
         let input = MemoryCompilationInput {
-            thread: thread.clone(),
-            recent_entries: recent_entries.clone(),
-            citations: citations.clone(),
+            thread,
+            recent_entries,
+            citations,
             existing_facts: snapshot.facts.clone(),
         };
-        let delta = HeuristicMemoryCompiler::default().compile(&input)?;
+        Ok(input)
+    }
+
+    fn apply_compilation_delta(
+        &self,
+        stores: &RuntimeStores,
+        ids: &IdGenerator,
+        input: MemoryCompilationInput,
+        delta: MemoryCompilationDelta,
+    ) -> RuntimeResult<MemoryCompilationSummary> {
+        let thread = input.thread;
+        let recent_entries = input.recent_entries;
+        let citations = input.citations;
+        let mut snapshot = stores.read_global_memory()?;
         let now = ids.now_timestamp();
         if let Some(identity_summary) = delta.identity_summary_update.clone() {
             snapshot.identity_summary = Some(identity_summary);
