@@ -36,8 +36,8 @@ fn thread_resource_round_trips_through_json() {
 #[test]
 fn channel_and_relationship_resources_round_trip_through_json() {
     let channel = ChannelRef {
-        kind: ChannelKind::Telegram,
-        external_conversation_id: "telegram_chat_42".to_owned(),
+        kind: ChannelKind::Web,
+        external_conversation_id: "web:browser_42:thread_01".to_owned(),
     };
     let participant = ParticipantRef {
         external_participant_id: "telegram_user_7".to_owned(),
@@ -58,6 +58,7 @@ fn channel_and_relationship_resources_round_trip_through_json() {
     };
 
     let channel_json = serde_json::to_string(&channel).expect("channel should serialize");
+    let channel_value = serde_json::to_value(&channel).expect("channel should serialize");
     let participant_json =
         serde_json::to_string(&participant).expect("participant should serialize");
     let relationship_json =
@@ -71,6 +72,7 @@ fn channel_and_relationship_resources_round_trip_through_json() {
         serde_json::from_str(&relationship_json).expect("relationship should deserialize");
 
     assert_eq!(channel_round_trip, channel);
+    assert_eq!(channel_value["kind"], "web");
     assert_eq!(participant_round_trip, participant);
     assert_eq!(relationship_round_trip, relationship);
 }

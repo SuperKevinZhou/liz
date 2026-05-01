@@ -45,6 +45,8 @@ pub enum MemoryFactKind {
 pub enum ChannelKind {
     /// The Rust CLI reference client.
     Cli,
+    /// The browser console client.
+    Web,
     /// Telegram Bot API.
     Telegram,
     /// Discord or a Discord-compatible gateway.
