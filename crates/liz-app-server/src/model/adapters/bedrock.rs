@@ -157,7 +157,9 @@ fn execute_live_http(
             "maxTokens": output_budget.max_output_tokens,
         },
     });
-    if matches!(tool_surface.protocol, ProviderToolProtocol::Native) {
+    if matches!(tool_surface.protocol, ProviderToolProtocol::Native)
+        && !tool_surface.tools.is_empty()
+    {
         body["toolConfig"] = json!({
             "tools": tool_surface
                 .tools

@@ -2,7 +2,7 @@
 
 use liz_app_server::model::{
     ModelGateway, ModelGatewayConfig, ModelProviderFamily, ModelTurnRequest, ProviderRegistry,
-    ProviderToolProtocol, ToolResultInjection, ToolSurfaceSpec,
+    ProviderToolProtocol, ToolResultInjection, ToolSurfaceMode, ToolSurfaceSpec,
 };
 use liz_protocol::{Thread, ThreadId, ThreadStatus, Timestamp, Turn, TurnId, TurnKind, TurnStatus};
 use std::collections::BTreeMap;
@@ -88,6 +88,26 @@ fn simulated_continuation_finishes_after_tool_result_injection() {
 
     assert!(second.tool_calls.is_empty());
     assert!(second.assistant_message.is_some());
+}
+
+#[test]
+fn conversation_only_simulation_does_not_emit_tool_calls() {
+    let gateway = ModelGateway::from_config(ModelGatewayConfig {
+        primary_provider: "openrouter".to_owned(),
+        overrides: BTreeMap::new(),
+    })
+    .with_simulation(true);
+
+    let summary = gateway
+        .run_turn(
+            demo_request("run command: echo should-stay-prose")
+                .with_tool_surface_mode(ToolSurfaceMode::ConversationOnly),
+            |_| {},
+        )
+        .expect("conversation-only simulation should run");
+
+    assert!(summary.tool_calls.is_empty());
+    assert!(summary.assistant_message.is_some());
 }
 
 fn demo_request(input: &str) -> ModelTurnRequest {

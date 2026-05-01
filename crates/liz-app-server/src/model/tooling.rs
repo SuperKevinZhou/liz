@@ -12,6 +12,15 @@ pub enum ProviderToolProtocol {
     StructuredFallback,
 }
 
+/// Tool surface mode selected for one model turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolSurfaceMode {
+    /// Expose workspace and shell tools for a thread with an attached workspace.
+    Standard,
+    /// Expose no action tools for pure conversation or memory work.
+    ConversationOnly,
+}
+
 /// One provider-facing tool schema entry.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProviderToolSchema {
@@ -97,8 +106,16 @@ impl ToolSurfaceSpec {
         Self { protocol, tools, name_map }
     }
 
+    /// Builds a pure-conversation surface with no workspace or shell tools.
+    pub fn conversation_only(protocol: ProviderToolProtocol) -> Self {
+        Self { protocol, tools: Vec::new(), name_map: ProviderToolNameMap::from_pairs(&[]) }
+    }
+
     /// Returns structured fallback instructions for providers without native tools.
     pub fn structured_fallback_instructions(&self) -> String {
+        if self.tools.is_empty() {
+            return "No runtime tools are available for this turn. Answer directly in prose and do not emit <liz_tool_call> blocks.".to_owned();
+        }
         let mut sections = vec![
             "When you need runtime tools, emit exactly one <liz_tool_call> JSON object.".to_owned(),
             "Do not narrate the tool call in prose.".to_owned(),

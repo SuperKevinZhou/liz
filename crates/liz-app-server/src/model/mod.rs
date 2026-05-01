@@ -40,5 +40,5 @@ pub use provider_spec::{ProviderAuthKind, ProviderSpec};
 pub use registry::ProviderRegistry;
 pub use tooling::{
     ProviderToolCall, ProviderToolNameMap, ProviderToolProtocol, ProviderToolSchema,
-    ToolResultInjection, ToolSurfaceSpec,
+    ToolResultInjection, ToolSurfaceMode, ToolSurfaceSpec,
 };

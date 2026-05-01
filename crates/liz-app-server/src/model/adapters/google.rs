@@ -161,7 +161,9 @@ fn execute_live_http(
                 "contents": google_contents_with_tool_results(&request, &tool_surface),
                 "generationConfig": {"maxOutputTokens": output_budget.max_output_tokens},
             });
-            if matches!(tool_surface.protocol, ProviderToolProtocol::Native) {
+            if matches!(tool_surface.protocol, ProviderToolProtocol::Native)
+                && !tool_surface.tools.is_empty()
+            {
                 body["tools"] = google_native_tools_payload(&tool_surface);
             }
             if let Some(cached_content) = prompt_cache.cached_content.clone() {
@@ -190,7 +192,9 @@ fn execute_live_http(
                 "contents": google_contents_with_tool_results(&request, &tool_surface),
                 "generationConfig": {"maxOutputTokens": output_budget.max_output_tokens},
             });
-            if matches!(tool_surface.protocol, ProviderToolProtocol::Native) {
+            if matches!(tool_surface.protocol, ProviderToolProtocol::Native)
+                && !tool_surface.tools.is_empty()
+            {
                 body["tools"] = google_native_tools_payload(&tool_surface);
             }
             if let Some(cached_content) = prompt_cache.cached_content.clone() {

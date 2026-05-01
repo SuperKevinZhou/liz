@@ -184,7 +184,9 @@ fn execute_live_http(
         "messages": [{"role": "user", "content": user_content}],
         "stream": false,
     });
-    if matches!(tool_surface.protocol, ProviderToolProtocol::Native) {
+    if matches!(tool_surface.protocol, ProviderToolProtocol::Native)
+        && !tool_surface.tools.is_empty()
+    {
         body["tools"] = serde_json::Value::Array(
             tool_surface
                 .tools

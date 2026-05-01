@@ -193,7 +193,9 @@ fn execute_live_http(
                     "stream": false,
                 }),
             };
-            if matches!(tool_surface.protocol, ProviderToolProtocol::Native) {
+            if matches!(tool_surface.protocol, ProviderToolProtocol::Native)
+                && !tool_surface.tools.is_empty()
+            {
                 body["tools"] = openai_native_tools_payload(&tool_surface);
             }
             if let Some(cache_retention) = prompt_cache.openai_cache_retention.clone() {
@@ -256,7 +258,9 @@ fn execute_live_http(
                         }],
                         "stream": false,
                     });
-                    if matches!(tool_surface.protocol, ProviderToolProtocol::Native) {
+                    if matches!(tool_surface.protocol, ProviderToolProtocol::Native)
+                        && !tool_surface.tools.is_empty()
+                    {
                         body["tools"] = anthropic_native_tools_payload(&tool_surface);
                     }
                     (
@@ -272,7 +276,9 @@ fn execute_live_http(
                         "max_output_tokens": output_budget.max_output_tokens,
                         "stream": false,
                     });
-                    if matches!(tool_surface.protocol, ProviderToolProtocol::Native) {
+                    if matches!(tool_surface.protocol, ProviderToolProtocol::Native)
+                        && !tool_surface.tools.is_empty()
+                    {
                         body["tools"] = openai_native_tools_payload(&tool_surface);
                     }
                     (
@@ -291,7 +297,9 @@ fn execute_live_http(
                         ),
                         "stream": false,
                     });
-                    if matches!(tool_surface.protocol, ProviderToolProtocol::Native) {
+                    if matches!(tool_surface.protocol, ProviderToolProtocol::Native)
+                        && !tool_surface.tools.is_empty()
+                    {
                         body["tools"] = openai_native_tools_payload(&tool_surface);
                     }
                     (
@@ -422,7 +430,10 @@ fn simulate_stream(
     sink(NormalizedTurnEvent::AssistantDelta { chunk: second_chunk });
 
     let mut tool_calls = Vec::new();
-    if request.tool_result_injections.is_empty() && needs_tool_call(&request.user_prompt) {
+    if !tool_surface.tools.is_empty()
+        && request.tool_result_injections.is_empty()
+        && needs_tool_call(&request.user_prompt)
+    {
         let tool_name = infer_tool_name(&request.user_prompt);
         let provider_tool_name = tool_surface
             .name_map

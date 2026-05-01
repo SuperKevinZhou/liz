@@ -8,7 +8,9 @@ use crate::model::config::{ModelGatewayConfig, ProviderOverride, ResolvedProvide
 use crate::model::family::ModelProviderFamily;
 use crate::model::normalized_stream::{NormalizedTurnEvent, UsageDelta};
 use crate::model::registry::ProviderRegistry;
-use crate::model::{ProviderToolCall, ProviderToolProtocol, ToolResultInjection, ToolSurfaceSpec};
+use crate::model::{
+    ProviderToolCall, ProviderToolProtocol, ToolResultInjection, ToolSurfaceMode, ToolSurfaceSpec,
+};
 use liz_protocol::{Thread, Turn};
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -31,6 +33,8 @@ pub struct ModelTurnRequest {
     pub prompt: String,
     /// Structured tool results injected into continuation requests.
     pub tool_result_injections: Vec<ToolResultInjection>,
+    /// The tool surface exposed to the provider for this turn.
+    pub tool_surface_mode: ToolSurfaceMode,
 }
 
 impl ModelTurnRequest {
@@ -51,6 +55,7 @@ impl ModelTurnRequest {
             user_prompt,
             prompt,
             tool_result_injections: Vec::new(),
+            tool_surface_mode: ToolSurfaceMode::Standard,
         }
     }
 
@@ -65,6 +70,12 @@ impl ModelTurnRequest {
         tool_result_injections: Vec<ToolResultInjection>,
     ) -> Self {
         self.tool_result_injections = tool_result_injections;
+        self
+    }
+
+    /// Returns a copy with the selected tool surface mode.
+    pub fn with_tool_surface_mode(mut self, mode: ToolSurfaceMode) -> Self {
+        self.tool_surface_mode = mode;
         self
     }
 }
@@ -238,7 +249,11 @@ impl ModelGateway {
         F: FnMut(NormalizedTurnEvent),
     {
         let provider = self.resolve_primary_provider()?;
-        let tool_surface = ToolSurfaceSpec::standard(provider_tool_protocol(&provider));
+        let protocol = provider_tool_protocol(&provider);
+        let tool_surface = match request.tool_surface_mode {
+            ToolSurfaceMode::Standard => ToolSurfaceSpec::standard(protocol),
+            ToolSurfaceMode::ConversationOnly => ToolSurfaceSpec::conversation_only(protocol),
+        };
         match provider.spec.family {
             ModelProviderFamily::AnthropicMessages => self.anthropic.stream_turn(
                 &provider,

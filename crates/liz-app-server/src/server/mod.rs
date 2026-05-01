@@ -8,7 +8,7 @@ use crate::executor::ExecutorGateway;
 use crate::handlers;
 use crate::model::{
     ModelGateway, ModelTurnRequest, NormalizedTurnEvent, ProviderOverride, ProviderToolCall,
-    ToolResultInjection,
+    ToolResultInjection, ToolSurfaceMode,
 };
 use crate::runtime::RuntimeCoordinator;
 use crate::storage::StoragePaths;
@@ -290,12 +290,17 @@ impl AppServer {
         let turn_id = turn.id.clone();
         let model_gateway = self.gateway_with_provider_auth_profiles();
         let base_request = ModelTurnRequest::from_prompt_parts(
-            thread,
+            thread.clone(),
             turn,
             system_prompt,
             developer_prompt,
             user_prompt,
-        );
+        )
+        .with_tool_surface_mode(if thread.workspace_ref.is_some() {
+            ToolSurfaceMode::Standard
+        } else {
+            ToolSurfaceMode::ConversationOnly
+        });
         let mut continuation_results = Vec::<ToolResultInjection>::new();
         let mut last_tool_fingerprint = String::new();
         let mut repeated_tool_rounds = 0_u32;
