@@ -8,6 +8,7 @@ use crate::auth::{
 };
 use crate::checkpoint::{Checkpoint, CheckpointScope};
 use crate::ids::{RequestId, ThreadId, WorkspaceMountId};
+use crate::interaction::InboundEventAction;
 use crate::memory::{
     MemoryCompilationSummary, MemoryEvidenceView, MemorySearchHit, MemorySearchMode,
     MemorySessionView, MemoryTopicSummary, MemoryWakeup, RecentConversationWakeupView,
@@ -180,6 +181,9 @@ pub enum ResponsePayload {
     /// Acknowledges `node/update_policy`.
     #[serde(rename = "node/update_policy")]
     NodeUpdatePolicy(NodeUpdatePolicyResponse),
+    /// Acknowledges `node/heartbeat`.
+    #[serde(rename = "node/heartbeat")]
+    NodeHeartbeat(NodeHeartbeatResponse),
     /// Acknowledges `workspace_mount/list`.
     #[serde(rename = "workspace_mount/list")]
     WorkspaceMountList(WorkspaceMountListResponse),
@@ -481,6 +485,15 @@ pub struct NodeReadResponse {
 pub struct NodeUpdatePolicyResponse {
     /// The updated node.
     pub node: NodeRecord,
+}
+
+/// The response payload for `node/heartbeat`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NodeHeartbeatResponse {
+    /// The node after applying heartbeat state.
+    pub node: NodeRecord,
+    /// The inbound classification action used for the heartbeat.
+    pub action: InboundEventAction,
 }
 
 /// The response payload for `workspace_mount/list`.

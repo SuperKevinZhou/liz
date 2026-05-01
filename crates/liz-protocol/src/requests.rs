@@ -10,7 +10,7 @@ use crate::ids::{
 use crate::interaction::InteractionContext;
 use crate::memory::{ChannelRef, MemorySearchMode, MemoryTopicStatus, ParticipantRef};
 use crate::memory_surface::{AboutYouUpdate, KnowledgeCorrection};
-use crate::node::{NodePolicy, WorkspaceMountPermissions};
+use crate::node::{NodePolicy, NodeStatus, WorkspaceMountPermissions};
 use crate::sandbox::ShellSandboxRequest;
 use crate::tool::ToolCallRequest;
 use serde::{Deserialize, Serialize};
@@ -155,6 +155,9 @@ pub enum ClientRequest {
     /// Updates node policy.
     #[serde(rename = "node/update_policy")]
     NodeUpdatePolicy(NodeUpdatePolicyRequest),
+    /// Records a node heartbeat without creating a model turn.
+    #[serde(rename = "node/heartbeat")]
+    NodeHeartbeat(NodeHeartbeatRequest),
     /// Lists workspace mounts.
     #[serde(rename = "workspace_mount/list")]
     WorkspaceMountList(WorkspaceMountListRequest),
@@ -509,6 +512,15 @@ pub struct NodeUpdatePolicyRequest {
     pub node_id: NodeId,
     /// Replacement policy.
     pub policy: NodePolicy,
+}
+
+/// Records node liveness and runtime version state.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NodeHeartbeatRequest {
+    /// The node that sent the heartbeat.
+    pub node_id: NodeId,
+    /// Replacement liveness status.
+    pub status: NodeStatus,
 }
 
 /// Lists workspace mounts.

@@ -1,6 +1,6 @@
 //! Inbound event classification before an event becomes a model turn.
 
-use liz_protocol::InteractionContext;
+use liz_protocol::{InboundEventAction, InteractionContext};
 
 /// An inbound event received by the runtime boundary.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -11,19 +11,6 @@ pub struct InboundEvent {
     pub text: Option<String>,
     /// Source-owned event kind.
     pub event_kind: String,
-}
-
-/// Classification result for inbound events.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InboundEventAction {
-    /// Start or continue a model turn.
-    RunTurn,
-    /// Store/update runtime state without a model turn.
-    StoreOnly,
-    /// Notify the owner without running a model turn.
-    NotifyOwner,
-    /// Ignore the event after diagnostics capture.
-    Ignore,
 }
 
 /// Classifies inbound events before turn creation.

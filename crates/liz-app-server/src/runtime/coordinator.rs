@@ -10,6 +10,7 @@ use crate::model::{
 use crate::runtime::context_assembler::{AssembledContext, ContextAssembler};
 use crate::runtime::error::{RuntimeError, RuntimeResult};
 use crate::runtime::ids::IdGenerator;
+use crate::runtime::inbound::{InboundEvent, InboundEventRouter};
 use crate::runtime::memory::{ForegroundMemoryEngine, MemoryCompilationPrompt};
 use crate::runtime::node_registry::NodeRegistry;
 use crate::runtime::policy_engine::{PolicyDecision, PolicyEngine};
@@ -26,11 +27,11 @@ use liz_protocol::requests::{
     MemorySurfaceAboutYouReadRequest, MemorySurfaceAboutYouUpdateRequest,
     MemorySurfaceCarryingReadRequest, MemorySurfaceKnowledgeCorrectRequest,
     MemorySurfaceKnowledgeListRequest, MiniMaxOAuthPollRequest, MiniMaxOAuthStartRequest,
-    NodeListRequest, NodeReadRequest, NodeUpdatePolicyRequest, OpenAiCodexOAuthCompleteRequest,
-    OpenAiCodexOAuthStartRequest, ProviderAuthDeleteRequest, ProviderAuthListRequest,
-    ProviderAuthUpsertRequest, ThreadForkRequest, ThreadListRequest, ThreadResumeRequest,
-    ThreadStartRequest, TurnCancelRequest, TurnStartRequest, WorkspaceMountAttachRequest,
-    WorkspaceMountDetachRequest, WorkspaceMountListRequest,
+    NodeHeartbeatRequest, NodeListRequest, NodeReadRequest, NodeUpdatePolicyRequest,
+    OpenAiCodexOAuthCompleteRequest, OpenAiCodexOAuthStartRequest, ProviderAuthDeleteRequest,
+    ProviderAuthListRequest, ProviderAuthUpsertRequest, ThreadForkRequest, ThreadListRequest,
+    ThreadResumeRequest, ThreadStartRequest, TurnCancelRequest, TurnStartRequest,
+    WorkspaceMountAttachRequest, WorkspaceMountDetachRequest, WorkspaceMountListRequest,
 };
 use liz_protocol::responses::{
     ApprovalRespondResponse, GitHubCopilotDevicePollResponse, GitHubCopilotDeviceStartResponse,
@@ -40,15 +41,17 @@ use liz_protocol::responses::{
     MemorySurfaceAboutYouReadResponse, MemorySurfaceAboutYouUpdateResponse,
     MemorySurfaceCarryingReadResponse, MemorySurfaceKnowledgeCorrectResponse,
     MemorySurfaceKnowledgeListResponse, MiniMaxOAuthPollResponse, MiniMaxOAuthStartResponse,
-    NodeListResponse, NodeReadResponse, NodeUpdatePolicyResponse, OpenAiCodexOAuthCompleteResponse,
-    OpenAiCodexOAuthStartResponse, ProviderAuthDeleteResponse, ProviderAuthListResponse,
-    ProviderAuthUpsertResponse, ThreadForkResponse, ThreadListResponse, ThreadResumeResponse,
-    ThreadStartResponse, TurnCancelResponse, TurnStartResponse, WorkspaceMountAttachResponse,
-    WorkspaceMountDetachResponse, WorkspaceMountListResponse,
+    NodeHeartbeatResponse, NodeListResponse, NodeReadResponse, NodeUpdatePolicyResponse,
+    OpenAiCodexOAuthCompleteResponse, OpenAiCodexOAuthStartResponse, ProviderAuthDeleteResponse,
+    ProviderAuthListResponse, ProviderAuthUpsertResponse, ThreadForkResponse, ThreadListResponse,
+    ThreadResumeResponse, ThreadStartResponse, TurnCancelResponse, TurnStartResponse,
+    WorkspaceMountAttachResponse, WorkspaceMountDetachResponse, WorkspaceMountListResponse,
 };
 use liz_protocol::InteractionContext;
 use liz_protocol::{
-    AboutYouItem, AboutYouSurface, CarryingItem, CarryingSurface, KnowledgeItem, KnowledgeSurface,
+    AboutYouItem, AboutYouSurface, ActorKind, ActorRef, Audience, AudienceVisibility,
+    AuthorityScope, CarryingItem, CarryingSurface, DisclosurePolicy, IngressRef, KnowledgeItem,
+    KnowledgeSurface, Provenance,
 };
 use liz_protocol::{
     ApprovalDecision, ApprovalRequest, ApprovalStatus, ArtifactKind, ArtifactRef, Checkpoint,
@@ -69,6 +72,7 @@ pub struct RuntimeCoordinator {
     context_assembler: ContextAssembler,
     memory_engine: ForegroundMemoryEngine,
     policy_engine: PolicyEngine,
+    inbound_router: InboundEventRouter,
     approvals: HashMap<liz_protocol::ApprovalId, ApprovalRequest>,
     node_registry: NodeRegistry,
 }
@@ -88,6 +92,7 @@ impl RuntimeCoordinator {
             context_assembler: ContextAssembler::default(),
             memory_engine: ForegroundMemoryEngine::default(),
             policy_engine: PolicyEngine::default(),
+            inbound_router: InboundEventRouter,
             approvals: HashMap::new(),
             node_registry,
         }
@@ -710,6 +715,58 @@ impl RuntimeCoordinator {
         let node = self.node_registry.update_node_policy(&request.node_id, request.policy)?;
         self.persist_node_registry()?;
         Ok(NodeUpdatePolicyResponse { node })
+    }
+
+    /// Records a node heartbeat after classifying it as a non-conversational inbound event.
+    pub fn heartbeat_node(
+        &mut self,
+        request: NodeHeartbeatRequest,
+    ) -> RuntimeResult<NodeHeartbeatResponse> {
+        let node = self.node_registry.read_node(&request.node_id)?;
+        let action = self.inbound_router.classify(&InboundEvent {
+            interaction_context: InteractionContext {
+                ingress: IngressRef {
+                    kind: "node".to_owned(),
+                    source_id: request.node_id.to_string(),
+                    conversation_id: None,
+                },
+                actor: ActorRef {
+                    actor_id: request.node_id.to_string(),
+                    kind: if node.identity.owner_device {
+                        ActorKind::LocalNode
+                    } else {
+                        ActorKind::RemoteNode
+                    },
+                    display_name: Some(node.identity.display_name.clone()),
+                    proof: Some("registered_node".to_owned()),
+                },
+                audience: Audience {
+                    visibility: AudienceVisibility::Machine,
+                    participants: vec![request.node_id.to_string()],
+                },
+                role: liz_protocol::InteractionRole::NodeController,
+                authority: AuthorityScope {
+                    can_speak_for_owner: false,
+                    can_start_work: false,
+                    can_call_tools: false,
+                    can_write_memory: false,
+                    requires_owner_confirmation: false,
+                },
+                disclosure: DisclosurePolicy::stranger_default(),
+                task_mandate: Some("node heartbeat".to_owned()),
+                provenance: Provenance {
+                    channel: None,
+                    received_at: request.status.last_seen_at.clone(),
+                    authenticated_by: Some("node_registry".to_owned()),
+                    raw_event_ref: None,
+                },
+            },
+            text: None,
+            event_kind: "node.heartbeat".to_owned(),
+        });
+        let node = self.node_registry.update_node_status(&request.node_id, request.status)?;
+        self.persist_node_registry()?;
+        Ok(NodeHeartbeatResponse { node, action })
     }
 
     /// Lists workspace mounts.

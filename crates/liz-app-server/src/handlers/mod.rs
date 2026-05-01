@@ -334,6 +334,9 @@ pub fn handle_request(
         ClientRequest::NodeUpdatePolicy(request) => runtime
             .update_node_policy(request)
             .map(|response| (ResponsePayload::NodeUpdatePolicy(response), Vec::new())),
+        ClientRequest::NodeHeartbeat(request) => runtime
+            .heartbeat_node(request)
+            .map(|response| (ResponsePayload::NodeHeartbeat(response), Vec::new())),
         ClientRequest::WorkspaceMountList(request) => runtime
             .list_workspace_mounts(request)
             .map(|response| (ResponsePayload::WorkspaceMountList(response), Vec::new())),

@@ -230,3 +230,17 @@ pub struct InteractionContext {
     /// Provenance metadata for diagnostics and policy.
     pub provenance: Provenance,
 }
+
+/// Runtime action selected after inbound event classification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InboundEventAction {
+    /// Start or continue a model turn.
+    RunTurn,
+    /// Store or update runtime state without a model turn.
+    StoreOnly,
+    /// Notify the owner without running a model turn.
+    NotifyOwner,
+    /// Ignore the event after diagnostics capture.
+    Ignore,
+}

@@ -34,7 +34,10 @@ impl NodeRegistry {
             .into_iter()
             .map(|node| (node.identity.node_id.clone(), node))
             .collect::<HashMap<_, _>>();
-        let local = local_node_record();
+        let mut local = local_node_record();
+        if let Some(persisted_local) = nodes.get(&local.identity.node_id) {
+            local.status.last_seen_at = persisted_local.status.last_seen_at.clone();
+        }
         nodes.insert(local.identity.node_id.clone(), local);
         let workspace_mounts = snapshot
             .workspace_mounts
@@ -89,6 +92,20 @@ impl NodeRegistry {
             .get_mut(node_id)
             .ok_or_else(|| RuntimeError::not_found("node_not_found", "node does not exist"))?;
         node.policy = policy;
+        Ok(node.clone())
+    }
+
+    /// Updates node heartbeat state.
+    pub fn update_node_status(
+        &mut self,
+        node_id: &NodeId,
+        status: NodeStatus,
+    ) -> RuntimeResult<NodeRecord> {
+        let node = self
+            .nodes
+            .get_mut(node_id)
+            .ok_or_else(|| RuntimeError::not_found("node_not_found", "node does not exist"))?;
+        node.status = status;
         Ok(node.clone())
     }
 

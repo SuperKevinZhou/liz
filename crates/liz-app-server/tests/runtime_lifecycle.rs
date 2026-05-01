@@ -7,7 +7,10 @@ use liz_protocol::requests::{
     ThreadForkRequest, ThreadResumeRequest, ThreadStartRequest, TurnCancelRequest, TurnInputKind,
     TurnStartRequest, WorkspaceMountListRequest,
 };
-use liz_protocol::{ThreadStatus, TurnStatus};
+use liz_protocol::{
+    InboundEventAction, NodeHeartbeatRequest, NodeId, NodeStatus, ThreadStatus, Timestamp,
+    TurnStatus,
+};
 use tempfile::TempDir;
 
 #[test]
@@ -196,6 +199,45 @@ fn workspace_mount_registry_survives_runtime_restart() {
     assert_eq!(node_id.as_str(), "local");
     assert_eq!(scoped_mount_id, Some(workspace_mount_id.clone()));
     assert!(listed_mounts.iter().any(|mount| mount.workspace_id == workspace_mount_id));
+}
+
+#[test]
+fn node_heartbeat_updates_liveness_without_turn_action() {
+    let temp_dir = TempDir::new().expect("temp dir should be created");
+    let storage_paths = StoragePaths::new(temp_dir.path().join(".liz"));
+    let heartbeat_at = Timestamp::new("2026-05-01T13:00:00Z");
+
+    {
+        let mut runtime = RuntimeCoordinator::from_storage_paths(storage_paths.clone());
+        let existing = runtime
+            .read_node(liz_protocol::NodeReadRequest { node_id: NodeId::new("local") })
+            .expect("local node should exist")
+            .node;
+        let response = runtime
+            .heartbeat_node(NodeHeartbeatRequest {
+                node_id: NodeId::new("local"),
+                status: NodeStatus {
+                    online: true,
+                    last_seen_at: Some(heartbeat_at.clone()),
+                    app_version: Some("test-version".to_owned()),
+                    os: existing.status.os,
+                    hostname: Some("test-host".to_owned()),
+                },
+            })
+            .expect("heartbeat should update local node");
+
+        assert_eq!(response.action, InboundEventAction::StoreOnly);
+        assert_eq!(response.node.status.last_seen_at, Some(heartbeat_at.clone()));
+        assert_eq!(response.node.status.hostname.as_deref(), Some("test-host"));
+    }
+
+    let restarted_runtime = RuntimeCoordinator::from_storage_paths(storage_paths);
+    let node = restarted_runtime
+        .read_node(liz_protocol::NodeReadRequest { node_id: NodeId::new("local") })
+        .expect("local node should be readable")
+        .node;
+
+    assert_eq!(node.status.last_seen_at, Some(heartbeat_at));
 }
 
 #[test]
