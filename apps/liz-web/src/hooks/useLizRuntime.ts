@@ -425,7 +425,7 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
   }, [request]);
 
   const loadOwnerSurfaces = useCallback(async () => {
-    const [aboutYou, carrying, knowledge] = await Promise.all([
+    const [aboutYou, carrying, knowledge, people] = await Promise.all([
       request<MemorySurfaceAboutYouReadResponse, Record<string, never>>(
         "memory_surface/about_you/read",
         {},
@@ -438,10 +438,12 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
         "memory_surface/knowledge/list",
         { limit: 40 },
       ),
+      request<PeopleSurfaceReadResponse, Record<string, never>>("people_surface/read", {}),
     ]);
     dispatch({ type: "about_you_set", surface: aboutYou.data.surface });
     dispatch({ type: "carrying_set", surface: carrying.data.surface });
     dispatch({ type: "knowledge_set", surface: knowledge.data.surface });
+    dispatch({ type: "people_set", surface: people.data.surface });
   }, [request]);
 
   const loadPeopleSurface = useCallback(async () => {

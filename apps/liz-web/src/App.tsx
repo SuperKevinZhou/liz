@@ -270,10 +270,15 @@ function PeopleSurface({ runtime }: { runtime: LizRuntime }) {
   const [profileDraft, setProfileDraft] = useState<Record<string, string>>({});
   const [correctionDrafts, setCorrectionDrafts] = useState<Record<string, string>>({});
   const [personDraft, setPersonDraft] = useState<PersonBoundary>(emptyPersonBoundary());
-  const identitySummary = identitySummaryDraft ?? aboutYou?.identity_summary ?? "";
+  const hasOnboardingProfile = !aboutYou || aboutYou.items.length === 0;
+  const profileItems = hasOnboardingProfile ? defaultAboutYouItems() : (aboutYou?.items ?? []);
+  const identitySummary =
+    identitySummaryDraft ??
+    aboutYou?.identity_summary ??
+    "Liz can remember my preferences, keep work continuity, and ask before sharing anything sensitive.";
 
   const saveAboutYou = () => {
-    const items = (aboutYou?.items ?? []).map((item) => ({
+    const items = profileItems.map((item) => ({
       ...item,
       value: profileDraft[item.key] ?? item.value,
       confirmed: true,
@@ -339,6 +344,15 @@ function PeopleSurface({ runtime }: { runtime: LizRuntime }) {
       <div className="settings-grid">
         <section className="settings-section">
           <p className="eyebrow">About You</p>
+          {hasOnboardingProfile ? (
+            <div className="empty-panel onboarding-panel">
+              <strong>Start with a first profile</strong>
+              <p>
+                liz will use this as the starting point for your preferences, update style, and
+                communication boundaries.
+              </p>
+            </div>
+          ) : null}
           <textarea
             className="small-textarea"
             value={identitySummary}
@@ -346,7 +360,7 @@ function PeopleSurface({ runtime }: { runtime: LizRuntime }) {
             placeholder="How liz should summarize the owner profile"
           />
           <div className="editable-list">
-            {(aboutYou?.items ?? []).map((item) => (
+            {profileItems.map((item) => (
               <article key={item.key}>
                 <label>
                   <span>{item.label}</span>
@@ -360,12 +374,12 @@ function PeopleSurface({ runtime }: { runtime: LizRuntime }) {
                 <small>{item.confirmed ? "confirmed" : "learned"}</small>
               </article>
             ))}
-            {!aboutYou || aboutYou.items.length === 0 ? (
+            {profileItems.length === 0 ? (
               <div className="empty-panel">No owner profile details are confirmed yet.</div>
             ) : null}
           </div>
           <button className="primary-button" type="button" onClick={saveAboutYou}>
-            Save About You
+            {hasOnboardingProfile ? "Create About You" : "Save About You"}
           </button>
         </section>
         <section className="settings-section provider-section">
@@ -713,6 +727,46 @@ function emptyPersonBoundary(): PersonBoundary {
     notes: null,
     requires_owner_confirmation: true,
   };
+}
+
+function defaultAboutYouItems() {
+  return [
+    {
+      key: "preferred_name",
+      label: "How liz should address you",
+      value: "Owner",
+      confirmed: false,
+      source_fact_id: null,
+    },
+    {
+      key: "language",
+      label: "Language preference",
+      value: "Chinese",
+      confirmed: false,
+      source_fact_id: null,
+    },
+    {
+      key: "update_style",
+      label: "Update style",
+      value: "Direct and concise",
+      confirmed: false,
+      source_fact_id: null,
+    },
+    {
+      key: "autonomy_style",
+      label: "Autonomy",
+      value: "Ask before major changes",
+      confirmed: false,
+      source_fact_id: null,
+    },
+    {
+      key: "work_style",
+      label: "Work style",
+      value: "Keep context narrow and continue from the current line",
+      confirmed: false,
+      source_fact_id: null,
+    },
+  ];
 }
 
 function splitTopics(value: string): string[] {
