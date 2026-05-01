@@ -15,7 +15,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { useLizRuntime, type LizRuntime } from "./hooks/useLizRuntime";
 import { loadPreferences, savePreferences, type Preferences } from "./preferences";
-import type { Thread, ThreadId } from "./protocol/types";
+import type { Thread } from "./protocol/types";
 import type { TranscriptEntry } from "./state/workbench";
 
 type ViewId = "chat" | "memory" | "approvals" | "channels" | "settings";

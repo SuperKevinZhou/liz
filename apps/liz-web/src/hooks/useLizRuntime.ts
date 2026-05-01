@@ -25,7 +25,6 @@ import type {
   ResponseError,
   RuntimeConfigResponse,
   RuntimeConfigUpdateRequest,
-  ServerResponseEnvelope,
   Thread,
   ThreadForkRequest,
   ThreadId,
@@ -37,7 +36,6 @@ import type {
   ThreadStartResponse,
   TurnCancelRequest,
   TurnCancelResponse,
-  TurnId,
   TurnStartRequest,
   TurnStartResponse,
 } from "../protocol/types";
