@@ -13,7 +13,10 @@ import {
   TerminalSquare,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { useLizRuntime, type LizRuntime } from "./hooks/useLizRuntime";
 import { loadPreferences, savePreferences, type Preferences } from "./preferences";
+import type { Thread, ThreadId } from "./protocol/types";
+import type { TranscriptEntry } from "./state/workbench";
 
 type ViewId = "chat" | "memory" | "approvals" | "channels" | "settings";
 
@@ -25,26 +28,10 @@ const views: Array<{ id: ViewId; label: string; icon: React.ComponentType<{ size
   { id: "settings", label: "Settings", icon: Settings },
 ];
 
-const sampleThreads = [
-  {
-    id: "thread_local_console",
-    title: "Liz Web Console",
-    status: "active",
-    summary: "Console shell ready for the protocol client.",
-    workspace: "conversation-only",
-  },
-  {
-    id: "thread_memory_review",
-    title: "Memory Review",
-    status: "waiting_approval",
-    summary: "Compilation surface and evidence viewer pending.",
-    workspace: "D:/zzh/Code/liz/liz",
-  },
-];
-
 export function App() {
   const [activeView, setActiveView] = useState<ViewId>("chat");
   const [preferences, setPreferences] = useState<Preferences>(() => loadPreferences());
+  const runtime = useLizRuntime(preferences);
 
   useEffect(() => {
     savePreferences(preferences);
@@ -83,92 +70,135 @@ export function App() {
       </aside>
 
       <aside className="thread-panel">
-        <header className="panel-header">
+        <ThreadPanel runtime={runtime} />
+      </aside>
+
+      <main className="workspace">
+        <TopBar
+          activeView={activeView}
+          preferences={preferences}
+          runtime={runtime}
+          setPreferences={setPreferences}
+        />
+        <WorkspaceView activeView={activeView} preferences={preferences} runtime={runtime} />
+      </main>
+
+      <aside className="inspector">
+        <Inspector runtime={runtime} />
+      </aside>
+    </div>
+  );
+}
+
+function ThreadPanel({ runtime }: { runtime: LizRuntime }) {
+  const [search, setSearch] = useState("");
+  const [newTitle, setNewTitle] = useState("");
+  const [workspaceRef, setWorkspaceRef] = useState("");
+  const filteredThreads = runtime.state.threads.filter((thread) =>
+    `${thread.title} ${thread.active_summary ?? ""} ${thread.workspace_ref ?? ""}`
+      .toLowerCase()
+      .includes(search.toLowerCase()),
+  );
+
+  const createThread = () => {
+    void runtime.startThread({
+      title: newTitle.trim() || null,
+      initial_goal: newTitle.trim() || null,
+      workspace_ref: workspaceRef.trim() || null,
+    });
+    setNewTitle("");
+  };
+
+  return (
+    <>
+      <header className="panel-header">
           <div>
             <p className="eyebrow">Threads</p>
             <h1>Liz Console</h1>
           </div>
-          <button className="icon-button" type="button" title="New thread" aria-label="New thread">
+          <button
+            className="icon-button"
+            type="button"
+            title="Refresh threads"
+            aria-label="Refresh threads"
+            onClick={() => void runtime.refreshThreads()}
+          >
             <MessageSquareText size={17} />
           </button>
         </header>
 
         <label className="search-field">
           <Search size={15} />
-          <input placeholder="Search threads" />
+          <input
+            placeholder="Search threads"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
         </label>
 
+        <form className="new-thread-form" onSubmit={(event) => event.preventDefault()}>
+          <input
+            value={newTitle}
+            onChange={(event) => setNewTitle(event.target.value)}
+            placeholder="New thread goal"
+          />
+          <input
+            value={workspaceRef}
+            onChange={(event) => setWorkspaceRef(event.target.value)}
+            placeholder="Workspace path optional"
+          />
+          <button className="secondary-button" type="button" onClick={createThread}>
+            New
+          </button>
+        </form>
+
         <div className="thread-list">
-          {sampleThreads.map((thread, index) => (
-            <button key={thread.id} className={index === 0 ? "thread-item active" : "thread-item"}>
+          {filteredThreads.map((thread) => (
+            <button
+              key={thread.id}
+              className={runtime.activeThread?.id === thread.id ? "thread-item active" : "thread-item"}
+              onClick={() => void runtime.setActiveThread(thread.id)}
+            >
               <span className={`status-dot ${thread.status}`} />
               <span>
                 <strong>{thread.title}</strong>
-                <small>{thread.summary}</small>
-                <em>{thread.workspace}</em>
+                <small>{thread.active_summary ?? thread.active_goal ?? "No summary yet"}</small>
+                <em>{workspaceLabel(thread)}</em>
               </span>
             </button>
           ))}
+          {filteredThreads.length === 0 ? (
+            <div className="empty-panel">No threads loaded.</div>
+          ) : null}
         </div>
 
         <section className="side-section">
           <div className="section-row">
             <span>Workspace</span>
-            <strong>Conversation only</strong>
+            <strong>{runtime.activeThread ? workspaceLabel(runtime.activeThread) : "None"}</strong>
           </div>
           <div className="section-row">
             <span>Channel</span>
             <strong>Web owner</strong>
           </div>
-        </section>
-      </aside>
-
-      <main className="workspace">
-        <TopBar activeView={activeView} preferences={preferences} setPreferences={setPreferences} />
-        <WorkspaceView activeView={activeView} preferences={preferences} />
-      </main>
-
-      <aside className="inspector">
-        <header className="panel-header compact">
-          <div>
-            <p className="eyebrow">Inspector</p>
-            <h2>Selection</h2>
+          <div className="section-row">
+            <span>Connection</span>
+            <strong>{runtime.connectionState}</strong>
           </div>
-          <button className="icon-button" type="button" title="Fork thread" aria-label="Fork thread">
-            <GitFork size={16} />
-          </button>
-        </header>
-        <div className="inspector-body">
-          <section>
-            <p className="eyebrow">Tool detail</p>
-            <h3>No tool selected</h3>
-            <p className="muted">
-              Tool output, approvals, artifacts, diffs, and memory evidence appear here when selected.
-            </p>
-          </section>
-          <section className="metric-grid">
-            <div>
-              <span>Pending approvals</span>
-              <strong>0</strong>
-            </div>
-            <div>
-              <span>Tool events</span>
-              <strong>0</strong>
-            </div>
-          </section>
-        </div>
-      </aside>
-    </div>
+        </section>
+      </>
   );
 }
 
 function TopBar({
   activeView,
   preferences,
+  runtime,
   setPreferences,
 }: {
   activeView: ViewId;
   preferences: Preferences;
+  runtime: LizRuntime;
   setPreferences: React.Dispatch<React.SetStateAction<Preferences>>;
 }) {
   return (
@@ -188,17 +218,26 @@ function TopBar({
             aria-label="Server URL"
           />
         </label>
-        <button className="primary-button" type="button">
-          Connect
+        <button className="primary-button" type="button" onClick={runtime.connect}>
+          {runtime.connectionState === "connected" ? "Reconnect" : "Connect"}
         </button>
       </div>
+      {runtime.error ? <div className="top-error">{runtime.error}</div> : null}
     </header>
   );
 }
 
-function WorkspaceView({ activeView, preferences }: { activeView: ViewId; preferences: Preferences }) {
+function WorkspaceView({
+  activeView,
+  preferences,
+  runtime,
+}: {
+  activeView: ViewId;
+  preferences: Preferences;
+  runtime: LizRuntime;
+}) {
   if (activeView === "chat") {
-    return <ChatSurface />;
+    return <ChatSurface runtime={runtime} />;
   }
 
   if (activeView === "settings") {
@@ -241,39 +280,67 @@ function WorkspaceView({ activeView, preferences }: { activeView: ViewId; prefer
   );
 }
 
-function ChatSurface() {
+function ChatSurface({ runtime }: { runtime: LizRuntime }) {
+  const [message, setMessage] = useState("");
+  const submit = () => {
+    void runtime.startTurn(message);
+    setMessage("");
+  };
+
   return (
     <section className="chat-surface">
       <div className="transcript">
-        <article className="message user">
-          <span>User</span>
-          <p>Build the first Liz web console.</p>
-        </article>
-        <article className="message assistant streaming">
-          <span>Liz</span>
-          <p>The console shell is ready. Protocol events will stream into this transcript.</p>
-        </article>
-        <article className="tool-line">
-          <TerminalSquare size={16} />
-          <div>
-            <strong>Tool timeline</strong>
-            <p>Tool calls will collapse into timeline rows and expand in the inspector.</p>
-          </div>
-        </article>
+        {runtime.activeThread ? (
+          runtime.activeTranscript.length > 0 ? (
+            runtime.activeTranscript.map((entry) => <TranscriptRow key={entry.id} entry={entry} />)
+          ) : (
+            <div className="empty-panel">Start a turn to build this transcript.</div>
+          )
+        ) : (
+          <div className="empty-panel">Connect to the app server and create or select a thread.</div>
+        )}
       </div>
       <form className="composer">
-        <textarea placeholder="Message Liz" rows={3} />
+        <textarea
+          placeholder="Message Liz"
+          rows={3}
+          value={message}
+          onChange={(event) => setMessage(event.target.value)}
+          onKeyDown={(event) => {
+            if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+              submit();
+            }
+          }}
+        />
         <div>
-          <span>conversation-only</span>
-          <button className="secondary-button" type="button">
+          <span>{runtime.activeThread ? workspaceLabel(runtime.activeThread) : "no thread selected"}</span>
+          <button className="secondary-button" type="button" onClick={() => void runtime.cancelTurn()}>
             Stop
           </button>
-          <button className="primary-button" type="button">
+          <button className="primary-button" type="button" onClick={submit}>
             Send
           </button>
         </div>
       </form>
     </section>
+  );
+}
+
+function TranscriptRow({ entry }: { entry: TranscriptEntry }) {
+  if (entry.kind === "system") {
+    return (
+      <article className={`message system ${entry.tone}`}>
+        <span>System</span>
+        <p>{entry.content}</p>
+      </article>
+    );
+  }
+
+  return (
+    <article className={`message ${entry.kind} ${entry.status}`}>
+      <span>{entry.kind === "user" ? "User" : "Liz"}</span>
+      <p>{entry.content || (entry.kind === "assistant" ? "Thinking..." : "")}</p>
+    </article>
   );
 }
 
@@ -300,6 +367,68 @@ function SettingsSurface({ preferences }: { preferences: Preferences }) {
   );
 }
 
+function Inspector({ runtime }: { runtime: LizRuntime }) {
+  const [forkReason, setForkReason] = useState("");
+
+  return (
+    <>
+      <header className="panel-header compact">
+        <div>
+          <p className="eyebrow">Inspector</p>
+          <h2>Selection</h2>
+        </div>
+        <button
+          className="icon-button"
+          type="button"
+          title="Fork thread"
+          aria-label="Fork thread"
+          onClick={() => {
+            if (!runtime.activeThread) {
+              return;
+            }
+            void runtime.forkThread({
+              thread_id: runtime.activeThread.id,
+              title: `${runtime.activeThread.title} fork`,
+              fork_reason: forkReason.trim() || null,
+            });
+          }}
+        >
+          <GitFork size={16} />
+        </button>
+      </header>
+      <div className="inspector-body">
+        <section>
+          <p className="eyebrow">Thread</p>
+          <h3>{runtime.activeThread?.title ?? "No thread selected"}</h3>
+          <p className="muted">
+            {runtime.activeThread?.active_summary ??
+              "Tool output, approvals, artifacts, diffs, and memory evidence appear here when selected."}
+          </p>
+        </section>
+        <section>
+          <p className="eyebrow">Fork reason</p>
+          <textarea
+            className="small-textarea"
+            value={forkReason}
+            onChange={(event) => setForkReason(event.target.value)}
+            placeholder="Reason for branching this thread"
+          />
+        </section>
+        <section className="metric-grid">
+          <div>
+            <span>Turn</span>
+            <strong>{runtime.activeRuntime.activeTurnId ? "Live" : "Idle"}</strong>
+          </div>
+          <div>
+            <span>Messages</span>
+            <strong>{runtime.activeTranscript.length}</strong>
+          </div>
+        </section>
+      </div>
+    </>
+  );
+}
+
 function viewTitle(view: ViewId) {
   switch (view) {
     case "chat":
@@ -313,4 +442,8 @@ function viewTitle(view: ViewId) {
     case "settings":
       return "Settings";
   }
+}
+
+function workspaceLabel(thread: Thread) {
+  return thread.workspace_ref?.trim() ? thread.workspace_ref : "conversation-only";
 }

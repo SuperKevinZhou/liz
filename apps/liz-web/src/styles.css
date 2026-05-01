@@ -166,7 +166,9 @@ button {
 }
 
 .search-field,
-.server-pill {
+.server-pill,
+.new-thread-form input,
+.small-textarea {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -180,13 +182,32 @@ button {
 }
 
 .search-field input,
-.server-pill input {
+.server-pill input,
+.new-thread-form input {
   min-width: 0;
   width: 100%;
   border: 0;
   outline: 0;
   color: var(--ink-0);
   background: transparent;
+}
+
+.top-error {
+  grid-column: 1 / -1;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.new-thread-form {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 16px;
+}
+
+.new-thread-form input {
+  width: 100%;
+  margin: 0;
+  color: var(--ink-0);
 }
 
 .thread-list {
@@ -370,6 +391,20 @@ button {
   border-left: 3px solid var(--accent);
 }
 
+.message.system {
+  color: var(--ink-1);
+  background: transparent;
+}
+
+.message.system.error {
+  border-left: 3px solid var(--danger);
+}
+
+.message.cancelled,
+.message.failed {
+  border-left: 3px solid var(--danger);
+}
+
 .tool-line {
   display: flex;
   gap: 10px;
@@ -408,6 +443,21 @@ button {
   height: 100%;
   margin: 0;
   padding: 24px;
+}
+
+.empty-panel {
+  padding: 14px;
+  color: var(--ink-2);
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.small-textarea {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  color: var(--ink-0);
 }
 
 .lined-list {

@@ -230,3 +230,58 @@ export interface RuntimeConfigUpdateRequest {
   sandbox: unknown | null;
   approval_policy: "on-request" | "danger-full-access" | null;
 }
+
+export interface ThreadStartResponse {
+  thread: Thread;
+}
+
+export interface ThreadResumeResponse {
+  thread: Thread;
+  resume_summary: ResumeSummary | null;
+}
+
+export interface ThreadListResponse {
+  threads: Thread[];
+}
+
+export interface ThreadForkResponse {
+  thread: Thread;
+}
+
+export interface TurnStartResponse {
+  turn: Turn;
+}
+
+export interface TurnCancelResponse {
+  turn: Turn;
+}
+
+export interface ResumeSummary {
+  headline: string;
+  active_summary: string | null;
+  pending_commitments: string[];
+  last_interruption: string | null;
+}
+
+export interface ThreadEventPayload {
+  thread: Thread;
+}
+
+export interface TurnEventPayload {
+  turn: Turn;
+}
+
+export interface TurnFailedEventPayload {
+  turn: Turn;
+  message: string;
+}
+
+export interface AssistantChunkEventPayload {
+  chunk: string;
+  stream_id: string | null;
+  is_final: boolean;
+}
+
+export interface AssistantCompletedEventPayload {
+  message: string;
+}
