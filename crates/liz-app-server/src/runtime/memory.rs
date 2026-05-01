@@ -41,6 +41,7 @@ pub(crate) struct MemoryCompilationDelta {
     pub(crate) candidate_procedures: Vec<String>,
     pub(crate) durable_facts: Vec<MemoryDeltaFact>,
     pub(crate) invalidation_candidates: Vec<String>,
+    #[cfg(test)]
     pub(crate) used_fallback: bool,
 }
 
@@ -94,6 +95,7 @@ impl MemoryCompiler for HeuristicMemoryCompiler {
             candidate_procedures,
             durable_facts: Vec::new(),
             invalidation_candidates: Vec::new(),
+            #[cfg(test)]
             used_fallback: true,
         })
     }
@@ -174,6 +176,7 @@ pub(crate) fn parse_llm_memory_delta(
             })
             .collect(),
         invalidation_candidates: sanitize_string_list(parsed.invalidation_candidates, 16),
+        #[cfg(test)]
         used_fallback: false,
     })
 }
@@ -491,14 +494,7 @@ impl ForegroundMemoryEngine {
         stores.write_global_memory(&snapshot)?;
 
         Ok(MemoryCompilationSummary {
-            delta_summary: format!(
-                "{} compiled {} topics, {} commitments, {} durable facts, and {} procedure candidates",
-                if delta.used_fallback { "Heuristic fallback" } else { "LLM compiler" },
-                delta.recent_topics.len(),
-                delta.commitments.len(),
-                delta.durable_facts.len(),
-                delta.candidate_procedures.len()
-            ),
+            delta_summary: memory_compilation_user_summary(&delta),
             updated_fact_ids,
             invalidated_fact_ids,
             recent_topics: delta.recent_topics,
@@ -784,6 +780,24 @@ impl ForegroundMemoryEngine {
             artifact: artifact.as_ref().map(|artifact| artifact.reference.clone()),
             artifact_body: artifact.map(|artifact| artifact.body),
         })
+    }
+}
+
+fn memory_compilation_user_summary(delta: &MemoryCompilationDelta) -> String {
+    let mut parts = Vec::new();
+    if !delta.commitments.is_empty() {
+        parts.push(format!("{} commitment(s)", delta.commitments.len()));
+    }
+    if !delta.durable_facts.is_empty() {
+        parts.push(format!("{} durable note(s)", delta.durable_facts.len()));
+    }
+    if !delta.recent_topics.is_empty() {
+        parts.push(format!("{} topic(s)", delta.recent_topics.len()));
+    }
+    if parts.is_empty() {
+        "No durable memory changes were needed.".to_owned()
+    } else {
+        format!("Updated memory with {}.", parts.join(", "))
     }
 }
 

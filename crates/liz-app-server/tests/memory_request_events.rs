@@ -60,7 +60,8 @@ fn memory_requests_emit_wakeup_and_compilation_events() {
     match compile_response {
         ServerResponseEnvelope::Success(success) => match success.response {
             ResponsePayload::MemoryCompileNow(response) => {
-                assert!(response.compilation.delta_summary.contains("Heuristic fallback"));
+                assert!(!response.compilation.delta_summary.contains("Heuristic fallback"));
+                assert!(response.compilation.delta_summary.contains("Updated memory"));
             }
             other => panic!("unexpected compile response: {other:?}"),
         },
