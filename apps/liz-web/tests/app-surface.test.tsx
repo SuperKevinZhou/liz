@@ -45,6 +45,8 @@ const runtime = {
   updateRuntimeConfig: vi.fn(),
   upsertProviderProfile: vi.fn(),
   deleteProviderProfile: vi.fn(),
+  attachWorkspaceMount: vi.fn(),
+  detachWorkspaceMount: vi.fn(),
 };
 
 vi.mock("../src/hooks/useLizRuntime", () => ({

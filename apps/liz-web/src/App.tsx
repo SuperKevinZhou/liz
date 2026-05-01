@@ -15,6 +15,7 @@ import {
   Sparkles,
   Square,
   TerminalSquare,
+  Trash2,
   UserRound,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -395,6 +396,33 @@ function DevicesSurface({ runtime }: { runtime: LizRuntime }) {
 }
 
 function WorkspacesSurface({ runtime }: { runtime: LizRuntime }) {
+  const firstNode = runtime.state.nodes[0]?.identity.node_id ?? "local";
+  const [nodeId, setNodeId] = useState(firstNode);
+  const [rootPath, setRootPath] = useState("");
+  const [label, setLabel] = useState("");
+  const [permissions, setPermissions] = useState({ read: true, write: true, shell: true });
+
+  useEffect(() => {
+    if (!runtime.state.nodes.some((node) => node.identity.node_id === nodeId)) {
+      setNodeId(firstNode);
+    }
+  }, [firstNode, nodeId, runtime.state.nodes]);
+
+  const attachWorkspace = () => {
+    const root = rootPath.trim();
+    if (!root) {
+      return;
+    }
+    void runtime.attachWorkspaceMount({
+      node_id: nodeId,
+      root_path: root,
+      label: label.trim() || null,
+      permissions,
+    });
+    setRootPath("");
+    setLabel("");
+  };
+
   return (
     <section className="settings-surface control-surface">
       <div className="settings-header">
@@ -404,6 +432,45 @@ function WorkspacesSurface({ runtime }: { runtime: LizRuntime }) {
         </div>
         <button className="secondary-button" type="button" onClick={() => void runtime.loadRuntimeState()}>
           Refresh
+        </button>
+      </div>
+      <div className="provider-form workspace-mount-form">
+        <select value={nodeId} onChange={(event) => setNodeId(event.target.value)} aria-label="Workspace node">
+          {runtime.state.nodes.length === 0 ? <option value="local">Local device</option> : null}
+          {runtime.state.nodes.map((node) => (
+            <option key={node.identity.node_id} value={node.identity.node_id}>
+              {node.identity.display_name}
+            </option>
+          ))}
+        </select>
+        <input
+          value={rootPath}
+          onChange={(event) => setRootPath(event.target.value)}
+          placeholder="Workspace root path"
+          aria-label="Workspace root path"
+        />
+        <input
+          value={label}
+          onChange={(event) => setLabel(event.target.value)}
+          placeholder="Label"
+          aria-label="Workspace label"
+        />
+        <div className="permission-row" aria-label="Workspace permissions">
+          {(["read", "write", "shell"] as const).map((permission) => (
+            <label key={permission}>
+              <input
+                type="checkbox"
+                checked={permissions[permission]}
+                onChange={(event) =>
+                  setPermissions((current) => ({ ...current, [permission]: event.target.checked }))
+                }
+              />
+              <span>{permission}</span>
+            </label>
+          ))}
+        </div>
+        <button className="primary-button" type="button" onClick={attachWorkspace}>
+          Attach
         </button>
       </div>
       <div className="channel-list">
@@ -423,6 +490,15 @@ function WorkspacesSurface({ runtime }: { runtime: LizRuntime }) {
                 .filter(Boolean)
                 .join(" / ")}
             </small>
+            <button
+              className="icon-button"
+              type="button"
+              aria-label={`Detach ${mount.label}`}
+              title="Detach workspace"
+              onClick={() => void runtime.detachWorkspaceMount(mount.workspace_id)}
+            >
+              <Trash2 size={16} />
+            </button>
           </article>
         ))}
         {runtime.state.workspaceMounts.length === 0 ? (

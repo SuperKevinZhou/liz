@@ -49,6 +49,11 @@ import type {
   TurnStartRequest,
   TurnStartResponse,
   WorkspaceMountListResponse,
+  WorkspaceMountAttachRequest,
+  WorkspaceMountAttachResponse,
+  WorkspaceMountDetachRequest,
+  WorkspaceMountDetachResponse,
+  WorkspaceMountId,
 } from "../protocol/types";
 import {
   activeApprovals,
@@ -100,6 +105,8 @@ export interface LizRuntime {
   updateRuntimeConfig: (request: RuntimeConfigUpdateRequest) => Promise<void>;
   upsertProviderProfile: (profile: ProviderAuthProfile) => Promise<void>;
   deleteProviderProfile: (profileId: string) => Promise<void>;
+  attachWorkspaceMount: (request: WorkspaceMountAttachRequest) => Promise<void>;
+  detachWorkspaceMount: (workspaceId: WorkspaceMountId) => Promise<void>;
 }
 
 export const useLizRuntime = (preferences: Preferences): LizRuntime => {
@@ -483,6 +490,41 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
     [request],
   );
 
+  const attachWorkspaceMount = useCallback(
+    async (mountRequest: WorkspaceMountAttachRequest) => {
+      const response = await request<WorkspaceMountAttachResponse, WorkspaceMountAttachRequest>(
+        "workspace_mount/attach",
+        mountRequest,
+      );
+      dispatch({
+        type: "workspace_mounts_set",
+        mounts: [
+          response.data.mount,
+          ...state.workspaceMounts.filter(
+            (mount) => mount.workspace_id !== response.data.mount.workspace_id,
+          ),
+        ],
+      });
+    },
+    [request, state.workspaceMounts],
+  );
+
+  const detachWorkspaceMount = useCallback(
+    async (workspaceId: WorkspaceMountId) => {
+      const response = await request<WorkspaceMountDetachResponse, WorkspaceMountDetachRequest>(
+        "workspace_mount/detach",
+        { workspace_id: workspaceId },
+      );
+      dispatch({
+        type: "workspace_mounts_set",
+        mounts: state.workspaceMounts.filter(
+          (mount) => mount.workspace_id !== response.data.workspace_id,
+        ),
+      });
+    },
+    [request, state.workspaceMounts],
+  );
+
   return useMemo(
     () => ({
       connectionState,
@@ -519,8 +561,11 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
       updateRuntimeConfig,
       upsertProviderProfile,
       deleteProviderProfile,
+      attachWorkspaceMount,
+      detachWorkspaceMount,
     }),
     [
+      attachWorkspaceMount,
       cancelTurn,
       close,
       compileMemory,
@@ -531,6 +576,7 @@ export const useLizRuntime = (preferences: Preferences): LizRuntime => {
       everyApproval,
       forkThread,
       deleteProviderProfile,
+      detachWorkspaceMount,
       listMemoryTopics,
       loadRuntimeState,
       loadOwnerSurfaces,

@@ -629,12 +629,31 @@ export interface WorkspaceMount {
   permissions: { read: boolean; write: boolean; shell: boolean };
 }
 
+export interface WorkspaceMountAttachRequest {
+  node_id: NodeId;
+  root_path: string;
+  label: string | null;
+  permissions: { read: boolean; write: boolean; shell: boolean };
+}
+
+export interface WorkspaceMountDetachRequest {
+  workspace_id: WorkspaceMountId;
+}
+
 export interface NodeListResponse {
   nodes: NodeRecord[];
 }
 
 export interface WorkspaceMountListResponse {
   mounts: WorkspaceMount[];
+}
+
+export interface WorkspaceMountAttachResponse {
+  mount: WorkspaceMount;
+}
+
+export interface WorkspaceMountDetachResponse {
+  workspace_id: WorkspaceMountId;
 }
 
 export interface RuntimeConfigResponse {
